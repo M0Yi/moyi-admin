@@ -1,0 +1,14 @@
+**
+!app/
+!bin/
+!config/
+!composer.*
+!.env.production
+!.env.dev
+!.env
+!.env.job
+!.env.prod
+!storage/
+!vendor/
+!rephp.sh
+!public/
