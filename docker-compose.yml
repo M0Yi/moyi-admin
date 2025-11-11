@@ -1,18 +1,42 @@
-version: '3'
 services:
-  hyperf-skeleton:
-    container_name: hyperf-skeleton
-    image: hyperf-skeleton
+  moyi-admin:
+    container_name: moyi-admin
+    image: moyi-admin
     build:
       context: .
-    volumes:
-      - ./:/opt/www
     ports:
-      - 9501:9501
+      - 6601:6601
     environment:
       - APP_ENV=dev
       - SCAN_CACHEABLE=false
-
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_DB=0
+      # 如需密码，取消下一行注释并设置：
+      # - REDIS_AUTH=your_password
+    # 如需以文件形式管理环境变量，但不将 .env 文件复制到容器文件系统，可使用：
+    # env_file:
+    #   - ./.env
+    depends_on:
+      - redis
+    networks:
+      - moyi_admin
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    networks:
+      - moyi_admin
+#     configs:
+#       - source: moyi_v1.0
+#         target: /opt/www/.env
+# configs:
+#   moyi_v1.0:
+#     external: true
 networks:
-  default:
-    name: hyperf-skeleton
+  moyi_admin:
+    external: false    
+volumes:
+  redis-data:
