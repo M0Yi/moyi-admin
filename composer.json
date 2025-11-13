@@ -56,13 +56,16 @@
     },
     "autoload": {
         "psr-4": {
-            "App\\": "app/"
+            "App\\": "app/",
+            "HyperfExtension\\Cookie\\": "app/Support/Cookie/"
         },
-        "files": []
+        "files": [
+            "app/Functions.php"
+        ]
     },
     "autoload-dev": {
         "psr-4": {
-            "HyperfTest\\": "./test/",
+          "HyperfTest\\": "./test/",
           "HyperfExtension\\Cookie\\": "app/Support/Cookie/"
 
         },
