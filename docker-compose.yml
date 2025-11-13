@@ -1,42 +1,70 @@
+# docker-compose.yml
+# 说明：定义应用、Redis、MySQL 三个服务及网络/数据卷。
+# 使用场景：本地开发或测试，生产请调整安全与持久化策略。
 services:
   moyi-admin:
-    container_name: moyi-admin
-    image: moyi-admin
+    # 主应用服务（Hyperf 框架）
+    container_name: moyi-admin                 # 指定容器名称，便于识别
+    image: moyi-admin                          # 镜像名称（与 build 构建的标签一致）
     build:
-      context: .
+      context: .                               # 使用当前目录的 Dockerfile 构建镜像
     ports:
-      - 6601:6601
-    environment:
-      - APP_ENV=dev
-      - SCAN_CACHEABLE=false
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - REDIS_DB=0
-      # 如需密码，取消下一行注释并设置：
-      # - REDIS_AUTH=your_password
+      - 6601:6601                              # 将主机 6601 映射到容器 6601
+    # environment 已移除，应用使用 Hyperf 配置中的 env() 默认值
     # 如需以文件形式管理环境变量，但不将 .env 文件复制到容器文件系统，可使用：
     # env_file:
     #   - ./.env
-    depends_on:
-      - redis
+    # depends_on:                                # 依赖 Redis/MySQL 健康后再启动
+    #   redis:
+    #     condition: service_healthy
+    #   mysql:
+    #     condition: service_healthy
     networks:
-      - moyi_admin
+      - moyi                                   # 连接到内部网络 moyi
   redis:
-    image: redis:7-alpine
-    container_name: redis
-    command: ["redis-server", "--appendonly", "yes"]
+    # Redis 缓存服务
+    image: redis:7-alpine                      # 轻量版 Redis 镜像
+    container_name: redis                      # 指定容器名称
+    command: ["redis-server", "--appendonly", "yes"]  # 开启 AOF 持久化
+    # healthcheck:                               # 健康检查：等待 Redis 准备就绪
+    #   test: ["CMD-SHELL", "redis-cli ping | grep PONG"]
+    #   interval: 5s
+    #   timeout: 3s
+    #   retries: 20
     volumes:
-      - redis-data:/data
+      - redis-data:/data                       # 将数据持久化到命名卷
     networks:
-      - moyi_admin
+      - moyi
+  mysql:
+    # MySQL（MariaDB）数据库服务
+    image: mariadb:11                          # MariaDB 11 版本镜像
+    container_name: mysql
+    # 环境变量配置（仅用于本地/测试环境）
+    environment:
+      - MARIADB_ALLOW_EMPTY_ROOT_PASSWORD=yes  # 允许 root 无密码（生产请勿使用）
+      - MARIADB_ROOT_HOST=%
+
+    # healthcheck:                               # 健康检查：等待数据库可连接
+    #   test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot --silent"]
+    #   interval: 5s
+    #   timeout: 5s
+    #   retries: 30
+    # ports:
+      # - "3306:3306"                          # 如需外部直接连接，取消注释映射端口
+    volumes:
+      - mysql-data:/var/lib/mysql              # 数据目录持久化到命名卷
+      - ./docker/mysql-init:/docker-entrypoint-initdb.d  # 初始化 SQL/脚本目录
+    networks:
+      - moyi
 #     configs:
 #       - source: moyi_v1.0
-#         target: /opt/www/.env
+#         target: /opt/www/.env                  # Docker Swarm/Configs 示例（当前未启用）
 # configs:
 #   moyi_v1.0:
 #     external: true
 networks:
-  moyi_admin:
-    external: false    
+  moyi:
+    external: false                              # 使用本地自定义网络（由 Compose 创建）
 volumes:
-  redis-data:
+  redis-data:                                    # Redis 数据卷声明
+  mysql-data:                                    # MySQL 数据卷声明

@@ -13,6 +13,9 @@
     "license": "Apache-2.0",
     "require": {
         "php": ">=8.1",
+        "hyperf-extension/auth": "^3.1",
+        "hyperf-extension/hashing": "^3.1",
+        "hyperf-extension/jwt": "^3.1",
         "hyperf/async-queue": "~3.1.0",
         "hyperf/cache": "~3.1.0",
         "hyperf/command": "~3.1.0",
@@ -59,8 +62,13 @@
     },
     "autoload-dev": {
         "psr-4": {
-            "HyperfTest\\": "./test/"
-        }
+            "HyperfTest\\": "./test/",
+          "HyperfExtension\\Cookie\\": "app/Support/Cookie/"
+
+        },
+        "files": [
+          "app/Functions.php"
+        ]
     },
     "minimum-stability": "dev",
     "prefer-stable": true,

@@ -10,4 +10,6 @@ declare(strict_types=1);
  * @license  https://github.com/hyperf/hyperf/blob/master/LICENSE
  */
 return [
+    \HyperfExtension\Cookie\Contract\CookieJarInterface::class => \HyperfExtension\Cookie\CookieJar::class,
+
 ];

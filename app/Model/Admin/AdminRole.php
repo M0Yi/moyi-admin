@@ -1,0 +1,109 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Model\Admin;
+
+use App\Model\Model;
+
+/**
+ * @property int $id
+ * @property int|null $site_id
+ * @property string $name
+ * @property string $slug
+ * @property string $description
+ * @property int $status
+ * @property int $sort
+ * @property \Carbon\Carbon $created_at
+ * @property \Carbon\Carbon $updated_at
+ */
+class AdminRole extends Model
+{
+    /**
+     * 表名
+     */
+    protected ?string $table = 'admin_roles';
+
+    /**
+     * 可批量赋值的属性
+     */
+    protected array $fillable = [
+        'site_id',
+        'name',
+        'slug',
+        'description',
+        'status',
+        'sort',
+    ];
+
+    /**
+     * 类型转换
+     */
+    protected array $casts = [
+        'id' => 'integer',
+        'site_id' => 'integer',
+        'status' => 'integer',
+        'sort' => 'integer',
+        'created_at' => 'datetime',
+        'updated_at' => 'datetime',
+    ];
+
+    /**
+     * 关联站点
+     */
+    public function site()
+    {
+        return $this->belongsTo(AdminSite::class, 'site_id', 'id');
+    }
+
+    /**
+     * 关联用户
+     */
+    public function users()
+    {
+        return $this->belongsToMany(
+            AdminUser::class,
+            'admin_role_user',
+            'role_id',
+            'user_id'
+        )->withTimestamps();
+    }
+
+    /**
+     * 关联权限
+     */
+    public function permissions()
+    {
+        return $this->belongsToMany(
+            AdminPermission::class,
+            'admin_permission_role',
+            'role_id',
+            'permission_id'
+        )->withTimestamps();
+    }
+
+    /**
+     * 查询作用域：指定站点
+     */
+    public function scopeBySite($query, int $siteId)
+    {
+        return $query->where('site_id', $siteId);
+    }
+
+    /**
+     * 查询作用域：启用状态
+     */
+    public function scopeActive($query)
+    {
+        return $query->where('status', 1);
+    }
+
+    /**
+     * 查询作用域：按排序
+     */
+    public function scopeOrdered($query)
+    {
+        return $query->orderBy('sort', 'asc')->orderBy('id', 'asc');
+    }
+}
+

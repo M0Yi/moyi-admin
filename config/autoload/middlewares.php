@@ -11,6 +11,14 @@ declare(strict_types=1);
  */
 return [
     'http' => [
-        \Hyperf\Validation\Middleware\ValidationMiddleware::class
+        // 站点识别中间件（放在最前面，优先识别站点）
+        \App\Middleware\SiteMiddleware::class,
+
+        // Session 中间件
+        \Hyperf\Session\Middleware\SessionMiddleware::class,
+
+        // 验证中间件
+        \Hyperf\Validation\Middleware\ValidationMiddleware::class,
+
     ],
 ];

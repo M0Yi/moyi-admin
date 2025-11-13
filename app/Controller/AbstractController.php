@@ -15,10 +15,21 @@ namespace App\Controller;
 use Hyperf\Di\Annotation\Inject;
 use Hyperf\HttpServer\Contract\RequestInterface;
 use Hyperf\HttpServer\Contract\ResponseInterface;
+use Hyperf\View\RenderInterface;
 use Psr\Container\ContainerInterface;
+use Hyperf\Contract\SessionInterface;
+use Hyperf\Validation\Contract\ValidatorFactoryInterface;
+
 
 abstract class AbstractController
 {
+
+    #[Inject]
+    protected ValidatorFactoryInterface $validationFactory;
+    #[Inject]
+
+    protected SessionInterface $session;
+
     #[Inject]
     protected ContainerInterface $container;
 
@@ -27,4 +38,7 @@ abstract class AbstractController
 
     #[Inject]
     protected ResponseInterface $response;
+
+    #[Inject]
+    protected RenderInterface $render;
 }
