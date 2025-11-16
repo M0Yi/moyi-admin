@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Model\Admin;
 
 use App\Model\Model;
+use Carbon\Carbon;
 use Hyperf\Database\Model\Relations\BelongsTo;
 use Hyperf\Database\Model\Relations\HasMany;
 
@@ -31,8 +32,8 @@ use Hyperf\Database\Model\Relations\HasMany;
  * @property int $cache 是否缓存
  * @property array $config 扩展配置
  * @property string $remark 备注
- * @property \Carbon\Carbon $created_at
- * @property \Carbon\Carbon $updated_at
+ * @property Carbon $created_at
+ * @property Carbon $updated_at
  *
  * @property-read AdminMenu $parent 父级菜单
  * @property-read AdminMenu[] $children 子菜单

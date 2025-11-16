@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Model\Admin;
 
 use App\Model\Model;
+use Carbon\Carbon;
 use Hyperf\Database\Model\SoftDeletes;
 use function Hyperf\Support\now;
 
@@ -25,16 +26,16 @@ use function Hyperf\Support\now;
  * @property string $storage_driver
  * @property int $status
  * @property string|null $violation_reason
- * @property \Carbon\Carbon $token_expire_at
- * @property \Carbon\Carbon|null $uploaded_at
- * @property \Carbon\Carbon|null $checked_at
+ * @property Carbon $token_expire_at
+ * @property Carbon|null $uploaded_at
+ * @property Carbon|null $checked_at
  * @property int $check_status
  * @property string|null $check_result
  * @property string|null $ip_address
  * @property string|null $user_agent
- * @property \Carbon\Carbon $created_at
- * @property \Carbon\Carbon $updated_at
- * @property \Carbon\Carbon|null $deleted_at
+ * @property Carbon $created_at
+ * @property Carbon $updated_at
+ * @property Carbon|null $deleted_at
  *
  * @property AdminUser|null $user
  * @property AdminSite|null $site

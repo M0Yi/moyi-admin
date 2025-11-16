@@ -6,6 +6,7 @@ namespace App\Model\Admin;
 
 use App\Model\Model;
 use Carbon\Carbon;
+use function Hyperf\Support\now;
 
 /**
  * CRUD生成器配置模型

@@ -37,6 +37,9 @@ Router::addGroup('/admin/{adminPath:[a-zA-Z0-9\-_]+}', function () {
         // 仪表盘
         Router::get('/dashboard', 'App\Controller\Admin\DashboardController@index');
 
+        // 测试页面
+        Router::get('/test', 'App\\Controller\\Admin\\TestController@index');
+
         // ========================================
         // 通用 CRUD 接口（动态模型管理）
         // ========================================

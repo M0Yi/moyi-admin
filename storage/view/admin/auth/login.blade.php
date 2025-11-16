@@ -377,11 +377,8 @@
                 const data = await response.json();
 
                 if (data.code === 200 || data.code === 0) {
-                    // 登录成功
-                    showAlert('登录成功，正在跳转...', 'success');
-                    setTimeout(() => {
-                        window.location.href = data.data.redirect;
-                    }, 1000);
+                    window.location.replace(data.data.redirect);
+                    return;
                 } else {
                     // 登录失败
                     showAlert(data.message || '登录失败');

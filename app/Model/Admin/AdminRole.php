@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Model\Admin;
 
 use App\Model\Model;
+use Carbon\Carbon;
 
 /**
  * @property int $id
@@ -14,8 +15,8 @@ use App\Model\Model;
  * @property string $description
  * @property int $status
  * @property int $sort
- * @property \Carbon\Carbon $created_at
- * @property \Carbon\Carbon $updated_at
+ * @property Carbon $created_at
+ * @property Carbon $updated_at
  */
 class AdminRole extends Model
 {

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Model\Admin;
 
 use App\Model\Model;
+use Carbon\Carbon;
 
 /**
  * @property int $id
@@ -19,7 +20,7 @@ use App\Model\Model;
  * @property array $response
  * @property int $status_code
  * @property int $duration
- * @property \Carbon\Carbon $created_at
+ * @property Carbon $created_at
  */
 class AdminOperationLog extends Model
 {

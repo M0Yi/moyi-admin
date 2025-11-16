@@ -8,6 +8,7 @@ use App\Controller\AbstractController;
 use App\Model\Admin\AdminUser;
 use App\Model\Admin\AdminRole;
 use App\Model\Admin\AdminPermission;
+use App\Model\Admin\AdminMenu;
 use App\Model\Admin\AdminSite;
 use Hyperf\Database\Schema\Blueprint;
 use Hyperf\Database\Schema\Schema;
@@ -30,7 +31,7 @@ class InstallController extends AbstractController
         // 检查是否已经初始化
         if ($this->isInstalled()) {
             return $this->render->render('admin.install.installed', [
-                'message' => '系统已经初始化，如需重新初始化，请删除默认站点（ID=1）',
+                'message' => '系统已经初始化，如需重新初始化，清空数据库重试）',
             ]);
         }
 
@@ -91,6 +92,10 @@ class InstallController extends AbstractController
             logger()->info('开始创建默认权限');
             $this->createDefaultPermissions($site->id);
             logger()->info('默认权限创建完成');
+
+            logger()->info('开始创建默认菜单');
+            $this->createDefaultMenus($site->id);
+            logger()->info('默认菜单创建完成');
 
             // 4. 创建超级管理员账号
             logger()->info('开始创建超级管理员账号');
@@ -317,6 +322,216 @@ class InstallController extends AbstractController
         }
     }
 
+    private function createDefaultMenus(int $siteId): void
+    {
+        $dashboard = AdminMenu::query()->firstOrCreate(
+            ['site_id' => $siteId, 'path' => '/dashboard'],
+            [
+                'parent_id' => 0,
+                'name' => 'dashboard',
+                'title' => '仪表盘',
+                'icon' => 'bi bi-speedometer2',
+                'component' => null,
+                'redirect' => null,
+                'type' => AdminMenu::TYPE_MENU,
+                'target' => AdminMenu::TARGET_SELF,
+                'badge' => null,
+                'badge_type' => null,
+                'permission' => null,
+                'visible' => 1,
+                'status' => 1,
+                'sort' => 1,
+                'cache' => 1,
+                'config' => null,
+                'remark' => null,
+            ]
+        );
+
+        $system = AdminMenu::query()->firstOrCreate(
+            ['site_id' => $siteId, 'path' => '/system'],
+            [
+                'parent_id' => 0,
+                'name' => 'system',
+                'title' => '系统管理',
+                'icon' => 'bi bi-gear',
+                'component' => null,
+                'redirect' => null,
+                'type' => AdminMenu::TYPE_GROUP,
+                'target' => AdminMenu::TARGET_SELF,
+                'badge' => null,
+                'badge_type' => null,
+                'permission' => null,
+                'visible' => 1,
+                'status' => 1,
+                'sort' => 100,
+                'cache' => 1,
+                'config' => null,
+                'remark' => null,
+            ]
+        );
+
+        AdminMenu::query()->firstOrCreate(
+            ['site_id' => $siteId, 'path' => '/system/users'],
+            [
+                'parent_id' => $system->id,
+                'name' => 'system.users',
+                'title' => '用户管理',
+                'icon' => 'bi bi-people',
+                'component' => null,
+                'redirect' => null,
+                'type' => AdminMenu::TYPE_MENU,
+                'target' => AdminMenu::TARGET_SELF,
+                'badge' => null,
+                'badge_type' => null,
+                'permission' => 'system.users.view',
+                'visible' => 1,
+                'status' => 1,
+                'sort' => 1,
+                'cache' => 1,
+                'config' => null,
+                'remark' => null,
+            ]
+        );
+
+        AdminMenu::query()->firstOrCreate(
+            ['site_id' => $siteId, 'path' => '/system/roles'],
+            [
+                'parent_id' => $system->id,
+                'name' => 'system.roles',
+                'title' => '角色管理',
+                'icon' => 'bi bi-person-badge',
+                'component' => null,
+                'redirect' => null,
+                'type' => AdminMenu::TYPE_MENU,
+                'target' => AdminMenu::TARGET_SELF,
+                'badge' => null,
+                'badge_type' => null,
+                'permission' => 'system.roles.view',
+                'visible' => 1,
+                'status' => 1,
+                'sort' => 2,
+                'cache' => 1,
+                'config' => null,
+                'remark' => null,
+            ]
+        );
+
+        AdminMenu::query()->firstOrCreate(
+            ['site_id' => $siteId, 'path' => '/system/permissions'],
+            [
+                'parent_id' => $system->id,
+                'name' => 'system.permissions',
+                'title' => '权限管理',
+                'icon' => 'bi bi-shield-check',
+                'component' => null,
+                'redirect' => null,
+                'type' => AdminMenu::TYPE_MENU,
+                'target' => AdminMenu::TARGET_SELF,
+                'badge' => null,
+                'badge_type' => null,
+                'permission' => 'system.permissions.view',
+                'visible' => 1,
+                'status' => 1,
+                'sort' => 3,
+                'cache' => 1,
+                'config' => null,
+                'remark' => null,
+            ]
+        );
+
+        AdminMenu::query()->firstOrCreate(
+            ['site_id' => $siteId, 'path' => '/system/menus'],
+            [
+                'parent_id' => $system->id,
+                'name' => 'system.menus',
+                'title' => '菜单管理',
+                'icon' => 'bi bi-menu-button-wide',
+                'component' => null,
+                'redirect' => null,
+                'type' => AdminMenu::TYPE_MENU,
+                'target' => AdminMenu::TARGET_SELF,
+                'badge' => null,
+                'badge_type' => null,
+                'permission' => 'system.menus.view',
+                'visible' => 1,
+                'status' => 1,
+                'sort' => 4,
+                'cache' => 1,
+                'config' => null,
+                'remark' => null,
+            ]
+        );
+
+        AdminMenu::query()->firstOrCreate(
+            ['site_id' => $siteId, 'path' => '/system/sites'],
+            [
+                'parent_id' => $system->id,
+                'name' => 'system.sites',
+                'title' => '站点管理',
+                'icon' => 'bi bi-sliders',
+                'component' => null,
+                'redirect' => null,
+                'type' => AdminMenu::TYPE_MENU,
+                'target' => AdminMenu::TARGET_SELF,
+                'badge' => null,
+                'badge_type' => null,
+                'permission' => 'system.sites.view',
+                'visible' => 1,
+                'status' => 1,
+                'sort' => 5,
+                'cache' => 1,
+                'config' => null,
+                'remark' => null,
+            ]
+        );
+
+        AdminMenu::query()->firstOrCreate(
+            ['site_id' => $siteId, 'name' => 'system.divider1'],
+            [
+                'parent_id' => $system->id,
+                'title' => '-',
+                'icon' => null,
+                'path' => null,
+                'component' => null,
+                'redirect' => null,
+                'type' => AdminMenu::TYPE_DIVIDER,
+                'target' => AdminMenu::TARGET_SELF,
+                'badge' => null,
+                'badge_type' => null,
+                'permission' => null,
+                'visible' => 1,
+                'status' => 1,
+                'sort' => 1090,
+                'cache' => 1,
+                'config' => null,
+                'remark' => null,
+            ]
+        );
+
+        AdminMenu::query()->firstOrCreate(
+            ['site_id' => $siteId, 'path' => '/system/crud-generator'],
+            [
+                'parent_id' => $system->id,
+                'name' => 'system.crud-generator',
+                'title' => 'CRUD生成器',
+                'icon' => 'bi bi-code-slash',
+                'component' => 'admin/system/crud-generator/index',
+                'redirect' => null,
+                'type' => AdminMenu::TYPE_MENU,
+                'target' => AdminMenu::TARGET_SELF,
+                'badge' => null,
+                'badge_type' => null,
+                'permission' => 'system.crud-generator.view',
+                'visible' => 1,
+                'status' => 1,
+                'sort' => 1900,
+                'cache' => 1,
+                'config' => null,
+                'remark' => '系统菜单',
+            ]
+        );
+    }
+
     /**
      * 创建管理员用户
      */
@@ -438,6 +653,7 @@ class InstallController extends AbstractController
                 $table->text('analytics_code')->nullable()->comment('统计代码');
                 $table->text('custom_css')->nullable()->comment('自定义CSS');
                 $table->text('custom_js')->nullable()->comment('自定义JS');
+                $table->string('resource_cdn', 255)->nullable()->comment('资源CDN地址');
                 $table->longText('config')->nullable()->comment('扩展配置(JSON)');
                 $table->unsignedBigInteger('default_brand_id')->nullable()->comment('默认品牌ID');
                 $table->unsignedBigInteger('default_wechat_provider_id')->nullable()->comment('默认微信服务商ID');

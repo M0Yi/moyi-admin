@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Model\Admin;
 
 use App\Model\Model;
+use Carbon\Carbon;
 use Hyperf\Database\Model\SoftDeletes;
 
 /**
@@ -29,6 +30,7 @@ use Hyperf\Database\Model\SoftDeletes;
  * @property string|null $analytics_code 统计代码
  * @property string|null $custom_css 自定义CSS
  * @property string|null $custom_js 自定义JavaScript
+ * @property string|null $resource_cdn 资源CDN地址
  * @property array|null $config 扩展配置(JSON)
  * @property string|null $upload_driver 上传驱动类型（local/s3），null则使用系统默认
  * @property array|null $upload_config 上传配置JSON，包含S3密钥、本地存储路径等配置
@@ -36,9 +38,9 @@ use Hyperf\Database\Model\SoftDeletes;
  * @property int|null $default_wechat_provider_id 默认微信服务商ID
  * @property int $status 状态：0=禁用，1=启用
  * @property int $sort 排序
- * @property \Carbon\Carbon $created_at 创建时间
- * @property \Carbon\Carbon $updated_at 更新时间
- * @property \Carbon\Carbon|null $deleted_at 删除时间
+ * @property Carbon $created_at 创建时间
+ * @property Carbon $updated_at 更新时间
+ * @property Carbon|null $deleted_at 删除时间
  */
 class AdminSite extends Model
 {
@@ -86,6 +88,7 @@ class AdminSite extends Model
         'analytics_code',
         'custom_css',
         'custom_js',
+        'resource_cdn',
         'config',
         'upload_driver',
         'upload_config',

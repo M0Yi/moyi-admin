@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Model\Admin;
 
 use App\Model\Model;
+use Carbon\Carbon;
 use Hyperf\Database\Model\SoftDeletes;
 use HyperfExtension\Auth\Contracts\AuthenticatableInterface;
 use HyperfExtension\Jwt\Contracts\JwtSubjectInterface;
@@ -21,10 +22,10 @@ use HyperfExtension\Jwt\Contracts\JwtSubjectInterface;
  * @property int $status
  * @property int $is_admin
  * @property string $last_login_ip
- * @property \Carbon\Carbon $last_login_at
- * @property \Carbon\Carbon $created_at
- * @property \Carbon\Carbon $updated_at
- * @property \Carbon\Carbon $deleted_at
+ * @property Carbon $last_login_at
+ * @property Carbon $created_at
+ * @property Carbon $updated_at
+ * @property Carbon $deleted_at
  */
 class AdminUser extends Model implements AuthenticatableInterface,JwtSubjectInterface
 {

@@ -2,6 +2,61 @@
 
 @section('title', '仪表盘')
 
+@push('admin_sidebar')
+    @include('admin.components.sidebar')
+@endpush
+
+@push('admin_navbar')
+    @include('admin.components.navbar')
+@endpush
+
+@push('admin_styles')
+<style>
+.page-header {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 1.5rem 2rem;
+    margin: -1rem -2rem 1.5rem -2rem;
+    border-radius: 0 0 24px 24px;
+    box-shadow: 0 8px 24px rgba(102, 126, 234, 0.2);
+}
+.page-header h1 { font-weight: 700; margin: 0; font-size: 1.75rem; }
+
+.card {
+    border: none;
+    border-radius: 16px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.04);
+    transition: box-shadow 0.3s ease, transform 0.3s ease;
+    overflow: visible;
+}
+.card:hover { box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08); transform: translateY(-4px); }
+.card-header { background: transparent; border: none; padding: 1.25rem 1.5rem; font-weight: 600; }
+.card-body { padding: 1.5rem; }
+
+.btn { padding: 0.6rem 1.5rem; border-radius: 10px; font-weight: 500; transition: all 0.3s ease; border: none; }
+.btn-primary { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3); }
+.btn-primary:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4); }
+.btn-outline-secondary:hover { transform: translateY(-2px); }
+
+@keyframes fadeInUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+.stats-card { animation: fadeInUp 0.6s ease-out; }
+.delay-0 { animation-delay: 0s; }
+.delay-1 { animation-delay: 0.1s; }
+.delay-2 { animation-delay: 0.2s; }
+.delay-3 { animation-delay: 0.3s; }
+.delay-4 { animation-delay: 0.4s; }
+.delay-5 { animation-delay: 0.5s; }
+.delay-6 { animation-delay: 0.6s; }
+.delay-7 { animation-delay: 0.7s; }
+.delay-8 { animation-delay: 0.8s; }
+.delay-9 { animation-delay: 0.9s; }
+.bg-grad-users { background: linear-gradient(135deg, #667eea, #764ba2); }
+.bg-grad-sites { background: linear-gradient(135deg, #f093fb, #f5576c); }
+.bg-grad-activities { background: linear-gradient(135deg, #4facfe, #00f2fe); }
+.bg-grad-default { background: linear-gradient(135deg, #43e97b, #38f9d7); }
+</style>
+@endpush
+
 @section('content')
 
 {{-- 页面标题 --}}
@@ -13,14 +68,14 @@
         </div>
         <div class="btn-toolbar">
             <div class="btn-group me-2">
-                <button type="button" class="btn btn-sm btn-light">
+                <button type="button" class="btn btn-sm btn-light" data-demo="true" data-bs-toggle="tooltip" title="演示功能，暂不可用">
                     <i class="bi bi-share"></i> 分享
                 </button>
-                <button type="button" class="btn btn-sm btn-light">
+                <button type="button" class="btn btn-sm btn-light" data-demo="true" data-bs-toggle="tooltip" title="演示功能，暂不可用">
                     <i class="bi bi-download"></i> 导出
                 </button>
             </div>
-            <button type="button" class="btn btn-sm btn-light dropdown-toggle d-flex align-items-center gap-1">
+            <button type="button" class="btn btn-sm btn-light dropdown-toggle d-flex align-items-center gap-1" data-demo="true" data-bs-toggle="tooltip" title="演示功能，暂不可用">
                 <i class="bi bi-calendar3"></i>
                 本周
             </button>
@@ -28,16 +83,22 @@
     </div>
 </div>
 
+<div class="alert alert-info d-flex align-items-center mb-4" role="alert" style="border: 0; color: #0f172a; background: linear-gradient(135deg, #e0f2fe, #e2e8f0);">
+    <i class="bi bi-info-circle me-2"></i>
+    <span>演示说明：当前仪表盘为展示版，部分按钮与交互仅作为示例，不提供实际功能。</span>
+    <span class="ms-2 text-muted">如需启用，请在后台接入真实逻辑。</span>
+</div>
+
 {{-- 统计卡片 --}}
 <div class="row g-4 mb-4">
     @foreach($stats as $key => $stat)
     <div class="col-12 col-sm-6 col-lg-3">
-        <div class="card stats-card h-100 border-0" style="animation-delay: {{ $loop->index * 0.1 }}s">
+        <div class="card stats-card h-100 border-0 delay-{{ $loop->index }}">
             <div class="card-body p-4">
                 <div class="d-flex align-items-start justify-content-between mb-3">
                     <div class="flex-shrink-0">
-                        <div class="rounded-3 d-flex align-items-center justify-content-center"
-                             style="width: 56px; height: 56px; background: linear-gradient(135deg, {{ $key === 'users' ? '#667eea, #764ba2' : ($key === 'sites' ? '#f093fb, #f5576c' : ($key === 'activities' ? '#4facfe, #00f2fe' : '#43e97b, #38f9d7')) }});">
+                        <div class="rounded-3 d-flex align-items-center justify-content-center{{ $key === 'users' ? ' bg-grad-users' : ($key === 'sites' ? ' bg-grad-sites' : ($key === 'activities' ? ' bg-grad-activities' : ' bg-grad-default')) }}"
+                             style="width: 56px; height: 56px;">
                             @if($key === 'users')
                                 <i class="bi bi-people fs-3 text-white"></i>
                             @elseif($key === 'sites')
@@ -91,9 +152,9 @@
                     <p class="text-muted mb-0 small">最近7天的访问量统计</p>
                 </div>
                 <div class="btn-group btn-group-sm">
-                    <button class="btn btn-outline-secondary active">7天</button>
-                    <button class="btn btn-outline-secondary">30天</button>
-                    <button class="btn btn-outline-secondary">90天</button>
+                    <button class="btn btn-outline-secondary active" data-demo="true" data-bs-toggle="tooltip" title="演示功能，暂不可用">7天</button>
+                    <button class="btn btn-outline-secondary" data-demo="true" data-bs-toggle="tooltip" title="演示功能，暂不可用">30天</button>
+                    <button class="btn btn-outline-secondary" data-demo="true" data-bs-toggle="tooltip" title="演示功能，暂不可用">90天</button>
                 </div>
             </div>
             <div class="card-body pt-2">
@@ -113,7 +174,7 @@
                         <h5 class="card-title mb-1">最近活动</h5>
                         <p class="text-muted mb-0 small">实时动态更新</p>
                     </div>
-                    <button class="btn btn-sm btn-outline-primary">
+                    <button class="btn btn-sm btn-outline-primary" data-demo="true" data-bs-toggle="tooltip" title="演示功能，暂不可用">
                         <i class="bi bi-arrow-clockwise"></i>
                     </button>
                 </div>
@@ -240,9 +301,12 @@
     </div>
 </div>
 
-@push('scripts')
-{{-- Chart.js --}}
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.js"></script>
+@push('admin_scripts')
+{{-- Chart.js
+    类型：图表 / 数据可视化
+    作用：在仪表盘中渲染访问趋势折线图等统计图表
+--}}
+@include('components.vendor.chart-js')
 <script>
 (function () {
     'use strict'
@@ -292,6 +356,64 @@
             }
         })
     }
+
+    const demoMsg = '演示提示：该交互为展示效果，暂无实际功能'
+    if (window.bootstrap && typeof bootstrap.Tooltip === 'function') {
+        document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(function (el) {
+            new bootstrap.Tooltip(el)
+        })
+    }
+
+    function showDemoNotice() {
+        const msg = demoMsg
+        if (typeof bootstrap !== 'undefined' && typeof bootstrap.Toast === 'function') {
+            let container = document.getElementById('demoToastContainer')
+            if (!container) {
+                container = document.createElement('div')
+                container.id = 'demoToastContainer'
+                container.className = 'toast-container position-fixed bottom-0 end-0 p-3'
+                document.body.appendChild(container)
+            }
+
+            const toastEl = document.createElement('div')
+            toastEl.className = 'toast align-items-center text-bg-info border-0'
+            toastEl.setAttribute('role', 'alert')
+            toastEl.setAttribute('aria-live', 'assertive')
+            toastEl.setAttribute('aria-atomic', 'true')
+
+            const wrapper = document.createElement('div')
+            wrapper.className = 'd-flex'
+
+            const body = document.createElement('div')
+            body.className = 'toast-body'
+            body.textContent = msg
+
+            const closeBtn = document.createElement('button')
+            closeBtn.type = 'button'
+            closeBtn.className = 'btn-close btn-close-white me-2 m-auto'
+            closeBtn.setAttribute('data-bs-dismiss', 'toast')
+            closeBtn.setAttribute('aria-label', 'Close')
+
+            wrapper.appendChild(body)
+            wrapper.appendChild(closeBtn)
+            toastEl.appendChild(wrapper)
+            container.appendChild(toastEl)
+
+            const bsToast = new bootstrap.Toast(toastEl, { delay: 2500, autohide: true })
+            bsToast.show()
+            toastEl.addEventListener('hidden.bs.toast', function () { toastEl.remove() })
+        } else {
+            window.alert(msg)
+        }
+    }
+
+    document.querySelectorAll('[data-demo="true"]').forEach(function (el) {
+        el.addEventListener('click', function (e) {
+            e.preventDefault()
+            e.stopPropagation()
+            showDemoNotice()
+        })
+    })
 })()
 </script>
 @endpush

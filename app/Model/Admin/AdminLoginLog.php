@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Model\Admin;
 
 use App\Model\Model;
+use Carbon\Carbon;
 use function Hyperf\Support\now;
 
 /**
@@ -16,7 +17,7 @@ use function Hyperf\Support\now;
  * @property string $user_agent
  * @property int $status
  * @property string $message
- * @property \Carbon\Carbon $created_at
+ * @property Carbon $created_at
  */
 class AdminLoginLog extends Model
 {
