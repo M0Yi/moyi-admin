@@ -1,7 +1,11 @@
 @php
-    $errorDetails = null;
-    if (isset($errorMessage) && $errorMessage) {
-        $errorDetails = '<strong>原因:</strong> ' . e($errorMessage) . '<br><strong>时间:</strong> ' . date('Y-m-d H:i:s');
+    $errorDetails = [];
+    if (!empty($errorMessage)) {
+        $errorDetails[] = ['label' => '原因', 'value' => $errorMessage];
+        $errorDetails[] = ['label' => '时间', 'value' => date('Y-m-d H:i:s')];
+    }
+    if (empty($errorDetails)) {
+        $errorDetails = null;
     }
 @endphp
 

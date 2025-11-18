@@ -1,14 +1,18 @@
 @php
-    $errorDetails = null;
-    if (isset($errorMessage) && $errorMessage && (config('app.env') === 'local' || config('app.debug'))) {
-        $errorDetails = '<strong>错误信息:</strong> ' . e($errorMessage);
-        if (isset($errorFile)) {
-            $errorDetails .= '<br><strong>文件:</strong> ' . e($errorFile);
+    $errorDetails = [];
+    $shouldShowDetails = config('app.env') === 'local' || config('app.debug');
+    if ($shouldShowDetails && !empty($errorMessage)) {
+        $errorDetails[] = ['label' => '错误信息', 'value' => $errorMessage];
+        if (!empty($errorFile)) {
+            $errorDetails[] = ['label' => '文件', 'value' => $errorFile];
         }
-        if (isset($errorLine)) {
-            $errorDetails .= '<br><strong>行号:</strong> ' . e($errorLine);
+        if (!empty($errorLine)) {
+            $errorDetails[] = ['label' => '行号', 'value' => $errorLine];
         }
-        $errorDetails .= '<br><strong>时间:</strong> ' . date('Y-m-d H:i:s');
+        $errorDetails[] = ['label' => '时间', 'value' => date('Y-m-d H:i:s')];
+    }
+    if (empty($errorDetails)) {
+        $errorDetails = null;
     }
 @endphp
 

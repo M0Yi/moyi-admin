@@ -1,12 +1,12 @@
 @php
     $errorDetails = [];
-    if (!empty($requestPath)) {
+    if (! empty($requestPath)) {
         $errorDetails[] = ['label' => '请求路径', 'value' => $requestPath ?? '未知'];
     }
-    if (!empty($requestMethod)) {
+    if (! empty($requestMethod)) {
         $errorDetails[] = ['label' => '请求方法', 'value' => $requestMethod];
     }
-    if (!empty($errorDetails)) {
+    if (! empty($errorDetails)) {
         $errorDetails[] = ['label' => '时间', 'value' => date('Y-m-d H:i:s')];
     } else {
         $errorDetails = null;
@@ -14,15 +14,15 @@
 @endphp
 
 @include('errors.layout', [
-    'errorCode' => '404',
-    'errorTitle' => '页面不存在',
-    'errorIcon' => 'bi bi-compass',
-    'errorMessage' => '抱歉，您访问的页面不存在或已被删除。<br>请检查网址是否正确，或返回首页。',
-    'gradient' => 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-    'errorColor' => '#667eea',
+    'errorCode' => '405',
+    'errorTitle' => '请求方法不被允许',
+    'errorIcon' => 'bi bi-shield-exclamation',
+    'errorMessage' => '当前页面不支持您使用的请求方法。<br>请返回上一页或使用支持的方法重新尝试。',
+    'gradient' => 'linear-gradient(135deg, #ff9a9e 0%, #fecfef 99%, #fecfef 100%)',
+    'errorColor' => '#ff758c',
     'textColor' => 'white',
-    'codeAnimation' => 'bounce 2s infinite',
-    'iconAnimation' => 'float 3s ease-in-out infinite',
+    'codeAnimation' => 'pulse 1.6s ease-in-out infinite',
+    'iconAnimation' => 'swing 2s ease-in-out infinite',
     'errorDetails' => $errorDetails,
     'errorDetailsTitle' => '请求信息',
     'buttons' => [
@@ -40,3 +40,4 @@
         ]
     ]
 ])
+

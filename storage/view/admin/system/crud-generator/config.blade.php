@@ -1,6 +1,6 @@
 @extends('admin.layouts.admin')
 
-@section('title', 'CRUD生成器 - 配置 V2')
+@section('title', 'CRUD生成器 - 配置')
 
 @push('admin_sidebar')
     @include('admin.components.sidebar')

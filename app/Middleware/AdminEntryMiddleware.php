@@ -99,14 +99,10 @@ class AdminEntryMiddleware implements MiddlewareInterface
      */
     protected function denyAccess(): ResponseInterface
     {
-//        print_r(['Error denyAccess']);
+        print_r(['Error denyAccess']);
         // 返回 404 而不是 403，避免暴露后台存在
         if($this->request->getMethod() == 'GET'){
-            return $this->render->render('errors.404', [
-                'requestPath' => $this->request->getUri()->getPath(),
-                'requestMethod' => $this->request->getMethod(),
-                'requestUri' => $this->request->getUri(),
-            ]);
+            return $this->render->render('errors.admin_illegal_access');
         }
 
         return $this->response->json([

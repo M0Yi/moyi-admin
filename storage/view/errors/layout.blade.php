@@ -26,14 +26,47 @@
         </p>
 
         @if(isset($customDetails) && $customDetails)
-            {!! $customDetails !!}
+            @php
+                $customTitle = $customDetails['title'] ?? ($errorDetailsTitle ?? '详细信息');
+                $customItems = $customDetails['items'] ?? (is_array($customDetails) ? $customDetails : null);
+            @endphp
+            <div class="error-details">
+                <div class="error-details-title">
+                    <i class="bi bi-info-circle"></i> {{ $customTitle }}
+                </div>
+                <div class="error-details-text">
+                    @if(is_array($customItems))
+                        @foreach($customItems as $detail)
+                            <div class="error-detail-line">
+                                @if(!empty($detail['label'] ?? null))
+                                    <strong>{{ $detail['label'] }}:</strong>
+                                @endif
+                                {{ $detail['value'] ?? '' }}
+                            </div>
+                        @endforeach
+                    @else
+                        {!! $customDetails !!}
+                    @endif
+                </div>
+            </div>
         @elseif(isset($errorDetails) && $errorDetails)
         <div class="error-details">
             <div class="error-details-title">
                 <i class="bi bi-info-circle"></i> {{ $errorDetailsTitle ?? '详细信息' }}
             </div>
             <div class="error-details-text">
-                {!! $errorDetails !!}
+                @if(is_array($errorDetails))
+                    @foreach($errorDetails as $detail)
+                        <div class="error-detail-line">
+                            @if(!empty($detail['label'] ?? null))
+                                <strong>{{ $detail['label'] }}:</strong>
+                            @endif
+                            {{ $detail['value'] ?? '' }}
+                        </div>
+                    @endforeach
+                @else
+                    {!! $errorDetails !!}
+                @endif
             </div>
         </div>
         @endif

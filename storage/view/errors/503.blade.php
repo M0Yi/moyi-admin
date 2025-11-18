@@ -1,9 +1,14 @@
 @php
-    $maintenanceInfo = null;
-    if (isset($maintenanceMessage) && $maintenanceMessage) {
-        $maintenanceInfo = '<div class="maintenance-info"><div class="maintenance-info-title"><i class="bi bi-info-circle"></i> 维护信息</div><div>' . e($maintenanceMessage) . '</div></div>';
+    $maintenanceInfo = [
+        'title' => '维护信息',
+        'items' => [],
+    ];
+
+    if (!empty($maintenanceMessage)) {
+        $maintenanceInfo['items'][] = ['value' => $maintenanceMessage];
     } else {
-        $maintenanceInfo = '<div class="maintenance-info"><div class="maintenance-info-title"><i class="bi bi-clock-history"></i> 预计恢复时间</div><div>我们正在努力尽快恢复服务，请稍后再试。</div></div>';
+        $maintenanceInfo['title'] = '预计恢复时间';
+        $maintenanceInfo['items'][] = ['value' => '我们正在努力尽快恢复服务，请稍后再试。'];
     }
 @endphp
 
