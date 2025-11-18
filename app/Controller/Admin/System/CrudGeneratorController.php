@@ -1,0 +1,1387 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Controller\Admin\System;
+
+use App\Controller\AbstractController;
+use App\Model\Admin\AdminCrudConfig;
+use App\Service\Admin\CrudGeneratorService;
+use App\Service\Admin\DatabaseService;
+use Hyperf\Di\Annotation\Inject;
+use Hyperf\HttpServer\Annotation\Controller;
+use Hyperf\HttpServer\Annotation\GetMapping;
+use Hyperf\HttpServer\Annotation\PostMapping;
+use Psr\Http\Message\ResponseInterface;
+
+class CrudGeneratorController extends AbstractController
+{
+
+    #[Inject]
+    protected DatabaseService $databaseService;
+    #[Inject]
+    protected CrudGeneratorService $crudGeneratorService;
+
+
+    /**
+     * CRUD生成器首页 - 显示已生成的CRUD配置记录列表
+     */
+    public function index(): ResponseInterface
+    {
+        // 获取所有CRUD配置记录（超级管理员跳过站点筛选）
+        $query = AdminCrudConfig::query();
+        $configs = $query->orderBy('created_at', 'desc')->get();
+        return $this->render->render('admin.system.crud-generator.index', [
+            'configs' => $configs,
+        ]);
+    }
+
+    /**
+     * 新建CRUD配置 - 显示数据表选择页面
+     */
+    public function create(): ResponseInterface
+    {
+        // 获取所有数据库连接
+        $connections = $this->databaseService->getAllConnections();
+        // 从请求参数获取数据库连接名称，默认为 'default'
+        $connection = $this->request->query('connection', key($connections));
+        $tables = $this->databaseService->getAllTables($connection);
+        // 只获取当前连接下的配置
+        $query = AdminCrudConfig::query()->where('db_connection', $connection);
+        $configs = $query->get()->keyBy('table_name');
+        return $this->render->render('admin.system.crud-generator.create', [
+            'tables' => $tables,
+            'configs' => $configs,
+            'connections' => $connections,
+            'currentConnection' => $connection,
+        ]);
+    }
+
+    /**
+     * 配置页面 - 选择字段和配置属性
+     */
+    #[GetMapping('config/{tableName}')]
+    public function config(string $tableName): ResponseInterface
+    {
+
+        // 获取所有数据库连接
+        $connections = $this->databaseService->getAllConnections();
+
+        // 从请求参数获取数据库连接名称
+        $requestConnection = $this->request->query('connection');
+        $dbConnection = $requestConnection ?? key($connections);
+
+        // 尝试获取已有配置
+        $query = AdminCrudConfig::query()
+            ->where('table_name', $tableName)
+            ->where('db_connection', $dbConnection);
+        $config = $query->first();
+        // 如果请求参数指定了连接，但配置不存在，使用请求参数
+        if ($requestConnection && !$config) {
+            $dbConnection = $requestConnection;
+        } elseif ($config && !$requestConnection) {
+            // 如果配置存在但没有请求参数，使用配置中的连接
+            $dbConnection = $config->db_connection ?? key($connections);
+        }
+
+        $baseConfig = $this->buildBaseConfig($tableName, $dbConnection, $config);
+        $tableComment = $baseConfig['table_comment'] ?? null;
+
+        return $this->render->render('admin.system.crud-generator.config', [
+            'tableName' => $tableName,
+            'tableComment' => $tableComment,
+            'config' => $baseConfig,
+            'connections' => $connections,
+            'dbConnection' => $dbConnection,
+        ]);
+    }
+//
+//    /**
+//     * 配置页面 V2 - 优化版本，字段配置分离加载
+//     */
+//    #[GetMapping('configv2/{tableName}')]
+//    public function configV2(string $tableName): ResponseInterface
+//    {
+//    }
+//
+//    /**
+//     * 获取原始字段配置（未经过后端处理，用于前端自动识别）
+//     */
+//    #[GetMapping('raw-fields-config/{tableName}')]
+//    public function getRawFieldsConfig(string $tableName): ResponseInterface
+//    {
+//        // 从请求参数获取数据库连接名称
+//        $requestConnection = $this->request->query('connection');
+//        $dbConnection = $requestConnection ?? key($this->databaseService->getAllConnections());
+//
+//        // 获取原始表结构（未经过后端处理）
+//        $columns = $this->databaseService->getRawTableColumns($tableName, $dbConnection);
+//
+//        return $this->success([
+//            'columns' => $columns,
+//            'total' => count($columns),
+//            'db_connection' => $dbConnection,
+//        ], '原始字段配置加载成功');
+//    }
+//
+//    /**
+//     * 获取字段配置（分离加载 API）
+//     */
+//    #[GetMapping('fields-config/{tableName}')]
+    public function getFieldsConfig(string $tableName): ResponseInterface
+    {
+        // 获取所有数据库连接
+        $connections = $this->databaseService->getAllConnections();
+
+        // 从请求参数获取数据库连接名称
+        $requestConnection = $this->request->query('connection');
+        $dbConnection = $requestConnection ?? key($connections);
+
+        // 尝试获取已有配置（超级管理员跳过站点筛选）
+        $query = AdminCrudConfig::query()
+            ->where('table_name', $tableName)
+            ->where('db_connection', $dbConnection);
+        if (!is_super_admin()) {
+            $query->where('site_id', site_id());
+        }
+        $config = $query->first();
+
+        // 如果请求参数指定了连接，但配置不存在，使用请求参数
+        if ($requestConnection && !$config) {
+            $dbConnection = $requestConnection;
+        } elseif ($config && !$requestConnection) {
+            // 如果配置存在但没有请求参数，使用配置中的连接
+            $dbConnection = $config->db_connection ?? key($connections);
+        }
+
+        // 获取原始表结构（只返回数据库原始信息，不做任何推断和合并）
+        $columns = $this->databaseService->getRawTableColumns($tableName, $dbConnection);
+
+        $configData = $config ? $this->buildBaseConfig($tableName, $dbConnection, $config) : null;
+        $connectionInfo = $connections[$dbConnection] ?? null;
+        $tableMeta = [
+            'name' => $tableName,
+            'comment' => $configData['table_comment'] ?? $this->databaseService->getTableComment($tableName, $dbConnection),
+        ];
+
+        return $this->success([
+            'columns' => $columns,
+            'total' => count($columns),
+            'db_connection' => $dbConnection,
+            'config' => $configData,
+            'table' => $tableMeta,
+            'connection' => [
+                'name' => $dbConnection,
+                'info' => $connectionInfo,
+            ],
+        ], '字段配置加载成功');
+    }
+
+    /**
+     * 构建基础配置，供视图和 API 共用
+     */
+    private function buildBaseConfig(string $tableName, string $dbConnection, ?AdminCrudConfig $config = null): array
+    {
+        $tableComment = $this->databaseService->getTableComment($tableName, $dbConnection);
+
+        if ($config instanceof AdminCrudConfig) {
+            $options = $config->options ?? [];
+            if (!is_array($options)) {
+                $options = [];
+            }
+            $featureColumns = [
+                'search' => $config->feature_search,
+                'add' => $config->feature_add,
+                'edit' => $config->feature_edit,
+                'delete' => $config->feature_delete,
+                'export' => $config->feature_export,
+            ];
+            $hasFeatureColumns = array_filter($featureColumns, static fn($value) => $value !== null);
+            $featuresSource = $hasFeatureColumns
+                ? array_map(static fn($value) => (bool) $value, $featureColumns)
+                : ($options['features'] ?? null);
+            $features = $this->normalizeFeatureToggles($featuresSource);
+            
+            // 优先从独立字段读取，如果没有则从 options 中读取（向后兼容）
+            $pageSize = $config->page_size ?? $options['page_size'] ?? 15;
+            $softDelete = $config->soft_delete ?? ($options['soft_delete'] ?? $this->databaseService->hasColumn($tableName, 'deleted_at', $dbConnection));
+
+            return [
+                'id' => $config->id,
+                'table_name' => $config->table_name,
+                'table_comment' => $tableComment,
+                'db_connection' => $config->db_connection,
+                'model_name' => $config->model_name,
+                'controller_name' => $config->controller_name,
+                'module_name' => $config->module_name,
+                'route_prefix' => $config->route_prefix,
+                'route_slug' => $config->route_slug,
+                'icon' => $config->icon ?: 'bi bi-table',
+                'page_size' => $pageSize,
+                'soft_delete' => $softDelete,
+                'options' => $options,
+                'features' => $features,
+                'sync_to_menu' => $config->sync_to_menu,
+                'status' => $config->status,
+                'fields_config' => $config->fields_config ?? [],
+            ];
+        }
+
+        // 如果没有配置，只返回基本信息，让前端自己推测 model_name、route_slug 等
+        $hasSoftDelete = $this->databaseService->hasColumn($tableName, 'deleted_at', $dbConnection);
+
+        return [
+            'table_name' => $tableName,
+            'table_comment' => $tableComment,
+            'db_connection' => $dbConnection,
+            'model_name' => null, // 由前端推测
+            'controller_name' => null, // 由前端推测
+            'module_name' => null, // 由前端推测
+            'route_prefix' => null, // 由前端推测
+            'route_slug' => null, // 由前端推测
+            'icon' => 'bi bi-table',
+            'page_size' => 15,
+            'soft_delete' => $hasSoftDelete,
+            'options' => [],
+            'features' => $this->getDefaultFeatureToggles(),
+            'sync_to_menu' => true,
+            'status' => AdminCrudConfig::STATUS_CONFIGURING,
+            'fields_config' => [],
+        ];
+    }
+
+    /**
+     * 合并字段配置（提取的公共方法）
+     */
+    private function mergeFieldConfig(array $column, array $savedConfig): array
+    {
+        // 只覆盖用户可配置的字段，保留表结构的基础信息
+        $column['field_name'] = $savedConfig['field_name'] ?? '';
+        $column['show_in_list'] = $savedConfig['show_in_list'] ?? $column['show_in_list'];
+        $column['listable'] = $savedConfig['listable'] ?? $column['listable'] ?? $column['show_in_list'];
+        $column['list_default'] = $savedConfig['list_default'] ?? $column['list_default'] ?? $column['show_in_list'];
+        $column['searchable'] = $savedConfig['searchable'] ?? $column['searchable'];
+        $column['sortable'] = $savedConfig['sortable'] ?? $column['sortable'];
+        $column['editable'] = $savedConfig['editable'] ?? $column['editable'];
+        $column['form_type'] = $savedConfig['form_type'] ?? $column['form_type'];
+        $column['model_type'] = $savedConfig['model_type'] ?? $column['model_type'];
+        $column['required'] = $savedConfig['required'] ?? false;
+
+        // 列渲染类型（column_type 或 render_type，优先使用 column_type）
+        if (isset($savedConfig['column_type'])) {
+            $column['column_type'] = $savedConfig['column_type'];
+        } elseif (isset($savedConfig['render_type'])) {
+            // 兼容旧字段名
+            $column['column_type'] = $savedConfig['render_type'];
+        }
+
+        // 处理 default_value：确保 null 不被转换为字符串
+        if (array_key_exists('default_value', $savedConfig)) {
+            $column['default_value'] = $savedConfig['default_value'];
+        }
+
+        // 选项配置（针对 select/radio/switch 等类型）
+        if (isset($savedConfig['options']) && is_array($savedConfig['options'])) {
+            $column['options'] = $savedConfig['options'];
+        }
+
+        // 关联配置（针对 relation 类型）
+        if (isset($savedConfig['relation']) && is_array($savedConfig['relation'])) {
+            $defaultRelation = [
+                'table' => '',
+                'label_column' => 'name',
+                'value_column' => 'id',
+                'multiple' => false,
+            ];
+            $column['relation'] = array_merge($defaultRelation, $savedConfig['relation']);
+        }
+
+        // 数字步长（针对 number 类型）
+        if (isset($savedConfig['number_step'])) {
+            $column['number_step'] = $savedConfig['number_step'];
+        }
+
+        // 表单属性（placeholder、help、disabled、readonly、rows 等）
+        if (isset($savedConfig['placeholder'])) {
+            $column['placeholder'] = $savedConfig['placeholder'];
+        }
+        if (isset($savedConfig['help'])) {
+            $column['help'] = $savedConfig['help'];
+        }
+        if (isset($savedConfig['disabled'])) {
+            $column['disabled'] = filter_var($savedConfig['disabled'], FILTER_VALIDATE_BOOLEAN);
+        }
+        if (isset($savedConfig['readonly'])) {
+            $column['readonly'] = filter_var($savedConfig['readonly'], FILTER_VALIDATE_BOOLEAN);
+        }
+        if (isset($savedConfig['rows'])) {
+            $column['rows'] = (int) $savedConfig['rows'];
+        }
+
+        // 数字类型属性（min、max、step）
+        // 注意：max 也用于字符串类型，表示最大长度
+        if (isset($savedConfig['min'])) {
+            $column['min'] = $savedConfig['min'];
+        }
+        if (isset($savedConfig['max'])) {
+            $column['max'] = $savedConfig['max'];
+        }
+        if (isset($savedConfig['step'])) {
+            $column['step'] = $savedConfig['step'];
+        }
+
+        // 开关类型属性（onValue、offValue、onLabel、offLabel）
+        if (isset($savedConfig['onValue'])) {
+            $column['onValue'] = $savedConfig['onValue'];
+        }
+        if (isset($savedConfig['offValue'])) {
+            $column['offValue'] = $savedConfig['offValue'];
+        }
+        if (isset($savedConfig['onLabel'])) {
+            $column['onLabel'] = $savedConfig['onLabel'];
+        }
+        if (isset($savedConfig['offLabel'])) {
+            $column['offLabel'] = $savedConfig['offLabel'];
+        }
+
+        // 搜索配置（search 对象）
+        if (isset($savedConfig['search']) && is_array($savedConfig['search'])) {
+            $column['search'] = $savedConfig['search'];
+        }
+
+        // 类型特定属性（type_attrs）
+        if (isset($savedConfig['type_attrs']) && is_array($savedConfig['type_attrs'])) {
+            $column['type_attrs'] = $savedConfig['type_attrs'];
+        }
+
+        // 徽章默认颜色（badge_default_color）
+        if (isset($savedConfig['badge_default_color'])) {
+            $column['badge_default_color'] = $savedConfig['badge_default_color'];
+        }
+
+        return $column;
+    }
+//
+//    /**
+//     * 保存配置
+//     */
+//    #[PostMapping('save-config')]
+//    public function saveConfig(): ResponseInterface
+//    {
+//        $data = $this->request->all();
+//
+//        // 查询配置（超级管理员跳过站点筛选）
+//        $query = AdminCrudConfig::query()->where('table_name', $data['table_name']);
+//        if (!is_super_admin()) {
+//            $query->where('site_id', site_id());
+//        }
+//        $config = $query->first();
+//
+//        // 处理字段配置中的默认值
+//        $fieldsConfig = $this->processDefaultValues($data['fields_config']);
+//
+//        // 记录旧的模型名称（用于判断是否需要更新菜单）
+//        $oldModelName = $config?->model_name;
+//        $newModelName = $data['model_name'];
+//
+//        // 获取菜单同步配置（默认为1，即默认勾选）
+//        $syncToMenu = isset($data['sync_to_menu']) ? filter_var($data['sync_to_menu'], FILTER_VALIDATE_BOOLEAN) : true;
+//
+//        // 获取 options（不再需要将 icon 保存到 options 中）
+//        $options = $data['options'] ?? [];
+//
+//        // 处理 options 中的布尔字段
+//        if (isset($options['soft_delete'])) {
+//            $options['soft_delete'] = filter_var($options['soft_delete'], FILTER_VALIDATE_BOOLEAN);
+//        }
+//
+//        // 获取数据库连接名称（默认为 'default'）
+//        $dbConnection = $data['db_connection'] ?? 'default';
+//
+//        if ($config) {
+//            $config->update([
+//                'db_connection' => $dbConnection,
+//                'model_name' => $data['model_name'],
+//                'controller_name' => $data['controller_name'],
+//                'module_name' => $data['module_name'],
+//                'route_slug' => $data['route_slug'],
+//                'icon' => $data['icon'] ?? null,
+//                'fields_config' => $fieldsConfig,
+//                'options' => $options,
+//                'sync_to_menu' => $syncToMenu,
+//            ]);
+//        } else {
+//            $config = AdminCrudConfig::create([
+//                'site_id' => site_id(),
+//                'table_name' => $data['table_name'],
+//                'db_connection' => $dbConnection,
+//                'model_name' => $data['model_name'],
+//                'controller_name' => $data['controller_name'],
+//                'module_name' => $data['module_name'],
+//                'route_slug' => $data['route_slug'],
+//                'icon' => $data['icon'] ?? null,
+//                'fields_config' => $fieldsConfig,
+//                'options' => $options,
+//                'sync_to_menu' => $syncToMenu,
+//                'status' => AdminCrudConfig::STATUS_CONFIGURING,
+//            ]);
+//        }
+//
+//        // 自动管理菜单规则
+//        // 只有在启用菜单同步且模型名称变化时才更新菜单
+//        if ($syncToMenu && $oldModelName !== $newModelName) {
+//            logger()->info('[CRUD配置保存] 准备同步菜单', [
+//                'config_id' => $config->id,
+//                'sync_to_menu' => $syncToMenu,
+//                'old_model_name' => $oldModelName,
+//                'new_model_name' => $newModelName,
+//            ]);
+//
+//            $this->syncMenuForConfig($config, $oldModelName);
+//        } elseif (!$syncToMenu) {
+//            logger()->info('[CRUD配置保存] 未启用菜单同步，跳过菜单操作', [
+//                'config_id' => $config->id,
+//                'sync_to_menu' => $syncToMenu,
+//            ]);
+//        } elseif ($oldModelName === $newModelName) {
+//            logger()->info('[CRUD配置保存] 模型名称未变化，跳过菜单同步', [
+//                'config_id' => $config->id,
+//                'model_name' => $newModelName,
+//            ]);
+//        }
+//
+//        return $this->success([
+//            'config_id' => $config->id,
+//        ], '配置保存成功');
+//    }
+//
+//    /**
+//     * 保存配置 V2 版本
+//     */
+//    #[PostMapping('save-config-v2')]
+    public function saveConfig(): ResponseInterface
+    {
+        $data = $this->request->all();
+
+        // 验证必填字段
+        if (empty($data['table_name'])) {
+            return $this->error('表名不能为空');
+        }
+
+        // 确保 table_name 是字符串类型
+        $tableName = is_string($data['table_name']) ? $data['table_name'] : (string)$data['table_name'];
+        if (trim($tableName) === '') {
+            return $this->error('表名不能为空');
+        }
+
+        // 查询配置（超级管理员跳过站点筛选）
+        $query = AdminCrudConfig::query()->where('table_name', $tableName);
+        if (!is_super_admin()) {
+            $query->where('site_id', site_id());
+        }
+        $config = $query->first();
+
+        print_r(['467']);
+        // 处理字段配置中的默认值
+        $fieldsConfig = $this->processDefaultValues($data['fields_config'] ?? []);
+        print_r(['470']);
+
+        // 记录用于创建菜单的字段的旧值（用于判断是否需要更新菜单）
+        $oldMenuValues = [
+            'model_name' => $config?->model_name,
+            'module_name' => $config?->module_name,
+            'route_slug' => $config?->route_slug,
+            'icon' => $config?->icon,
+        ];
+
+        // 获取菜单同步配置（默认为1，即默认勾选）
+        $syncToMenu = isset($data['sync_to_menu']) ? filter_var($data['sync_to_menu'], FILTER_VALIDATE_BOOLEAN) : true;
+
+        // 获取状态配置（默认为1，即默认开启）
+        // 表单中 status 是 checkbox，勾选时值为 "1" 或 1，未勾选时值为 "0" 或 0
+        // 前端已处理：未勾选时也会提交 0，所以这里直接处理即可
+        $status = isset($data['status']) ? (int)filter_var($data['status'], FILTER_VALIDATE_BOOLEAN) : 1;
+
+        // 获取 page_size 和 soft_delete（作为独立字段）
+        $pageSize = isset($data['page_size']) ? (int)$data['page_size'] : ($config?->page_size ?? 15);
+        if ($pageSize < 1) {
+            $pageSize = 15;
+        }
+        if ($pageSize > 100) {
+            $pageSize = 100;
+        }
+
+        $softDelete = isset($data['soft_delete']) ? filter_var($data['soft_delete'], FILTER_VALIDATE_BOOLEAN) : ($config?->soft_delete ?? false);
+        // 如果没有提供，检测表是否有 deleted_at 字段
+        if (!isset($data['soft_delete']) && $config === null) {
+            print_r(['500']);
+
+            $softDelete = $this->databaseService->hasColumn($tableName, 'deleted_at', $data['db_connection'] ?? 'default');
+        }
+
+        // 获取 options（不再包含 page_size 和 soft_delete）
+        $options = $data['options'] ?? [];
+        // 从 options 中移除 page_size 和 soft_delete（如果存在），因为它们是独立字段
+        unset($options['page_size'], $options['soft_delete']);
+        if (!is_array($options)) {
+            $options = [];
+        }
+
+        $featureInput = isset($data['features']) && is_array($data['features']) ? $data['features'] : [];
+        $featureToggles = $this->normalizeFeatureToggles($featureInput);
+        $options['features'] = $featureToggles;
+
+        // 获取数据库连接名称（默认为 'default'）
+        $dbConnection = $data['db_connection'] ?? 'default';
+        print_r(['512'=>$data['route_slug']]);
+        $routeSlugInput = $this->normalizeRouteSlug($data['route_slug'] ?? null);
+        print_r(['512'=>$routeSlugInput]);
+
+        if ($routeSlugInput === '') {
+
+            $routeSlugInput = $this->guessRouteSlug($tableName);
+        }
+        print_r(['520'=>$data['route_prefix']]);
+
+        $routePrefixInput = $this->normalizeRoutePrefix($data['route_prefix'] ?? null);
+        if ($routePrefixInput === '') {
+            print_r(['524']);
+
+            $routePrefixInput = $this->guessRoutePrefix($tableName, $routeSlugInput);
+        }
+        print_r(['526'=>$dbConnection,$config?'oo':'xxx']);
+
+        if ($config) {
+            $config->update([
+                'db_connection' => $dbConnection,
+                'model_name' => $data['model_name'] ?? $config->model_name,
+                'controller_name' => $data['controller_name'] ?? $config->controller_name,
+                'module_name' => $data['module_name'] ?? $config->module_name,
+                'route_prefix' => $routePrefixInput ?: $config->route_prefix,
+                'route_slug' => $routeSlugInput ?: $config->route_slug,
+                'icon' => $data['icon'] ?? $config->icon,
+                'page_size' => $pageSize,
+                'soft_delete' => $softDelete ? 1 : 0,
+                'feature_search' => $featureToggles['search'] ? 1 : 0,
+                'feature_add' => $featureToggles['add'] ? 1 : 0,
+                'feature_edit' => $featureToggles['edit'] ? 1 : 0,
+                'feature_delete' => $featureToggles['delete'] ? 1 : 0,
+                'feature_export' => $featureToggles['export'] ? 1 : 0,
+                'fields_config' => $fieldsConfig,
+                'options' => $options,
+                'sync_to_menu' => $syncToMenu,
+                'status' => $status,
+            ]);
+        } else {
+            // 如果没有提供必要字段，使用默认值
+            $modelName = $data['model_name'] ?? $this->guessModelName($tableName);
+            $controllerName = $data['controller_name'] ?? $modelName . 'Controller';
+            $moduleName = $data['module_name'] ?? '';
+            $routeSlug = $routeSlugInput ?: $this->guessRouteSlug($tableName);
+            $routePrefix = $routePrefixInput ?: $this->guessRoutePrefix($tableName, $routeSlug);
+
+            $config = AdminCrudConfig::create([
+                'site_id' => site_id(),
+                'table_name' => $tableName,
+                'db_connection' => $dbConnection,
+                'model_name' => $modelName,
+                'controller_name' => $controllerName,
+                'module_name' => $moduleName,
+                'route_prefix' => $routePrefix,
+                'route_slug' => $routeSlug,
+                'icon' => $data['icon'] ?? null,
+                'page_size' => $pageSize,
+                'soft_delete' => $softDelete ? 1 : 0,
+                'feature_search' => $featureToggles['search'] ? 1 : 0,
+                'feature_add' => $featureToggles['add'] ? 1 : 0,
+                'feature_edit' => $featureToggles['edit'] ? 1 : 0,
+                'feature_delete' => $featureToggles['delete'] ? 1 : 0,
+                'feature_export' => $featureToggles['export'] ? 1 : 0,
+                'fields_config' => $fieldsConfig,
+                'options' => $options,
+                'sync_to_menu' => $syncToMenu,
+                'status' => $status,
+            ]);
+        }
+        print_r(['572'=>$syncToMenu?'oo':'xx']);
+
+        // 自动管理菜单规则
+        // 如果启用了菜单同步，检查用于创建菜单的字段是否有变化
+        if ($syncToMenu) {
+
+            print_r(['578'=>$config]);
+            // 获取新值（需要重新加载配置以获取更新后的值）
+            $config->refresh();
+            print_r(['580'=>$config]);
+            $newMenuValues = [
+                'model_name' => $config->model_name,
+                'module_name' => $config->module_name,
+                'route_slug' => $config->route_slug,
+                'icon' => $config->icon,
+            ];
+
+            // 检查是否有任何菜单相关字段发生变化
+            $menuValuesChanged = false;
+            $changedFields = [];
+            foreach ($newMenuValues as $key => $newValue) {
+                $oldValue = $oldMenuValues[$key] ?? null;
+                // 标准化比较（处理 null 和空字符串）
+                $oldValueNormalized = $oldValue === null || $oldValue === '' ? null : (string)$oldValue;
+                $newValueNormalized = $newValue === null || $newValue === '' ? null : (string)$newValue;
+                
+                if ($oldValueNormalized !== $newValueNormalized) {
+                    $menuValuesChanged = true;
+                    $changedFields[$key] = [
+                        'old' => $oldValue,
+                        'new' => $newValue,
+                    ];
+                }
+            }
+            logger()->error('[CRUD配置保存V2] 菜单相关字段未变化，跳过菜单同步');
+            print_r(['$menuValuesChanged'=>$menuValuesChanged?'ooo':'xxx']);
+            print_r(['log'=>[
+                'config_id' => $config->id,
+                'menu_values' => $newMenuValues,
+            ]]);
+            logger()->info('[CRUD配置保存V2] 菜单相关字段未变化，跳过菜单同步哈哈哈', [
+                'config_id' => $config->id,
+                'menu_values' => $newMenuValues,
+            ]);
+            print_r(['$config->id'=>$config->id,'$newMenuValues'=>$newMenuValues]);
+            if ($menuValuesChanged) {
+                logger()->info('[CRUD配置保存V2] 检测到菜单相关字段变化，准备同步菜单', [
+                    'config_id' => $config->id,
+                    'sync_to_menu' => $syncToMenu,
+                    'changed_fields' => $changedFields,
+                    'old_values' => $oldMenuValues,
+                    'new_values' => $newMenuValues,
+                ]);
+
+                try {
+                    $this->syncMenuForConfig(
+                        $config,
+                        $oldMenuValues['model_name'] ?? null,
+                        $oldMenuValues['route_slug'] ?? null
+                    );
+                } catch (\Exception $e) {
+                    logger()->error('[CRUD配置保存V2] 同步菜单失败', [
+                        'config_id' => $config->id,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            } else {
+                logger()->info('[CRUD配置保存V2] 菜单相关字段未变化，跳过菜单同步', [
+                    'config_id' => $config->id,
+                    'menu_values' => $newMenuValues,
+                ]);
+            }
+        } else {
+            logger()->info('[CRUD配置保存V2] 未启用菜单同步，跳过菜单操作', [
+                'config_id' => $config->id,
+                'sync_to_menu' => $syncToMenu,
+            ]);
+        }
+
+        return $this->success([
+            'config_id' => $config->id,
+        ], '配置保存成功');
+    }
+
+    /**
+     * 默认功能开关
+     */
+    private function getDefaultFeatureToggles(): array
+    {
+        return [
+            'search' => true,
+            'add' => true,
+            'edit' => true,
+            'delete' => true,
+            'export' => true,
+        ];
+    }
+
+    /**
+     * 规范化功能开关配置
+     */
+    private function normalizeFeatureToggles(null|array $input): array
+    {
+        $defaults = $this->getDefaultFeatureToggles();
+        if (empty($input)) {
+            return $defaults;
+        }
+
+        foreach ($defaults as $key => $defaultValue) {
+            if (array_key_exists($key, $input)) {
+                $defaults[$key] = filter_var($input[$key], FILTER_VALIDATE_BOOLEAN);
+            }
+        }
+
+        return $defaults;
+    }
+//
+//    /**
+//     * 验证和清理字段配置数据 V2 版本
+//     * V2 版本的数据格式可能包含 type_attrs 等新字段
+//     */
+    protected function processDefaultValues(array $fieldsConfig): array
+    {
+        foreach ($fieldsConfig as &$field) {
+            // 1. 处理默认值：如果前端没有设置，从数据库信息推断
+            if (!isset($field['default_value'])) {
+                $field['default_value'] = $field['default_value_db'] ?? null;
+            }
+            // 统一空值处理
+            if ($field['default_value'] === '' || $field['default_value'] === 'NULL' || $field['default_value'] === 'null') {
+                $field['default_value'] = null;
+            }
+
+            // 2. 验证布尔字段类型（防御性编程，前端应该已经处理好）
+            $booleanFields = [
+                'listable', 'list_default', 'searchable', 'sortable',
+                'required', 'editable', 'nullable', 'is_primary',
+                'is_auto_increment', 'is_list', 'is_search', 'is_required',
+                'disabled', 'readonly'
+            ];
+            foreach ($booleanFields as $boolField) {
+                if (isset($field[$boolField]) && !is_bool($field[$boolField])) {
+                    $field[$boolField] = filter_var($field[$boolField], FILTER_VALIDATE_BOOLEAN);
+                }
+            }
+            // 兼容旧字段
+            if (isset($field['show_in_list']) && !is_bool($field['show_in_list'])) {
+                $field['show_in_list'] = filter_var($field['show_in_list'], FILTER_VALIDATE_BOOLEAN);
+            }
+
+            // 3. 验证关联配置中的布尔字段类型
+            if (isset($field['relation']) && is_array($field['relation'])) {
+                if (isset($field['relation']['multiple']) && !is_bool($field['relation']['multiple'])) {
+                    $field['relation']['multiple'] = filter_var($field['relation']['multiple'], FILTER_VALIDATE_BOOLEAN);
+                }
+            }
+
+            // 4. 验证 options 字段中的数据类型（保留所有配置，不做清理）
+            if (isset($field['options']) && is_array($field['options'])) {
+                foreach ($field['options'] as &$option) {
+                    if (is_array($option)) {
+                        // 确保数据类型正确，但不删除任何数据
+                        if (isset($option['key']) && !is_string($option['key']) && !is_numeric($option['key'])) {
+                            $option['key'] = (string)$option['key'];
+                        }
+                    }
+                }
+                unset($option);
+            }
+
+            // 5. 验证 search 配置中的布尔字段类型（保留所有配置，不做清理）
+            if (isset($field['search']) && is_array($field['search'])) {
+                if (isset($field['search']['enabled']) && !is_bool($field['search']['enabled'])) {
+                    $field['search']['enabled'] = filter_var($field['search']['enabled'], FILTER_VALIDATE_BOOLEAN);
+                }
+            }
+
+            // 6. 验证 type_attrs 配置（保留所有配置，不做清理）
+            // 只做基本的数据类型验证，不删除任何配置
+
+            // 7. 清理临时字段（必须）
+            unset($field['default_value_db']);
+        }
+
+        return $fieldsConfig;
+    }
+//
+//    /**
+//     * 预览生成的代码
+//     */
+//    #[GetMapping('preview/{id:\d+}')]
+//    public function preview(int $id): ResponseInterface
+//    {
+//        // 查询配置（超级管理员跳过站点筛选）
+//        $query = AdminCrudConfig::query();
+//        if (!is_super_admin()) {
+//            $query->where('site_id', site_id());
+//        }
+//        $config = $query->findOrFail($id);
+//
+//        // 生成代码
+//        $files = $this->crudGeneratorService->generate($config);
+//
+//        return $this->render->render('admin.system.crud-generator.preview', [
+//            'config' => $config,
+//            'files' => $files,
+//        ]);
+//    }
+//
+//    /**
+//     * 生成代码到项目中
+//     */
+//    #[PostMapping('generate/{id:\d+}')]
+//    public function generate(int $id): ResponseInterface
+//    {
+//        // 查询配置（超级管理员跳过站点筛选）
+//        $query = AdminCrudConfig::query();
+//        if (!is_super_admin()) {
+//            $query->where('site_id', site_id());
+//        }
+//        $config = $query->findOrFail($id);
+//
+//        try {
+//            // 生成代码
+//            $files = $this->crudGeneratorService->generate($config);
+//
+//            // 写入文件
+//            $createdFiles = [];
+//            foreach ($files as $type => $content) {
+//                $filePath = $this->getFilePath($config, $type);
+//                if ($filePath) {
+//                    $this->writeFile($filePath, $content);
+//                    $createdFiles[] = $filePath;
+//                }
+//            }
+//
+//            // 标记为已生成
+//            $config->markAsGenerated();
+//
+//            return $this->success([
+//                'files' => $createdFiles,
+//            ], 'CRUD代码生成成功');
+//        } catch (\Throwable $e) {
+//            return $this->error($e->getMessage());
+//        }
+//    }
+//
+//    /**
+//     * 下载生成的代码包
+//     */
+//    #[GetMapping('download/{id:\d+}')]
+//    public function download(int $id): ResponseInterface
+//    {
+//        // 查询配置（超级管理员跳过站点筛选）
+//        $query = AdminCrudConfig::query();
+//        if (!is_super_admin()) {
+//            $query->where('site_id', site_id());
+//        }
+//        $config = $query->findOrFail($id);
+//
+//        // 生成代码
+//        $files = $this->crudGeneratorService->generate($config);
+//
+//        // 创建 ZIP 压缩包
+//        $zipPath = BASE_PATH . '/runtime/crud_' . $config->table_name . '_' . time() . '.zip';
+//        $zip = new \ZipArchive();
+//
+//        if ($zip->open($zipPath, \ZipArchive::CREATE | \ZipArchive::OVERWRITE) !== true) {
+//            return $this->error('无法创建压缩包');
+//        }
+//
+//        foreach ($files as $type => $content) {
+//            $filename = $this->getZipFilename($config, $type);
+//            if ($filename) {
+//                $zip->addFromString($filename, $content);
+//            }
+//        }
+//
+//        $zip->close();
+//
+//        // 返回下载
+//        return $this->response->download($zipPath, 'crud_' . $config->table_name . '.zip');
+//    }
+//
+    /**
+     * 删除配置
+     */
+    public function delete(int $id): ResponseInterface
+    {
+        try {
+            $query = AdminCrudConfig::query();
+            $config = $query->findOrFail($id);
+            // 如果启用了菜单同步，删除对应的菜单
+            if ($config->sync_to_menu) {
+                logger()->info('[CRUD配置删除] 准备删除关联菜单', [
+                    'config_id' => $config->id,
+                    'table_name' => $config->table_name,
+                    'route_slug' => $config->route_slug,
+                ]);
+                $this->deleteMenuForConfig($config);
+            }
+            $config->delete();
+            return $this->success([], '删除成功');
+        } catch (\Exception $e) {
+            logger()->error('[CRUD配置删除] 处理异常', [
+                'message' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+            return $this->error('处理异常');
+        }
+    }
+
+    /**
+     * 推测模型名称
+     */
+    protected function guessModelName(string $tableName): string
+    {
+        // 确保输入是字符串类型
+        if (!is_string($tableName)) {
+            $tableName = (string)$tableName;
+        }
+        
+        // 如果为空，返回默认值
+        if (trim($tableName) === '') {
+            return 'Model';
+        }
+        
+        // 直接转换表名为驼峰命名，不移除任何前缀
+        // 例如：admin_articles -> AdminArticles, users -> Users, sys_configs -> SysConfigs
+        $name = str_replace('_', ' ', $tableName);
+        $name = ucwords($name);
+        $name = str_replace(' ', '', $name);
+
+        // 单数化（简单处理）
+        if (str_ends_with($name, 's')) {
+            $name = substr($name, 0, -1);
+        }
+
+        return $name;
+    }
+    /**
+     * 推测路由标识
+     */
+    protected function guessRouteSlug(string $tableName): string
+    {
+        // 确保输入是字符串类型
+        if (!is_string($tableName)) {
+            $tableName = (string)$tableName;
+        }
+        
+        // 如果为空，返回默认值
+        if (trim($tableName) === '') {
+            return 'default';
+        }
+        
+        return $this->normalizeRouteSlug($tableName) ?: $tableName;
+    }
+
+    /**
+     * 推测路由前缀
+     */
+    protected function guessRoutePrefix(string $tableName, ?string $routeSlug = null): string
+    {
+        // 确保输入是字符串类型
+        if (!is_string($tableName)) {
+            $tableName = (string)$tableName;
+        }
+        
+        $routeSlug = $routeSlug ?: $this->guessRouteSlug($tableName);
+        return $routeSlug;
+    }
+
+    /**
+     * 清洗路由标识，移除斜杠和非法字符
+     */
+    protected function normalizeRouteSlug(?string $slug): string
+    {
+        if ($slug === null) {
+            return '';
+        }
+
+        // 确保是字符串类型
+        if (!is_string($slug)) {
+            $slug = (string)$slug;
+        }
+
+        $slug = trim($slug);
+        if ($slug === '') {
+            return '';
+        }
+
+        // 移除首尾斜杠并替换中间的斜杠
+        $slug = trim($slug, "/\\");
+        $slug = str_replace(['/', '\\'], '-', $slug);
+
+        // 仅保留字母、数字、连字符、下划线
+        $slug = preg_replace('/[^A-Za-z0-9_-]/', '-', $slug);
+
+        // 合并连续的 -
+        $slug = preg_replace('/-+/', '-', $slug);
+
+        return trim($slug, '-');
+    }
+
+    /**
+     * 清洗路由前缀，保留多级路径
+     */
+    protected function normalizeRoutePrefix(?string $prefix): string
+    {
+        if ($prefix === null) {
+            return '';
+        }
+
+        // 确保是字符串类型
+        if (!is_string($prefix)) {
+            $prefix = (string)$prefix;
+        }
+
+        $prefix = trim($prefix);
+        if ($prefix === '') {
+            return '';
+        }
+
+        $prefix = str_replace('\\', '/', $prefix);
+        $segments = array_map(function ($segment) {
+            return $this->normalizeRouteSlug($segment);
+        }, explode('/', $prefix));
+
+        $segments = array_filter($segments, static fn($segment) => $segment !== '');
+
+        return implode('/', $segments);
+    }
+
+//    /**
+//     * 获取文件路径
+//     */
+//    protected function getFilePath(AdminCrudConfig $config, string $type): ?string
+//    {
+//        $basePath = BASE_PATH;
+//
+//        return match ($type) {
+//            'model' => "{$basePath}/app/Model/Admin/{$config->model_name}.php",
+//            'controller' => "{$basePath}/app/Controller/Admin/System/{$config->controller_name}.php",
+//            'request_store' => "{$basePath}/app/Request/Admin/{$config->model_name}StoreRequest.php",
+//            'request_update' => "{$basePath}/app/Request/Admin/{$config->model_name}UpdateRequest.php",
+//            'view_index' => "{$basePath}/storage/view/admin/system/{$config->route_slug}/index.blade.php",
+//            'view_create' => "{$basePath}/storage/view/admin/system/{$config->route_slug}/create.blade.php",
+//            'view_edit' => "{$basePath}/storage/view/admin/system/{$config->route_slug}/edit.blade.php",
+//            'route' => null, // 路由需要手动添加到 routes.php
+//            'menu_sql' => null, // SQL 需要手动执行
+//            default => null,
+//        };
+//    }
+//
+//    /**
+//     * 获取 ZIP 文件名
+//     */
+//    protected function getZipFilename(AdminCrudConfig $config, string $type): ?string
+//    {
+//        return match ($type) {
+//            'model' => "Model/{$config->model_name}.php",
+//            'controller' => "Controller/{$config->controller_name}.php",
+//            'request_store' => "Request/{$config->model_name}StoreRequest.php",
+//            'request_update' => "Request/{$config->model_name}UpdateRequest.php",
+//            'view_index' => "View/{$config->route_slug}/index.blade.php",
+//            'view_create' => "View/{$config->route_slug}/create.blade.php",
+//            'view_edit' => "View/{$config->route_slug}/edit.blade.php",
+//            'route' => "routes.php",
+//            'menu_sql' => "menu.sql",
+//            default => null,
+//        };
+//    }
+//
+//    /**
+//     * 写入文件
+//     */
+//    protected function writeFile(string $filePath, string $content): void
+//    {
+//        $dir = dirname($filePath);
+//
+//        if (!is_dir($dir)) {
+//            mkdir($dir, 0755, true);
+//        }
+//
+//        file_put_contents($filePath, $content);
+//    }
+//
+    /**
+     * 为 CRUD 配置同步菜单
+     *
+     * @param AdminCrudConfig $config 当前配置
+     * @param string|null $oldModelName 旧的模型名称（仅用于日志）
+     * @param string|null $oldRouteSlug 旧的路由标识（用于清理旧菜单）
+     * @throws \Exception
+     */
+    protected function syncMenuForConfig(AdminCrudConfig $config, ?string $oldModelName = null, ?string $oldRouteSlug = null): void
+    {
+        $siteId = $config->site_id;
+        $moduleName = $config->module_name;
+        $routeSlug = $config->route_slug;
+
+        // 直接从 icon 字段获取，如果没有则使用默认图标
+        $icon = $config->icon ?? 'bi bi-table';
+
+        // 日志：开始同步菜单
+        logger()->info('[CRUD菜单同步] 开始同步菜单', [
+            'config_id' => $config->id,
+            'site_id' => $siteId,
+            'table_name' => $config->table_name,
+            'model_name' => $config->model_name,
+            'old_model_name' => $oldModelName,
+            'old_route_slug' => $oldRouteSlug,
+            'module_name' => $moduleName,
+            'route_slug' => $routeSlug,
+            'icon' => $icon,
+        ]);
+
+        // 查找系统管理父菜单
+        $systemMenu = \App\Model\Admin\AdminMenu::query()
+            ->where('site_id', $siteId)
+            ->where('name', 'system')
+            ->first();
+
+        // 如果没有系统管理菜单，创建一个
+        if (!$systemMenu) {
+            logger()->info('[CRUD菜单同步] 系统管理菜单不存在，开始创建', [
+                'site_id' => $siteId,
+            ]);
+
+            $systemMenu = \App\Model\Admin\AdminMenu::create([
+                'site_id' => $siteId,
+                'parent_id' => 0,
+                'name' => 'system',
+                'title' => '系统管理',
+                'icon' => 'bi bi-gear',
+                'path' => '/system',
+                'type' => 'menu',
+                'visible' => 1,
+                'status' => 1,
+                'sort' => 999,
+            ]);
+
+            logger()->info('[CRUD菜单同步] 系统管理菜单创建成功', [
+                'menu_id' => $systemMenu->id,
+                'menu_name' => $systemMenu->name,
+                'menu_title' => $systemMenu->title,
+            ]);
+        } else {
+            logger()->info('[CRUD菜单同步] 找到系统管理菜单', [
+                'menu_id' => $systemMenu->id,
+                'menu_name' => $systemMenu->name,
+                'menu_title' => $systemMenu->title,
+            ]);
+        }
+
+        // 如果旧的 route_slug 存在且与当前不同，删除旧菜单（无需兼容旧路径）
+        if ($oldRouteSlug && $oldRouteSlug !== $routeSlug) {
+            $previousMenuPath = "/u/{$oldRouteSlug}";
+            logger()->info('[CRUD菜单同步] 检测到路由标识变化，准备删除旧菜单', [
+                'old_route_slug' => $oldRouteSlug,
+                'new_route_slug' => $routeSlug,
+                'old_menu_path' => $previousMenuPath,
+            ]);
+
+            $oldMenu = \App\Model\Admin\AdminMenu::query()
+                ->where('site_id', $siteId)
+                ->where('parent_id', $systemMenu->id)
+                ->where('path', $previousMenuPath)
+                ->first();
+
+            if ($oldMenu) {
+                logger()->info('[CRUD菜单同步] 找到旧菜单，开始删除', [
+                    'old_menu_id' => $oldMenu->id,
+                    'old_menu_name' => $oldMenu->name,
+                    'old_menu_title' => $oldMenu->title,
+                    'old_menu_path' => $oldMenu->path,
+                ]);
+
+                $oldMenu->delete();
+
+                logger()->info('[CRUD菜单同步] 旧菜单删除成功', [
+                    'deleted_menu_id' => $oldMenu->id,
+                ]);
+            } else {
+                logger()->info('[CRUD菜单同步] 未找到旧菜单，跳过删除', [
+                    'search_path' => $previousMenuPath,
+                ]);
+            }
+        }
+
+        // 查找或创建当前模块的菜单，路径固定为 /u/{route_slug}
+        $menuPath = "/u/{$routeSlug}";
+
+        logger()->info('[CRUD菜单同步] 查找当前模块的菜单', [
+            'site_id' => $siteId,
+            'parent_id' => $systemMenu->id,
+            'model_name' => $config->model_name,
+            'search_path' => $menuPath,
+        ]);
+
+        $parentMenu = \App\Model\Admin\AdminMenu::query()
+            ->where('site_id', $siteId)
+            ->where('parent_id', $systemMenu->id)
+            ->where('path', $menuPath)
+            ->first();
+
+        if (!$parentMenu) {
+            logger()->info('[CRUD菜单同步] 菜单不存在，开始创建', [
+                'module_name' => $moduleName,
+                'model_name' => $config->model_name,
+                'menu_path' => $menuPath,
+                'icon' => $icon,
+            ]);
+
+            // 创建菜单
+            $parentMenu = \App\Model\Admin\AdminMenu::create([
+                'site_id' => $siteId,
+                'parent_id' => $systemMenu->id,
+                'name' => $routeSlug,
+                'title' => $moduleName,
+                'icon' => $icon,
+                'path' => $menuPath,
+                'type' => 'menu',
+                'visible' => 1,
+                'status' => 1,
+                'sort' => 100,
+            ]);
+
+            logger()->info('[CRUD菜单同步] 菜单创建成功', [
+                'menu_id' => $parentMenu->id,
+                'menu_name' => $parentMenu->name,
+                'menu_title' => $parentMenu->title,
+                'menu_path' => $parentMenu->path,
+            ]);
+        } else {
+            // 构建需要更新的字段
+            $updateData = [];
+            
+            // 如果 module_name 变化，更新 title
+            if ($parentMenu->title !== $moduleName) {
+                $updateData['title'] = $moduleName;
+            }
+            
+            // 如果 icon 变化，更新 icon
+            if ($parentMenu->icon !== $icon) {
+                $updateData['icon'] = $icon;
+            }
+            
+            // 如果 route_slug 变化，更新 name
+            if ($parentMenu->name !== $routeSlug) {
+                $updateData['name'] = $routeSlug;
+            }
+            
+            // 如果 route_slug 变化，更新 path（正常情况下菜单路径与 route_slug 一致）
+            $newMenuPath = "/u/{$routeSlug}";
+            if ($parentMenu->path !== $newMenuPath) {
+                $updateData['path'] = $newMenuPath;
+            }
+
+            // 如果有需要更新的字段，执行更新
+            if (!empty($updateData)) {
+                logger()->info('[CRUD菜单同步] 找到菜单，开始更新', [
+                    'menu_id' => $parentMenu->id,
+                    'old_title' => $parentMenu->title,
+                    'new_title' => $moduleName,
+                    'old_icon' => $parentMenu->icon,
+                    'new_icon' => $icon,
+                    'old_name' => $parentMenu->name,
+                    'new_name' => $routeSlug,
+                    'old_path' => $parentMenu->path,
+                    'new_path' => $newMenuPath,
+                    'update_fields' => array_keys($updateData),
+                ]);
+
+                // 更新菜单
+                $parentMenu->update($updateData);
+
+                logger()->info('[CRUD菜单同步] 菜单更新成功', [
+                    'menu_id' => $parentMenu->id,
+                    'updated_fields' => array_keys($updateData),
+                ]);
+            } else {
+                logger()->info('[CRUD菜单同步] 菜单字段无变化，跳过更新', [
+                    'menu_id' => $parentMenu->id,
+                ]);
+            }
+        }
+
+        logger()->info('[CRUD菜单同步] 菜单同步完成', [
+            'config_id' => $config->id,
+            'model_name' => $config->model_name,
+            'menu_id' => $parentMenu->id,
+            'menu_title' => $parentMenu->title,
+            'menu_path' => $parentMenu->path,
+        ]);
+    }
+
+    /**
+     * 删除 CRUD 配置对应的菜单
+     *
+     * @param AdminCrudConfig $config CRUD 配置
+     * @throws \Exception
+     */
+    protected function deleteMenuForConfig(AdminCrudConfig $config): void
+    {
+        $siteId = $config->site_id;
+        $routeSlug = $config->route_slug;
+        $menuPath = "/u/{$routeSlug}";
+
+        logger()->info('[CRUD菜单删除] 开始删除菜单', [
+            'config_id' => $config->id,
+            'site_id' => $siteId,
+            'table_name' => $config->table_name,
+            'model_name' => $config->model_name,
+            'route_slug' => $routeSlug,
+            'menu_path' => $menuPath,
+        ]);
+
+        // 查找系统管理父菜单
+        $systemMenu = \App\Model\Admin\AdminMenu::query()
+            ->where('site_id', $siteId)
+            ->where('name', 'system')
+            ->first();
+
+        if (!$systemMenu) {
+            logger()->info('[CRUD菜单删除] 系统管理菜单不存在，无需删除', [
+                'site_id' => $siteId,
+            ]);
+            return;
+        }
+
+        // 查找要删除的菜单（仅使用最新的 /u/{route_slug} 路径）
+        $menu = \App\Model\Admin\AdminMenu::query()
+            ->where('site_id', $siteId)
+            ->where('parent_id', $systemMenu->id)
+            ->where('path', $menuPath)
+            ->first();
+
+        if (!$menu) {
+            logger()->info('[CRUD菜单删除] 未找到对应菜单，无需删除', [
+                'route_slug' => $routeSlug,
+                'search_path' => $menuPath,
+            ]);
+            return;
+        }
+
+        logger()->info('[CRUD菜单删除] 找到菜单，开始删除', [
+            'menu_id' => $menu->id,
+            'menu_name' => $menu->name,
+            'menu_title' => $menu->title,
+            'menu_path' => $menu->path,
+        ]);
+
+        // 删除菜单
+        $menu->delete();
+
+        logger()->info('[CRUD菜单删除] 菜单删除成功', [
+            'deleted_menu_id' => $menu->id,
+            'deleted_menu_title' => $menu->title,
+        ]);
+    }
+//
+    /**
+     * 从模型名称推测表名
+     *
+     * @param string $modelName 模型名称（如 AdminUser）
+     * @return string 表名（如 admin_users）
+     */
+    protected function guessTableNameFromModel(string $modelName): string
+    {
+        // 将驼峰命名转换为下划线命名
+        $tableName = strtolower(preg_replace('/(?<!^)[A-Z]/', '_$0', $modelName));
+
+        // 简单的复数化处理（添加 s）
+        if (!str_ends_with($tableName, 's')) {
+            $tableName .= 's';
+        }
+
+        return $tableName;
+    }
+}
+

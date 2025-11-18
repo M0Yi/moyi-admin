@@ -107,6 +107,11 @@ class InstallController extends AbstractController
             $adminUser->roles()->attach($superAdminRole->id);
             logger()->info('角色分配完成');
 
+            // 6. 插入测试数据
+            logger()->info('开始插入测试数据');
+            $this->insertTestData($site->id, $adminUser->id);
+            logger()->info('测试数据插入完成');
+
             // 提交事务
             logger()->info('准备提交事务');
             Db::commit();
@@ -255,66 +260,66 @@ class InstallController extends AbstractController
                 'status' => 1,
                 'sort' => 1,
             ],
-            // 用户管理
-            [
-                'site_id' => $siteId,
-                'parent_id' => 0,
-                'name' => '用户管理',
-                'slug' => 'users',
-                'type' => 'menu',
-                'icon' => 'users',
-                'path' => '/users',
-                'status' => 1,
-                'sort' => 2,
-            ],
-            // 角色管理
-            [
-                'site_id' => $siteId,
-                'parent_id' => 0,
-                'name' => '角色管理',
-                'slug' => 'roles',
-                'type' => 'menu',
-                'icon' => 'shield',
-                'path' => '/roles',
-                'status' => 1,
-                'sort' => 3,
-            ],
-            // 权限管理
-            [
-                'site_id' => $siteId,
-                'parent_id' => 0,
-                'name' => '权限管理',
-                'slug' => 'permissions',
-                'type' => 'menu',
-                'icon' => 'key',
-                'path' => '/permissions',
-                'status' => 1,
-                'sort' => 4,
-            ],
-            // 站点管理
-            [
-                'site_id' => $siteId,
-                'parent_id' => 0,
-                'name' => '站点管理',
-                'slug' => 'sites',
-                'type' => 'menu',
-                'icon' => 'globe',
-                'path' => '/sites',
-                'status' => 1,
-                'sort' => 5,
-            ],
-            // 系统配置
-            [
-                'site_id' => $siteId,
-                'parent_id' => 0,
-                'name' => '系统配置',
-                'slug' => 'settings',
-                'type' => 'menu',
-                'icon' => 'settings',
-                'path' => '/settings',
-                'status' => 1,
-                'sort' => 6,
-            ],
+//            // 用户管理
+//            [
+//                'site_id' => $siteId,
+//                'parent_id' => 0,
+//                'name' => '用户管理',
+//                'slug' => 'users',
+//                'type' => 'menu',
+//                'icon' => 'users',
+//                'path' => '/users',
+//                'status' => 1,
+//                'sort' => 2,
+//            ],
+//            // 角色管理
+//            [
+//                'site_id' => $siteId,
+//                'parent_id' => 0,
+//                'name' => '角色管理',
+//                'slug' => 'roles',
+//                'type' => 'menu',
+//                'icon' => 'shield',
+//                'path' => '/roles',
+//                'status' => 1,
+//                'sort' => 3,
+//            ],
+//            // 权限管理
+//            [
+//                'site_id' => $siteId,
+//                'parent_id' => 0,
+//                'name' => '权限管理',
+//                'slug' => 'permissions',
+//                'type' => 'menu',
+//                'icon' => 'key',
+//                'path' => '/permissions',
+//                'status' => 1,
+//                'sort' => 4,
+//            ],
+//            // 站点管理
+//            [
+//                'site_id' => $siteId,
+//                'parent_id' => 0,
+//                'name' => '站点管理',
+//                'slug' => 'sites',
+//                'type' => 'menu',
+//                'icon' => 'globe',
+//                'path' => '/sites',
+//                'status' => 1,
+//                'sort' => 5,
+//            ],
+//            // 系统配置
+//            [
+//                'site_id' => $siteId,
+//                'parent_id' => 0,
+//                'name' => '系统配置',
+//                'slug' => 'settings',
+//                'type' => 'menu',
+//                'icon' => 'settings',
+//                'path' => '/settings',
+//                'status' => 1,
+//                'sort' => 6,
+//            ],
         ];
 
         foreach ($permissions as $permission) {
@@ -369,121 +374,121 @@ class InstallController extends AbstractController
                 'remark' => null,
             ]
         );
-
-        AdminMenu::query()->firstOrCreate(
-            ['site_id' => $siteId, 'path' => '/system/users'],
-            [
-                'parent_id' => $system->id,
-                'name' => 'system.users',
-                'title' => '用户管理',
-                'icon' => 'bi bi-people',
-                'component' => null,
-                'redirect' => null,
-                'type' => AdminMenu::TYPE_MENU,
-                'target' => AdminMenu::TARGET_SELF,
-                'badge' => null,
-                'badge_type' => null,
-                'permission' => 'system.users.view',
-                'visible' => 1,
-                'status' => 1,
-                'sort' => 1,
-                'cache' => 1,
-                'config' => null,
-                'remark' => null,
-            ]
-        );
-
-        AdminMenu::query()->firstOrCreate(
-            ['site_id' => $siteId, 'path' => '/system/roles'],
-            [
-                'parent_id' => $system->id,
-                'name' => 'system.roles',
-                'title' => '角色管理',
-                'icon' => 'bi bi-person-badge',
-                'component' => null,
-                'redirect' => null,
-                'type' => AdminMenu::TYPE_MENU,
-                'target' => AdminMenu::TARGET_SELF,
-                'badge' => null,
-                'badge_type' => null,
-                'permission' => 'system.roles.view',
-                'visible' => 1,
-                'status' => 1,
-                'sort' => 2,
-                'cache' => 1,
-                'config' => null,
-                'remark' => null,
-            ]
-        );
-
-        AdminMenu::query()->firstOrCreate(
-            ['site_id' => $siteId, 'path' => '/system/permissions'],
-            [
-                'parent_id' => $system->id,
-                'name' => 'system.permissions',
-                'title' => '权限管理',
-                'icon' => 'bi bi-shield-check',
-                'component' => null,
-                'redirect' => null,
-                'type' => AdminMenu::TYPE_MENU,
-                'target' => AdminMenu::TARGET_SELF,
-                'badge' => null,
-                'badge_type' => null,
-                'permission' => 'system.permissions.view',
-                'visible' => 1,
-                'status' => 1,
-                'sort' => 3,
-                'cache' => 1,
-                'config' => null,
-                'remark' => null,
-            ]
-        );
-
-        AdminMenu::query()->firstOrCreate(
-            ['site_id' => $siteId, 'path' => '/system/menus'],
-            [
-                'parent_id' => $system->id,
-                'name' => 'system.menus',
-                'title' => '菜单管理',
-                'icon' => 'bi bi-menu-button-wide',
-                'component' => null,
-                'redirect' => null,
-                'type' => AdminMenu::TYPE_MENU,
-                'target' => AdminMenu::TARGET_SELF,
-                'badge' => null,
-                'badge_type' => null,
-                'permission' => 'system.menus.view',
-                'visible' => 1,
-                'status' => 1,
-                'sort' => 4,
-                'cache' => 1,
-                'config' => null,
-                'remark' => null,
-            ]
-        );
-
-        AdminMenu::query()->firstOrCreate(
-            ['site_id' => $siteId, 'path' => '/system/sites'],
-            [
-                'parent_id' => $system->id,
-                'name' => 'system.sites',
-                'title' => '站点管理',
-                'icon' => 'bi bi-sliders',
-                'component' => null,
-                'redirect' => null,
-                'type' => AdminMenu::TYPE_MENU,
-                'target' => AdminMenu::TARGET_SELF,
-                'badge' => null,
-                'badge_type' => null,
-                'permission' => 'system.sites.view',
-                'visible' => 1,
-                'status' => 1,
-                'sort' => 5,
-                'cache' => 1,
-                'config' => null,
-                'remark' => null,
-            ]
-        );
+//
+//        AdminMenu::query()->firstOrCreate(
+//            ['site_id' => $siteId, 'path' => '/system/users'],
+//            [
+//                'parent_id' => $system->id,
+//                'name' => 'system.users',
+//                'title' => '用户管理',
+//                'icon' => 'bi bi-people',
+//                'component' => null,
+//                'redirect' => null,
+//                'type' => AdminMenu::TYPE_MENU,
+//                'target' => AdminMenu::TARGET_SELF,
+//                'badge' => null,
+//                'badge_type' => null,
+//                'permission' => 'system.users.view',
+//                'visible' => 1,
+//                'status' => 1,
+//                'sort' => 1,
+//                'cache' => 1,
+//                'config' => null,
+//                'remark' => null,
+//            ]
+//        );
+//
+//        AdminMenu::query()->firstOrCreate(
+//            ['site_id' => $siteId, 'path' => '/system/roles'],
+//            [
+//                'parent_id' => $system->id,
+//                'name' => 'system.roles',
+//                'title' => '角色管理',
+//                'icon' => 'bi bi-person-badge',
+//                'component' => null,
+//                'redirect' => null,
+//                'type' => AdminMenu::TYPE_MENU,
+//                'target' => AdminMenu::TARGET_SELF,
+//                'badge' => null,
+//                'badge_type' => null,
+//                'permission' => 'system.roles.view',
+//                'visible' => 1,
+//                'status' => 1,
+//                'sort' => 2,
+//                'cache' => 1,
+//                'config' => null,
+//                'remark' => null,
+//            ]
+//        );
+//
+//        AdminMenu::query()->firstOrCreate(
+//            ['site_id' => $siteId, 'path' => '/system/permissions'],
+//            [
+//                'parent_id' => $system->id,
+//                'name' => 'system.permissions',
+//                'title' => '权限管理',
+//                'icon' => 'bi bi-shield-check',
+//                'component' => null,
+//                'redirect' => null,
+//                'type' => AdminMenu::TYPE_MENU,
+//                'target' => AdminMenu::TARGET_SELF,
+//                'badge' => null,
+//                'badge_type' => null,
+//                'permission' => 'system.permissions.view',
+//                'visible' => 1,
+//                'status' => 1,
+//                'sort' => 3,
+//                'cache' => 1,
+//                'config' => null,
+//                'remark' => null,
+//            ]
+//        );
+//
+//        AdminMenu::query()->firstOrCreate(
+//            ['site_id' => $siteId, 'path' => '/system/menus'],
+//            [
+//                'parent_id' => $system->id,
+//                'name' => 'system.menus',
+//                'title' => '菜单管理',
+//                'icon' => 'bi bi-menu-button-wide',
+//                'component' => null,
+//                'redirect' => null,
+//                'type' => AdminMenu::TYPE_MENU,
+//                'target' => AdminMenu::TARGET_SELF,
+//                'badge' => null,
+//                'badge_type' => null,
+//                'permission' => 'system.menus.view',
+//                'visible' => 1,
+//                'status' => 1,
+//                'sort' => 4,
+//                'cache' => 1,
+//                'config' => null,
+//                'remark' => null,
+//            ]
+//        );
+//
+//        AdminMenu::query()->firstOrCreate(
+//            ['site_id' => $siteId, 'path' => '/system/sites'],
+//            [
+//                'parent_id' => $system->id,
+//                'name' => 'system.sites',
+//                'title' => '站点管理',
+//                'icon' => 'bi bi-sliders',
+//                'component' => null,
+//                'redirect' => null,
+//                'type' => AdminMenu::TYPE_MENU,
+//                'target' => AdminMenu::TARGET_SELF,
+//                'badge' => null,
+//                'badge_type' => null,
+//                'permission' => 'system.sites.view',
+//                'visible' => 1,
+//                'status' => 1,
+//                'sort' => 5,
+//                'cache' => 1,
+//                'config' => null,
+//                'remark' => null,
+//            ]
+//        );
 
         AdminMenu::query()->firstOrCreate(
             ['site_id' => $siteId, 'name' => 'system.divider1'],
@@ -658,16 +663,18 @@ class InstallController extends AbstractController
                 $table->unsignedBigInteger('default_brand_id')->nullable()->comment('默认品牌ID');
                 $table->unsignedBigInteger('default_wechat_provider_id')->nullable()->comment('默认微信服务商ID');
                 $table->tinyInteger('status')->default(1)->comment('状态：0=禁用，1=启用');
-                $table->string('upload_driver', 20)->nullable();
-                $table->longText('upload_config')->nullable();
+                $table->string('upload_driver', 20)->nullable()->comment('上传驱动');
+                $table->longText('upload_config')->nullable()->comment('上传配置(JSON)');
                 $table->integer('sort')->default(0)->comment('排序');
-                $table->timestamps();
-                $table->softDeletes();
+                $table->timestamp('created_at')->nullable()->comment('创建时间');
+                $table->timestamp('updated_at')->nullable()->comment('更新时间');
+                $table->softDeletes()->comment('删除时间');
                 $table->unique('domain', 'admin_sites_domain_unique');
                 $table->index('status', 'admin_sites_status_index');
                 $table->index('default_brand_id', 'admin_sites_default_brand_id_index');
                 $table->index('default_wechat_provider_id', 'admin_sites_default_wechat_provider_id_index');
             });
+            Db::statement("ALTER TABLE `admin_sites` COMMENT = '站点表'");
         }
 
         if (! Schema::hasTable('admin_users')) {
@@ -675,26 +682,28 @@ class InstallController extends AbstractController
                 $table->engine = 'InnoDB';
                 $table->charset = 'utf8mb4';
                 $table->collation = 'utf8mb4_unicode_ci';
-                $table->bigIncrements('id');
-                $table->unsignedBigInteger('site_id')->nullable();
-                $table->string('username', 50);
-                $table->string('password', 255);
-                $table->string('email', 100)->nullable();
-                $table->string('mobile', 20)->nullable();
-                $table->string('avatar', 255)->nullable();
-                $table->string('real_name', 50)->nullable();
-                $table->tinyInteger('status')->default(1);
-                $table->tinyInteger('is_admin')->default(0);
-                $table->string('last_login_ip', 50)->nullable();
-                $table->timestamp('last_login_at')->nullable();
-                $table->timestamps();
-                $table->softDeletes();
+                $table->bigIncrements('id')->comment('用户ID');
+                $table->unsignedBigInteger('site_id')->nullable()->comment('站点ID');
+                $table->string('username', 50)->comment('用户名');
+                $table->string('password', 255)->comment('密码');
+                $table->string('email', 100)->nullable()->comment('邮箱');
+                $table->string('mobile', 20)->nullable()->comment('手机号');
+                $table->string('avatar', 255)->nullable()->comment('头像');
+                $table->string('real_name', 50)->nullable()->comment('真实姓名');
+                $table->tinyInteger('status')->default(1)->comment('状态：0=禁用，1=启用');
+                $table->tinyInteger('is_admin')->default(0)->comment('是否超级管理员：0=否，1=是');
+                $table->string('last_login_ip', 50)->nullable()->comment('最后登录IP');
+                $table->timestamp('last_login_at')->nullable()->comment('最后登录时间');
+                $table->timestamp('created_at')->nullable()->comment('创建时间');
+                $table->timestamp('updated_at')->nullable()->comment('更新时间');
+                $table->softDeletes()->comment('删除时间');
                 $table->unique('username', 'admin_users_username_unique');
                 $table->unique('email', 'admin_users_email_unique');
                 $table->index('status', 'admin_users_status_index');
                 $table->index('created_at', 'admin_users_created_at_index');
                 $table->index('site_id', 'idx_sites_id');
             });
+            Db::statement("ALTER TABLE `admin_users` COMMENT = '管理员用户表'");
         }
 
         if (! Schema::hasTable('admin_roles')) {
@@ -702,19 +711,21 @@ class InstallController extends AbstractController
                 $table->engine = 'InnoDB';
                 $table->charset = 'utf8mb4';
                 $table->collation = 'utf8mb4_unicode_ci';
-                $table->bigIncrements('id');
-                $table->unsignedBigInteger('site_id')->nullable();
-                $table->string('name', 50);
-                $table->string('slug', 50);
-                $table->string('description', 255)->nullable();
-                $table->tinyInteger('status')->default(1);
-                $table->integer('sort')->default(0);
-                $table->timestamps();
+                $table->bigIncrements('id')->comment('角色ID');
+                $table->unsignedBigInteger('site_id')->nullable()->comment('站点ID');
+                $table->string('name', 50)->comment('角色名称');
+                $table->string('slug', 50)->comment('角色标识');
+                $table->string('description', 255)->nullable()->comment('角色描述');
+                $table->tinyInteger('status')->default(1)->comment('状态：0=禁用，1=启用');
+                $table->integer('sort')->default(0)->comment('排序');
+                $table->timestamp('created_at')->nullable()->comment('创建时间');
+                $table->timestamp('updated_at')->nullable()->comment('更新时间');
                 $table->unique('slug', 'admin_roles_slug_unique');
                 $table->index('status', 'admin_roles_status_index');
                 $table->index('sort', 'admin_roles_sort_index');
                 $table->index('site_id', 'idx_sites_id');
             });
+            Db::statement("ALTER TABLE `admin_roles` COMMENT = '角色表'");
         }
 
         if (! Schema::hasTable('admin_permissions')) {
@@ -722,25 +733,27 @@ class InstallController extends AbstractController
                 $table->engine = 'InnoDB';
                 $table->charset = 'utf8mb4';
                 $table->collation = 'utf8mb4_unicode_ci';
-                $table->bigIncrements('id');
-                $table->unsignedBigInteger('site_id')->nullable();
-                $table->unsignedBigInteger('parent_id')->default(0);
-                $table->string('name', 50);
-                $table->string('slug', 100);
-                $table->string('type', 20)->default('menu');
-                $table->string('icon', 50)->nullable();
-                $table->string('path', 255)->nullable();
-                $table->string('component', 255)->nullable();
-                $table->string('description', 255)->nullable();
-                $table->tinyInteger('status')->default(1);
-                $table->integer('sort')->default(0);
-                $table->timestamps();
+                $table->bigIncrements('id')->comment('权限ID');
+                $table->unsignedBigInteger('site_id')->nullable()->comment('站点ID');
+                $table->unsignedBigInteger('parent_id')->default(0)->comment('父级ID');
+                $table->string('name', 50)->comment('权限名称');
+                $table->string('slug', 100)->comment('权限标识');
+                $table->string('type', 20)->default('menu')->comment('类型：menu=菜单，button=按钮');
+                $table->string('icon', 50)->nullable()->comment('图标');
+                $table->string('path', 255)->nullable()->comment('路径');
+                $table->string('component', 255)->nullable()->comment('组件');
+                $table->string('description', 255)->nullable()->comment('描述');
+                $table->tinyInteger('status')->default(1)->comment('状态：0=禁用，1=启用');
+                $table->integer('sort')->default(0)->comment('排序');
+                $table->timestamp('created_at')->nullable()->comment('创建时间');
+                $table->timestamp('updated_at')->nullable()->comment('更新时间');
                 $table->unique('slug', 'admin_permissions_slug_unique');
                 $table->index('parent_id', 'admin_permissions_parent_id_index');
                 $table->index('status', 'admin_permissions_status_index');
                 $table->index('sort', 'admin_permissions_sort_index');
                 $table->index('site_id', 'idx_sites_id');
             });
+            Db::statement("ALTER TABLE `admin_permissions` COMMENT = '权限表'");
         }
 
         if (! Schema::hasTable('admin_permission_role')) {
@@ -748,13 +761,15 @@ class InstallController extends AbstractController
                 $table->engine = 'InnoDB';
                 $table->charset = 'utf8mb4';
                 $table->collation = 'utf8mb4_unicode_ci';
-                $table->bigIncrements('id');
-                $table->unsignedBigInteger('permission_id');
-                $table->unsignedBigInteger('role_id');
-                $table->timestamps();
+                $table->bigIncrements('id')->comment('ID');
+                $table->unsignedBigInteger('permission_id')->comment('权限ID');
+                $table->unsignedBigInteger('role_id')->comment('角色ID');
+                $table->timestamp('created_at')->nullable()->comment('创建时间');
+                $table->timestamp('updated_at')->nullable()->comment('更新时间');
                 $table->unique(['permission_id', 'role_id'], 'uk_permission_role');
                 $table->index('role_id', 'admin_permission_role_role_id_index');
             });
+            Db::statement("ALTER TABLE `admin_permission_role` COMMENT = '权限角色关联表'");
         }
 
         if (! Schema::hasTable('admin_role_user')) {
@@ -762,13 +777,15 @@ class InstallController extends AbstractController
                 $table->engine = 'InnoDB';
                 $table->charset = 'utf8mb4';
                 $table->collation = 'utf8mb4_unicode_ci';
-                $table->bigIncrements('id');
-                $table->unsignedBigInteger('role_id');
-                $table->unsignedBigInteger('user_id');
-                $table->timestamps();
+                $table->bigIncrements('id')->comment('ID');
+                $table->unsignedBigInteger('role_id')->comment('角色ID');
+                $table->unsignedBigInteger('user_id')->comment('用户ID');
+                $table->timestamp('created_at')->nullable()->comment('创建时间');
+                $table->timestamp('updated_at')->nullable()->comment('更新时间');
                 $table->unique(['role_id', 'user_id'], 'uk_role_user');
                 $table->index('user_id', 'admin_role_user_user_id_index');
             });
+            Db::statement("ALTER TABLE `admin_role_user` COMMENT = '角色用户关联表'");
         }
 
         if (! Schema::hasTable('admin_menus')) {
@@ -776,27 +793,28 @@ class InstallController extends AbstractController
                 $table->engine = 'InnoDB';
                 $table->charset = 'utf8mb4';
                 $table->collation = 'utf8mb4_unicode_ci';
-                $table->bigIncrements('id');
-                $table->unsignedBigInteger('site_id')->default(0);
-                $table->unsignedBigInteger('parent_id')->default(0);
-                $table->string('name', 100);
-                $table->string('title', 100);
-                $table->string('icon', 50)->nullable();
-                $table->string('path', 255)->nullable();
-                $table->string('component', 255)->nullable();
-                $table->string('redirect', 255)->nullable();
-                $table->string('type', 20)->default('menu');
-                $table->string('target', 20)->default('_self');
-                $table->string('badge', 50)->nullable();
-                $table->string('badge_type', 20)->nullable();
-                $table->string('permission', 100)->nullable();
-                $table->tinyInteger('visible')->default(1);
-                $table->tinyInteger('status')->default(1);
-                $table->integer('sort')->default(0);
-                $table->tinyInteger('cache')->default(1);
-                $table->longText('config')->nullable();
-                $table->text('remark')->nullable();
-                $table->timestamps();
+                $table->bigIncrements('id')->comment('菜单ID');
+                $table->unsignedBigInteger('site_id')->default(0)->comment('站点ID');
+                $table->unsignedBigInteger('parent_id')->default(0)->comment('父级ID');
+                $table->string('name', 100)->comment('菜单名称');
+                $table->string('title', 100)->comment('菜单标题');
+                $table->string('icon', 50)->nullable()->comment('图标');
+                $table->string('path', 255)->nullable()->comment('路径');
+                $table->string('component', 255)->nullable()->comment('组件');
+                $table->string('redirect', 255)->nullable()->comment('重定向');
+                $table->string('type', 20)->default('menu')->comment('类型：menu=菜单，group=分组，divider=分割线');
+                $table->string('target', 20)->default('_self')->comment('打开方式：_self=当前窗口，_blank=新窗口');
+                $table->string('badge', 50)->nullable()->comment('徽章');
+                $table->string('badge_type', 20)->nullable()->comment('徽章类型');
+                $table->string('permission', 100)->nullable()->comment('权限标识');
+                $table->tinyInteger('visible')->default(1)->comment('是否可见：0=隐藏，1=显示');
+                $table->tinyInteger('status')->default(1)->comment('状态：0=禁用，1=启用');
+                $table->integer('sort')->default(0)->comment('排序');
+                $table->tinyInteger('cache')->default(1)->comment('是否缓存：0=否，1=是');
+                $table->longText('config')->nullable()->comment('配置(JSON)');
+                $table->text('remark')->nullable()->comment('备注');
+                $table->timestamp('created_at')->nullable()->comment('创建时间');
+                $table->timestamp('updated_at')->nullable()->comment('更新时间');
                 $table->index('site_id', 'idx_sites_id');
                 $table->index('parent_id', 'idx_parent_id');
                 $table->index(['site_id', 'status'], 'idx_sites_status');
@@ -804,6 +822,7 @@ class InstallController extends AbstractController
                 $table->index('name', 'idx_name');
                 $table->index('permission', 'idx_permission');
             });
+            Db::statement("ALTER TABLE `admin_menus` COMMENT = '菜单表'");
         }
 
         if (! Schema::hasTable('admin_configs')) {
@@ -811,20 +830,22 @@ class InstallController extends AbstractController
                 $table->engine = 'InnoDB';
                 $table->charset = 'utf8mb4';
                 $table->collation = 'utf8mb4_unicode_ci';
-                $table->bigIncrements('id');
-                $table->unsignedBigInteger('site_id')->nullable();
-                $table->string('group', 50)->default('system');
-                $table->string('key', 100);
-                $table->text('value')->nullable();
-                $table->string('type', 20)->default('string');
-                $table->string('description', 255)->nullable();
-                $table->integer('sort')->default(0);
-                $table->timestamps();
+                $table->bigIncrements('id')->comment('配置ID');
+                $table->unsignedBigInteger('site_id')->nullable()->comment('站点ID');
+                $table->string('group', 50)->default('system')->comment('配置分组');
+                $table->string('key', 100)->comment('配置键');
+                $table->text('value')->nullable()->comment('配置值');
+                $table->string('type', 20)->default('string')->comment('类型：string=字符串，number=数字，boolean=布尔值，json=JSON');
+                $table->string('description', 255)->nullable()->comment('描述');
+                $table->integer('sort')->default(0)->comment('排序');
+                $table->timestamp('created_at')->nullable()->comment('创建时间');
+                $table->timestamp('updated_at')->nullable()->comment('更新时间');
                 $table->unique('key', 'admin_configs_key_unique');
                 $table->index('group', 'admin_configs_group_index');
                 $table->index('sort', 'admin_configs_sort_index');
                 $table->index('site_id', 'idx_sites_id');
             });
+            Db::statement("ALTER TABLE `admin_configs` COMMENT = '配置表'");
         }
 
         if (! Schema::hasTable('admin_attachments')) {
@@ -832,32 +853,33 @@ class InstallController extends AbstractController
                 $table->engine = 'InnoDB';
                 $table->charset = 'utf8mb4';
                 $table->collation = 'utf8mb4_unicode_ci';
-                $table->bigIncrements('id');
-                $table->unsignedBigInteger('site_id')->nullable();
-                $table->string('name', 255);
-                $table->text('description')->nullable();
-                $table->string('category', 50)->nullable();
-                $table->string('tags', 255)->nullable();
-                $table->string('original_filename', 255);
-                $table->string('filename', 255);
-                $table->string('file_path', 255);
-                $table->string('file_url', 255)->nullable();
-                $table->string('content_type', 100);
-                $table->unsignedBigInteger('file_size');
-                $table->string('storage_driver', 20)->default('local');
-                $table->string('file_hash', 64)->nullable();
-                $table->string('related_type', 50)->nullable();
-                $table->unsignedBigInteger('related_id')->nullable();
-                $table->unsignedBigInteger('user_id')->nullable();
-                $table->string('username', 50)->nullable();
-                $table->tinyInteger('status')->default(1);
-                $table->integer('sort')->default(0);
-                $table->string('ip_address', 50)->nullable();
-                $table->string('user_agent', 255)->nullable();
-                $table->integer('download_count')->default(0);
-                $table->timestamp('last_downloaded_at')->nullable();
-                $table->timestamps();
-                $table->softDeletes();
+                $table->bigIncrements('id')->comment('附件ID');
+                $table->unsignedBigInteger('site_id')->nullable()->comment('站点ID');
+                $table->string('name', 255)->comment('附件名称');
+                $table->text('description')->nullable()->comment('描述');
+                $table->string('category', 50)->nullable()->comment('分类');
+                $table->string('tags', 255)->nullable()->comment('标签');
+                $table->string('original_filename', 255)->comment('原始文件名');
+                $table->string('filename', 255)->comment('文件名');
+                $table->string('file_path', 255)->comment('文件路径');
+                $table->string('file_url', 255)->nullable()->comment('文件URL');
+                $table->string('content_type', 100)->comment('文件类型');
+                $table->unsignedBigInteger('file_size')->comment('文件大小（字节）');
+                $table->string('storage_driver', 20)->default('local')->comment('存储驱动');
+                $table->string('file_hash', 64)->nullable()->comment('文件哈希值');
+                $table->string('related_type', 50)->nullable()->comment('关联类型');
+                $table->unsignedBigInteger('related_id')->nullable()->comment('关联ID');
+                $table->unsignedBigInteger('user_id')->nullable()->comment('用户ID');
+                $table->string('username', 50)->nullable()->comment('用户名');
+                $table->tinyInteger('status')->default(1)->comment('状态：0=禁用，1=启用');
+                $table->integer('sort')->default(0)->comment('排序');
+                $table->string('ip_address', 50)->nullable()->comment('IP地址');
+                $table->string('user_agent', 255)->nullable()->comment('用户代理');
+                $table->integer('download_count')->default(0)->comment('下载次数');
+                $table->timestamp('last_downloaded_at')->nullable()->comment('最后下载时间');
+                $table->timestamp('created_at')->nullable()->comment('创建时间');
+                $table->timestamp('updated_at')->nullable()->comment('更新时间');
+                $table->softDeletes()->comment('删除时间');
                 $table->index('site_id', 'idx_site_id');
                 $table->index('user_id', 'idx_user_id');
                 $table->index('category', 'idx_category');
@@ -868,6 +890,7 @@ class InstallController extends AbstractController
                 $table->index('created_at', 'idx_created_at');
                 $table->index('file_hash', 'idx_file_hash');
             });
+            Db::statement("ALTER TABLE `admin_attachments` COMMENT = '附件表'");
         }
 
         if (! Schema::hasTable('admin_upload_files')) {
@@ -875,29 +898,30 @@ class InstallController extends AbstractController
                 $table->engine = 'InnoDB';
                 $table->charset = 'utf8mb4';
                 $table->collation = 'utf8mb4_unicode_ci';
-                $table->bigIncrements('id');
-                $table->unsignedBigInteger('site_id')->nullable();
-                $table->string('upload_token', 64);
-                $table->unsignedBigInteger('user_id')->nullable();
-                $table->string('username', 50)->nullable();
-                $table->string('original_filename', 255);
-                $table->string('filename', 255);
-                $table->string('file_path', 255);
-                $table->string('file_url', 255)->nullable();
-                $table->string('content_type', 100);
-                $table->unsignedBigInteger('file_size');
-                $table->string('storage_driver', 20)->default('local');
-                $table->tinyInteger('status')->default(0);
-                $table->text('violation_reason')->nullable();
-                $table->timestamp('token_expire_at');
-                $table->timestamp('uploaded_at')->nullable();
-                $table->timestamp('checked_at')->nullable();
-                $table->tinyInteger('check_status')->default(0);
-                $table->text('check_result')->nullable();
-                $table->string('ip_address', 50)->nullable();
-                $table->string('user_agent', 255)->nullable();
-                $table->timestamps();
-                $table->softDeletes();
+                $table->bigIncrements('id')->comment('文件ID');
+                $table->unsignedBigInteger('site_id')->nullable()->comment('站点ID');
+                $table->string('upload_token', 64)->comment('上传令牌');
+                $table->unsignedBigInteger('user_id')->nullable()->comment('用户ID');
+                $table->string('username', 50)->nullable()->comment('用户名');
+                $table->string('original_filename', 255)->comment('原始文件名');
+                $table->string('filename', 255)->comment('文件名');
+                $table->string('file_path', 255)->comment('文件路径');
+                $table->string('file_url', 255)->nullable()->comment('文件URL');
+                $table->string('content_type', 100)->comment('文件类型');
+                $table->unsignedBigInteger('file_size')->comment('文件大小（字节）');
+                $table->string('storage_driver', 20)->default('local')->comment('存储驱动');
+                $table->tinyInteger('status')->default(0)->comment('状态：0=待上传，1=已上传，2=已删除');
+                $table->text('violation_reason')->nullable()->comment('违规原因');
+                $table->timestamp('token_expire_at')->comment('令牌过期时间');
+                $table->timestamp('uploaded_at')->nullable()->comment('上传时间');
+                $table->timestamp('checked_at')->nullable()->comment('审核时间');
+                $table->tinyInteger('check_status')->default(0)->comment('审核状态：0=待审核，1=通过，2=拒绝');
+                $table->text('check_result')->nullable()->comment('审核结果');
+                $table->string('ip_address', 50)->nullable()->comment('IP地址');
+                $table->string('user_agent', 255)->nullable()->comment('用户代理');
+                $table->timestamp('created_at')->nullable()->comment('创建时间');
+                $table->timestamp('updated_at')->nullable()->comment('更新时间');
+                $table->softDeletes()->comment('删除时间');
                 $table->unique('upload_token', 'admin_upload_files_upload_token_unique');
                 $table->index('site_id', 'idx_site_id');
                 $table->index('user_id', 'idx_user_id');
@@ -907,6 +931,170 @@ class InstallController extends AbstractController
                 $table->index('token_expire_at', 'idx_token_expire_at');
                 $table->index('created_at', 'idx_created_at');
             });
+            Db::statement("ALTER TABLE `admin_upload_files` COMMENT = '上传文件表'");
+        }
+
+        if (! Schema::hasTable('users')) {
+            Schema::create('users', function (Blueprint $table) {
+                $table->engine = 'InnoDB';
+                $table->charset = 'utf8mb4';
+                $table->collation = 'utf8mb4_unicode_ci';
+                $table->bigIncrements('id')->comment('用户ID');
+                $table->unsignedBigInteger('site_id')->comment('所属站点ID');
+                $table->string('username', 50)->comment('登录名');
+                $table->string('nickname', 50)->nullable()->comment('显示昵称');
+                $table->string('password', 255)->comment('密码');
+                $table->string('email', 100)->nullable()->comment('邮箱');
+                $table->string('mobile', 20)->nullable()->comment('手机号');
+                $table->string('avatar', 255)->nullable()->comment('头像');
+                $table->tinyInteger('gender')->nullable()->comment('性别：0=未知，1=男，2=女');
+                $table->tinyInteger('status')->default(1)->comment('状态：0=禁用，1=启用');
+                $table->integer('points')->default(0)->comment('积分余额');
+                $table->decimal('balance', 12, 2)->default(0)->comment('账户余额');
+                $table->string('last_login_ip', 50)->nullable()->comment('最后登录IP');
+                $table->dateTime('last_login_at')->nullable()->comment('最后登录时间');
+                $table->timestamp('created_at')->useCurrent()->comment('创建时间');
+                $table->timestamp('updated_at')->nullable()->useCurrent()->useCurrentOnUpdate()->comment('更新时间');
+                $table->timestamp('deleted_at')->nullable()->comment('软删除时间');
+                $table->unique(['site_id', 'username'], 'users_site_username_unique');
+                $table->unique(['site_id', 'email'], 'users_site_email_unique');
+                $table->unique(['site_id', 'mobile'], 'users_site_mobile_unique');
+                $table->index('site_id', 'users_site_id_index');
+                $table->index('status', 'users_status_index');
+            });
+            Db::statement("ALTER TABLE `users` COMMENT = '普通用户表'");
+
+            Db::table('users')->insert([
+                'site_id' => 1,
+                'username' => '用户名',
+                'nickname' => '用户昵称',
+                'password' => '',
+                'email' => null,
+                'mobile' => null,
+                'avatar' => null,
+                'gender' => 1,
+                'status' => 1,
+                'points' => 0,
+                'balance' => 0,
+                'last_login_ip' => null,
+                'last_login_at' => null,
+                'created_at' => date('Y-m-d H:i:s'),
+                'updated_at' => date('Y-m-d H:i:s'),
+                'deleted_at' => null,
+            ]);
+        }
+
+        if (! Schema::hasTable('test')) {
+            Schema::create('test', function (Blueprint $table) {
+                $table->engine = 'InnoDB';
+                $table->charset = 'utf8mb4';
+                $table->collation = 'utf8mb4_general_ci';
+                $table->bigIncrements('id')->comment('id');
+                $table->unsignedBigInteger('site_id')->nullable()->comment('站点ID');
+                $table->unsignedBigInteger('user_id')->comment('用户');
+                $table->longText('user_ids')->nullable()->comment('用户合集');
+                $table->string('image', 255)->nullable()->comment('图片');
+                $table->longText('images')->nullable()->comment('图片组');
+                $table->boolean('is_show')->comment('显示状态:0=隐藏,1=显示');
+                $table->string('status', 20)->default('active')->comment('状态:active=启用, inactive=禁用');
+                $table->string('title', 200)->comment('标题');
+                $table->longText('content')->comment('内容');
+                $table->integer('view_count')->default(0)->comment('浏览次数');
+                $table->dateTime('published_at')->nullable()->comment('发布时间');
+                $table->dateTime('created_at')->nullable()->comment('创建时间');
+                $table->dateTime('updated_at')->nullable()->comment('更新时间');
+                $table->dateTime('deleted_at')->nullable()->comment('删除时间');
+            });
+            Db::statement("ALTER TABLE `test` COMMENT = '测试表'");
+        }
+
+        if (! Schema::hasTable('admin_crud_configs')) {
+            Schema::create('admin_crud_configs', function (Blueprint $table) {
+                $table->engine = 'InnoDB';
+                $table->charset = 'utf8mb4';
+                $table->collation = 'utf8mb4_unicode_ci';
+                $table->bigIncrements('id')->comment('配置ID');
+                $table->unsignedBigInteger('site_id')->comment('站点ID');
+                $table->string('table_name', 100)->comment('数据表名');
+                $table->string('db_connection', 50)->default('default')->comment('数据库连接名称，对应 config/databases.php 中的连接键名');
+                $table->string('model_name', 100)->comment('模型名称');
+                $table->string('controller_name', 100)->comment('控制器名称');
+                $table->string('module_name', 100)->comment('模块名称（中文）');
+                $table->string('route_prefix', 150)->comment('路由前缀（后台访问路径，例如 system/articles）');
+                $table->string('route_slug', 100)->comment('路由标识（用于菜单/组件）');
+                $table->string('icon', 50)->default('bi bi-table')->comment('模块图标（CSS类名或图标路径）');
+                $table->longText('fields_config')->nullable()->comment('字段配置（JSON格式）');
+                $table->longText('options')->nullable()->comment('其他选项（分页、软删除等）');
+                $table->integer('page_size')->default(15)->comment('分页大小');
+                $table->tinyInteger('soft_delete')->default(0)->comment('是否启用软删除：0=否，1=是');
+                $table->tinyInteger('feature_search')->default(1)->comment('是否启用搜索功能');
+                $table->tinyInteger('feature_add')->default(1)->comment('是否启用新增功能');
+                $table->tinyInteger('feature_edit')->default(1)->comment('是否启用编辑功能');
+                $table->tinyInteger('feature_delete')->default(1)->comment('是否启用删除功能');
+                $table->tinyInteger('feature_export')->default(1)->comment('是否启用导出功能');
+                $table->tinyInteger('sync_to_menu')->default(1)->comment('是否同步到菜单：0=否，1=是');
+                $table->tinyInteger('status')->default(0)->comment('状态：0=配置中，1=已生成');
+                $table->timestamp('generated_at')->nullable()->comment('生成时间');
+                $table->timestamp('created_at')->nullable()->comment('创建时间');
+                $table->timestamp('updated_at')->nullable()->comment('更新时间');
+                $table->unique('model_name', 'admin_crud_configs_model_name_index');
+                $table->index('site_id', 'admin_crud_configs_sites_id_index');
+                $table->index('table_name', 'admin_crud_configs_table_name_index');
+                $table->index('status', 'admin_crud_configs_status_index');
+                $table->index('created_at', 'admin_crud_configs_created_at_index');
+            });
+
+            // 修改 fields_config 和 options 字段的排序规则为 utf8mb4_bin，并添加 JSON 验证约束
+            Db::statement("ALTER TABLE `admin_crud_configs` MODIFY `fields_config` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_bin DEFAULT NULL COMMENT '字段配置（JSON格式）' CHECK (json_valid(`fields_config`))");
+            Db::statement("ALTER TABLE `admin_crud_configs` MODIFY `options` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_bin DEFAULT NULL COMMENT '其他选项（分页、软删除等）' CHECK (json_valid(`options`))");
+            Db::statement("ALTER TABLE `admin_crud_configs` COMMENT = 'CRUD配置表'");
+        }
+    }
+
+    /**
+     * 插入测试数据
+     */
+    private function insertTestData(int $siteId, int $userId): void
+    {
+        $testData = [
+            [
+                'id' => 1,
+                'site_id' => $siteId,
+                'user_id' => $userId,
+                'user_ids' => null,
+                'image' => 'https://inkakofenghui.oss-cn-shenzhen.aliyuncs.com/inkako/meeting/images/user-1/1763287317-b6a262c586998312.jpg',
+                'images' => '["https://inkakofenghui.oss-cn-shenzhen.aliyuncs.com/inkako/meeting/images/user-1/1763287317-f02bf714faed7258.jpg","https://inkakofenghui.oss-cn-shenzhen.aliyuncs.com/inkako/meeting/images/user-1/1763287318-4d1ca3f323f43571.jpg"]',
+                'is_show' => 0,
+                'status' => 'active',
+                'title' => '厉害',
+                'content' => '',
+                'view_count' => 222,
+                'published_at' => '2025-11-06 18:01:38',
+                'created_at' => '2025-11-05 10:03:34',
+                'updated_at' => '2025-11-16 10:02:55',
+                'deleted_at' => null,
+            ],
+            [
+                'id' => 2,
+                'site_id' => $siteId,
+                'user_id' => $userId,
+                'user_ids' => null,
+                'image' => 'https://inkakofenghui.oss-cn-shenzhen.aliyuncs.com/inkako/meeting/images/user-1/1763287317-229f8e96dc80ae75.jpg',
+                'images' => '["https://inkakofenghui.oss-cn-shenzhen.aliyuncs.com/inkako/meeting/images/user-1/1763287318-aa76a192cc466b58.jpg","https://inkakofenghui.oss-cn-shenzhen.aliyuncs.com/inkako/meeting/images/user-1/1763287318-b6d5cb42c70c57e4.jpg"]',
+                'is_show' => 1,
+                'status' => 'active',
+                'title' => '哈哈',
+                'content' => '',
+                'view_count' => 555,
+                'published_at' => '2025-11-06 18:01:38',
+                'created_at' => '2025-11-05 10:03:34',
+                'updated_at' => '2025-11-16 10:03:11',
+                'deleted_at' => null,
+            ],
+        ];
+
+        foreach ($testData as $data) {
+            Db::table('test')->insert($data);
         }
     }
 }

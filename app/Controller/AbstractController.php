@@ -13,6 +13,7 @@ declare(strict_types=1);
 namespace App\Controller;
 
 use Hyperf\Di\Annotation\Inject;
+use Hyperf\HttpMessage\Stream\SwooleStream;
 use Hyperf\HttpServer\Contract\RequestInterface;
 use Hyperf\HttpServer\Contract\ResponseInterface;
 use Hyperf\View\RenderInterface;
@@ -41,4 +42,27 @@ abstract class AbstractController
 
     #[Inject]
     protected RenderInterface $render;
+
+    protected function result(string $msg = '', array $data = null, int $code = 0,array $extra = []): \Psr\Http\Message\ResponseInterface
+    {
+
+        return $this->response->json(array_merge([
+            'code' => $code,
+            'msg' => $msg,
+            'data' => $data,
+        ],$extra));
+    }
+
+
+    protected function error(string $msg = 'error', array|null $data = null, int $code = 400): \Psr\Http\Message\ResponseInterface
+    {
+        return $this->result($msg, $data, $code);
+    }
+
+    protected function success(array|null $data = null, string $msg = '', int $code = 200): \Psr\Http\Message\ResponseInterface
+    {
+        return $this->result($msg, $data, $code);
+    }
+
+
 }

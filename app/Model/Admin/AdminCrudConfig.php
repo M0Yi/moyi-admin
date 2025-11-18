@@ -18,8 +18,16 @@ use function Hyperf\Support\now;
  * @property string $model_name
  * @property string $controller_name
  * @property string $module_name
+ * @property string $route_slug
  * @property string $route_prefix
  * @property string|null $icon
+ * @property int $page_size
+ * @property int $soft_delete
+ * @property int $feature_search
+ * @property int $feature_add
+ * @property int $feature_edit
+ * @property int $feature_delete
+ * @property int $feature_export
  * @property array|null $fields_config
  * @property array|null $options
  * @property int $sync_to_menu
@@ -70,8 +78,16 @@ class AdminCrudConfig extends Model
         'model_name',
         'controller_name',
         'module_name',
+        'route_slug',
         'route_prefix',
         'icon',
+        'page_size',
+        'soft_delete',
+        'feature_search',
+        'feature_add',
+        'feature_edit',
+        'feature_delete',
+        'feature_export',
         'fields_config',
         'options',
         'sync_to_menu',
@@ -85,6 +101,15 @@ class AdminCrudConfig extends Model
     protected array $casts = [
         'id' => 'integer',
         'site_id' => 'integer',
+        'route_slug' => 'string',
+        'route_prefix' => 'string',
+        'page_size' => 'integer',
+        'soft_delete' => 'integer',
+        'feature_search' => 'integer',
+        'feature_add' => 'integer',
+        'feature_edit' => 'integer',
+        'feature_delete' => 'integer',
+        'feature_export' => 'integer',
         'fields_config' => 'array',
         'options' => 'array',
         'sync_to_menu' => 'integer',

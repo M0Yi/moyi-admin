@@ -31,6 +31,29 @@ Router::addGroup('/admin/{adminPath:[a-zA-Z0-9\-_]+}', function () {
     Router::get('', 'App\Controller\Admin\DashboardController@index');
 
     // ========================================
+    // CRUD 代码生成器（系统管理，仅超级管理员可访问）
+    // ========================================
+    Router::addGroup('/system/crud-generator', function () {
+        Router::get('', 'App\Controller\Admin\System\CrudGeneratorController@index');
+        Router::get('/create', 'App\Controller\Admin\System\CrudGeneratorController@create');
+        Router::get('/config/{tableName}', 'App\Controller\Admin\System\CrudGeneratorController@config');
+        Router::get('/configv2/{tableName}', 'App\Controller\Admin\System\CrudGeneratorController@configV2');
+        Router::get('/raw-fields-config/{tableName}', 'App\Controller\Admin\System\CrudGeneratorController@getRawFieldsConfig');
+        Router::get('/fields-config/{tableName}', 'App\Controller\Admin\System\CrudGeneratorController@getFieldsConfig');
+        Router::post('/save-config', 'App\Controller\Admin\System\CrudGeneratorController@saveConfig');
+        Router::post('/save-config-v2', 'App\Controller\Admin\System\CrudGeneratorController@saveConfigV2');
+        Router::get('/preview/{id:\d+}', 'App\Controller\Admin\System\CrudGeneratorController@preview');
+        Router::post('/generate/{id:\d+}', 'App\Controller\Admin\System\CrudGeneratorController@generate');
+        Router::get('/download/{id:\d+}', 'App\Controller\Admin\System\CrudGeneratorController@download');
+        Router::delete('/{id:\d+}', 'App\Controller\Admin\System\CrudGeneratorController@delete');
+    }, [
+        'middleware' => [
+            \App\Middleware\AdminAuthMiddleware::class,
+            \App\Middleware\SuperAdminMiddleware::class,
+        ]
+    ]);
+
+    // ========================================
     // 后台页面路由（需要登录）
     // ========================================
     Router::addGroup('', function () {
@@ -40,14 +63,17 @@ Router::addGroup('/admin/{adminPath:[a-zA-Z0-9\-_]+}', function () {
         // 测试页面
         Router::get('/test', 'App\\Controller\\Admin\\TestController@index');
 
+
+
+
         // ========================================
         // 通用 CRUD 接口（动态模型管理）
         // ========================================
         // 通过路由参数 {model} 指定要操作的模型
         // {model} 应该传入模型名（model_name），例如：AdminUser、AdminRole
         // 例如：/admin/admin/universal/AdminUser -> 管理 AdminUser 模型（对应 admin_users 表）
-        // 注意：推荐使用 model_name，但也兼容 route_prefix、table_name 和 ID
-        Router::addGroup('/universal/{model}', function () {
+        // 注意：推荐使用 model_name，但也兼容 route_slug、table_name 和 ID
+        Router::addGroup('/u/{model}', function () {
             // 列表页面
             Router::get('', 'App\Controller\Admin\System\UniversalCrudController@index');
             // 创建页面
