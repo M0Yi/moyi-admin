@@ -5,7 +5,7 @@ services:
   moyi-admin:
     # 主应用服务（Hyperf 框架）
     container_name: moyi-admin                 # 指定容器名称，便于识别
-    image: moyi-admin                          # 镜像名称（与 build 构建的标签一致）
+    image: mymoyi/moyi-admin:latest                         # 镜像名称（与 build 构建的标签一致）
     build:
       context: .                               # 使用当前目录的 Dockerfile 构建镜像
     ports:
