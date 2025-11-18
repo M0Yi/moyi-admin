@@ -9,10 +9,10 @@
     <title>@yield('title', '管理后台') - {{ site()?->name ?? '管理后台' }}</title>
 
     {{-- 外部 CSS 资源（按需引入） --}}
-    @include('components.vendor.bootstrap-css')
-    @include('components.vendor.bootstrap-icons')
-    @include('components.vendor.tom-select-css')
-    @include('components.vendor.flatpickr-css')
+    @include('components.plugin.bootstrap-css')
+    @include('components.plugin.bootstrap-icons')
+    @include('components.plugin.tom-select-css')
+    @include('components.plugin.flatpickr-css')
 
     {{-- 全局样式说明：为后台布局提供主题变量与基础排版
               页面级样式建议通过 @push('admin_styles') 进行扩展或覆盖 --}}
@@ -597,10 +597,10 @@
 
 
 {{-- 外部 JavaScript 资源（按需引入） --}}
-@include('components.vendor.bootstrap-js')
-@include('components.vendor.tom-select-js')
-@include('components.vendor.flatpickr-js')
-@include('components.vendor.flatpickr-zh')
+@include('components.plugin.bootstrap-js')
+@include('components.plugin.tom-select-js')
+@include('components.plugin.flatpickr-js')
+@include('components.plugin.flatpickr-zh')
 
 {{-- 全局配置和工具函数 --}}
 <script>

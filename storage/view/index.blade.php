@@ -4,8 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{{ site()?->name ?? '现代化CMS' }}</title>
-    @include('components.vendor.bootstrap-css')
-    @include('components.vendor.bootstrap-icons')
+    @include('components.plugin.bootstrap-css')
+    @include('components.plugin.bootstrap-icons')
     <style>
         :root { --brand: #4f46e5; --accent: #22c55e; --bg: #f8fafc; }
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; background: var(--bg); }
@@ -292,7 +292,7 @@ cd moyi-admin</code></div>
         </div>
     </footer>
 
-    @include('components.vendor.bootstrap-js')
+    @include('components.plugin.bootstrap-js')
 
     <script>
         document.querySelectorAll('a').forEach(function(el){

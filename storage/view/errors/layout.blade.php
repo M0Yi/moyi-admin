@@ -4,8 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ $errorCode ?? '错误' }} - {{ $errorTitle ?? '错误' }}</title>
-    @include('components.vendor.bootstrap-css')
-    @include('components.vendor.bootstrap-icons')
+    @include('components.plugin.bootstrap-css')
+    @include('components.plugin.bootstrap-icons')
     @include('errors.styles', [
         'gradient' => $gradient ?? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
         'errorColor' => $errorColor ?? '#667eea',

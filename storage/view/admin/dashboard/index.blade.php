@@ -306,7 +306,7 @@
     类型：图表 / 数据可视化
     作用：在仪表盘中渲染访问趋势折线图等统计图表
 --}}
-@include('components.vendor.chart-js')
+@include('components.plugin.chart-js')
 <script>
 (function () {
     'use strict'
