@@ -69,7 +69,7 @@ class DashboardController extends AbstractController
             ],
         ];
 
-        return $this->render->render('admin.dashboard.index', [
+        return $this->renderAdmin('admin.dashboard.index', [
             'stats' => $stats,
             'recentActivities' => $recentActivities,
         ]);

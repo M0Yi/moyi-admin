@@ -23,16 +23,27 @@
 @else
     {{-- 普通菜单项 或 外部链接 --}}
     <li class="nav-item">
-        <a class="nav-link d-flex align-items-center gap-2"
-           href="{{ $menu['type'] === 'link' ? $menu['path'] : admin_route($menu['path']) }}"
+        @php
+            $isExternalLink = $menu['type'] === 'link';
+            $hasChildren = isset($menu['children']) && count($menu['children']) > 0;
+            $linkHref = $isExternalLink ? $menu['path'] : admin_route($menu['path']);
+            // 有子菜单的项不应该打开 tab，而是展开/折叠
+            $shouldOpenTab = !$hasChildren && !$isExternalLink;
+        @endphp
+        <a class="nav-link d-flex align-items-center gap-2 {{ $hasChildren ? 'has-children' : '' }}"
+           href="{{ $linkHref }}"
            target="{{ $menu['target'] ?? '_self' }}"
-           data-path="{{ $menu['path'] }}">
+           data-path="{{ $menu['path'] }}"
+           data-admin-tab="{{ $shouldOpenTab ? '1' : '0' }}"
+           data-tab-mode="{{ $isExternalLink ? 'external' : 'internal' }}"
+           data-tab-title="{{ $menu['title'] ?? '' }}"
+           @if($hasChildren) data-toggle="collapse" data-target="#submenu-{{ md5($menu['path'] ?? $menu['id'] ?? uniqid()) }}" @endif>
 
             {{-- 图标 --}}
             @if(!empty($menu['icon']))
                 @if(str_starts_with($menu['icon'], 'bi '))
                     {{-- Bootstrap Icons --}}
-                    <i class="{{ $menu['icon'] }}" style="width: 16px; height: 16px; flex-shrink: 0;"></i>
+                    <i class="{{ $menu['icon'] }}" ></i>
                 @elseif(str_starts_with($menu['icon'], '#'))
                     {{-- SVG Symbol --}}
                     <svg class="bi" width="16" height="16" style="flex-shrink: 0;">
@@ -40,11 +51,11 @@
                     </svg>
                 @else
                     {{-- 其他图标 --}}
-                    <i class="{{ $menu['icon'] }}" style="width: 16px; height: 16px; flex-shrink: 0;"></i>
+                    <i class="{{ $menu['icon'] }}></i>
                 @endif
             @else
                 {{-- 默认图标占位 --}}
-                <i class="bi bi-circle" style="width: 16px; height: 16px; flex-shrink: 0; opacity: 0.3;"></i>
+                <i class="bi bi-circle" ></i>
             @endif
 
             {{-- 菜单标题 --}}
@@ -58,14 +69,14 @@
             @endif
 
             {{-- 子菜单箭头 --}}
-            @if(isset($menu['children']) && count($menu['children']) > 0)
-                <i class="bi bi-chevron-down ms-auto" style="font-size: 0.75rem;"></i>
+            @if($hasChildren)
+                <i class="bi bi-chevron-down ms-auto submenu-arrow" style="font-size: 0.75rem; transition: transform 0.2s ease;"></i>
             @endif
         </a>
 
         {{-- 子菜单 --}}
-        @if(isset($menu['children']) && count($menu['children']) > 0)
-            <ul class="nav flex-column ms-3">
+        @if($hasChildren)
+            <ul class="nav flex-column ms-3 collapse" id="submenu-{{ md5($menu['path'] ?? $menu['id'] ?? uniqid()) }}">
                 @foreach($menu['children'] as $child)
                     @include('admin.components.sidebar-menu-item', ['menu' => $child])
                 @endforeach

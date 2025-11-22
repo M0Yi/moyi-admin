@@ -12,7 +12,7 @@
             <ol class="breadcrumb mb-0">
                 <li class="breadcrumb-item"><a href="{{ admin_route('dashboard') }}">首页</a></li>
                 <li class="breadcrumb-item"><a href="#">系统管理</a></li>
-                <li class="breadcrumb-item"><a href="{{ admin_route("universal/{$model}") }}">{{ $config['title'] ?? '数据' }}列表</a></li>
+                <li class="breadcrumb-item"><a href="{{ admin_route("u/{$model}") }}">{{ $config['title'] ?? '数据' }}列表</a></li>
                 <li class="breadcrumb-item active">编辑</li>
             </ol>
         </nav>
@@ -62,13 +62,12 @@
 <!-- 固定在底部的操作栏 -->
 @include('admin.components.fixed-bottom-actions', [
     'infoText' => '修改完成后点击保存按钮提交',
-    'cancelUrl' => admin_route("universal/{$model}"),
+    'cancelUrl' => admin_route("u/{$model}"),
     'submitText' => '保存',
     'formId' => 'editForm',
     'submitBtnId' => 'submitBtn'
 ])
 
-@include('admin.common.scripts')
 
 <script>
 // 图片预览功能
@@ -225,7 +224,7 @@ function submitFormAsJson(form, formData, submitBtn, id) {
     submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> 提交中...';
 
     // 提交数据
-    fetch(`{{ admin_route("universal/{$model}") }}/${id}`, {
+    fetch(`{{ admin_route("u/{$model}") }}/${id}`, {
         method: 'PUT',
         headers: {
             'Content-Type': 'application/json',
@@ -237,7 +236,7 @@ function submitFormAsJson(form, formData, submitBtn, id) {
         if (result.code === 200) {
             showToast('success', result.msg || '更新成功');
             setTimeout(() => {
-                window.location.href = '{{ admin_route("universal/{$model}") }}';
+                window.location.href = '{{ admin_route("u/{$model}") }}';
             }, 1000);
         } else {
             showToast('danger', result.msg || '更新失败');
@@ -291,7 +290,7 @@ function submitFormWithFiles(form, formData, submitBtn, id) {
     submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> 提交中...';
 
     // 提交 FormData
-    fetch(`{{ admin_route("universal/{$model}") }}/${id}`, {
+    fetch(`{{ admin_route("u/{$model}") }}/${id}`, {
         method: 'POST',
         body: formData
     })
@@ -300,7 +299,7 @@ function submitFormWithFiles(form, formData, submitBtn, id) {
         if (result.code === 200) {
             showToast('success', result.msg || '更新成功');
             setTimeout(() => {
-                window.location.href = '{{ admin_route("universal/{$model}") }}';
+                window.location.href = '{{ admin_route("u/{$model}") }}';
             }, 1000);
         } else {
             showToast('danger', result.msg || '更新失败');

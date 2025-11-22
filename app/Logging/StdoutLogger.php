@@ -86,7 +86,6 @@ class StdoutLogger implements StdoutLoggerInterface
         if (! in_array($level, $config['log_level'], true)) {
             return;
         }
-        print_r(['日志输出中'=>$level]);
         $tags = array_intersect_key($context, array_flip($this->tags));
         $context = array_diff_key($context, $tags);
 

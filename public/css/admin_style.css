@@ -1,0 +1,1390 @@
+/* ==================== 全局布局控制 ==================== */
+/* 防止整个页面出现横向滚动 */
+html, body {
+    overflow-x: hidden;
+    max-width: 100vw; /* 限制最大宽度为视口宽度 */
+    box-sizing: border-box;
+}
+
+*, *::before, *::after {
+    box-sizing: inherit;
+}
+
+/* ==================== 按钮样式 ==================== */
+.btn {
+    border-radius: var(--border-radius);
+    padding: 0.625rem 1.25rem;
+    font-weight: 500;
+    font-size: 0.875rem;
+    transition: var(--transition);
+    border: none;
+}
+
+.btn:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--box-shadow);
+}
+
+.btn:active {
+    transform: translateY(0);
+}
+
+/* 主要按钮 */
+.btn-primary {
+    background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-hover) 100%);
+    color: white;
+}
+
+.btn-primary:hover {
+    background: linear-gradient(135deg, var(--primary-hover) 0%, var(--primary-color) 100%);
+    color: white;
+}
+
+/* 成功按钮 */
+.btn-success {
+    background-color: var(--success-color);
+    color: white;
+}
+
+.btn-success:hover {
+    background-color: #059669;
+    color: white;
+}
+
+/* 警告按钮 */
+.btn-warning {
+    background-color: var(--warning-color);
+    color: white;
+}
+
+.btn-warning:hover {
+    background-color: #d97706;
+    color: white;
+}
+
+/* 危险按钮 */
+.btn-danger {
+    background-color: var(--danger-color);
+    color: white;
+}
+
+.btn-danger:hover {
+    background-color: #dc2626;
+    color: white;
+}
+
+/* 信息按钮 */
+.btn-info {
+    background-color: var(--info-color);
+    color: white;
+}
+
+.btn-info:hover {
+    background-color: #2563eb;
+    color: white;
+}
+
+/* 次要按钮 */
+.btn-secondary {
+    background-color: var(--secondary-color);
+    color: white;
+}
+
+.btn-secondary:hover {
+    background-color: #5a6268;
+    color: white;
+}
+
+/* 浅色按钮 */
+.btn-light {
+    background-color: var(--light-color);
+    color: var(--dark-color);
+    border: 1px solid var(--border-color);
+}
+
+.btn-light:hover {
+    background-color: #e9ecef;
+    border-color: #dee2e6;
+    color: var(--dark-color);
+}
+
+/* 轮廓按钮 */
+.btn-outline-primary {
+    color: var(--primary-color);
+    border: 1px solid var(--primary-color);
+}
+
+.btn-outline-primary:hover {
+    background-color: var(--primary-color);
+    color: white;
+}
+
+.btn-outline-secondary {
+    color: var(--secondary-color);
+    border: 1px solid var(--border-color);
+}
+
+.btn-outline-secondary:hover {
+    background-color: var(--light-color);
+    border-color: #adb5bd;
+    color: #495057;
+}
+
+/* 小按钮 */
+.btn-sm, .btn-action {
+    padding: 0.375rem 0.75rem;
+    font-size: 0.8125rem;
+}
+
+/* 按钮组 */
+.btn-group .btn {
+    margin: 0;
+}
+
+/* ==================== 卡片样式 ==================== */
+.card {
+    border: none;
+    border-radius: var(--border-radius-lg);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+    margin-bottom: 1.5rem;
+    /* 确保下拉菜单不被裁剪 */
+    overflow: visible;
+}
+
+.card-header {
+    background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-hover) 100%);
+    color: white;
+    border-radius: var(--border-radius-lg) var(--border-radius-lg) 0 0;
+    padding: 1rem 1.5rem;
+    font-weight: 600;
+}
+
+.card-body {
+    padding: 1.5rem;
+    /* 确保下拉菜单不被裁剪 */
+    overflow: visible;
+}
+
+
+/* ==================== 表格样式 ==================== */
+.table-responsive {
+    border-radius: var(--border-radius);
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+}
+
+.table {
+    margin-bottom: 0;
+}
+
+.table thead th {
+    background-color: var(--light-color);
+    color: var(--dark-color);
+    font-weight: 600;
+    font-size: 0.875rem;
+    border-bottom: 2px solid var(--border-color);
+    padding: 1rem 0.75rem;
+    vertical-align: middle;
+}
+
+.table tbody td {
+    padding: 1rem 0.75rem;
+    vertical-align: middle;
+    color: #4b5563;
+}
+
+.table-hover tbody tr {
+    transition: background-color 0.2s;
+}
+
+.table-hover tbody tr:hover {
+    background-color: #f9fafb;
+}
+
+/* 固定操作列 */
+.sticky-column {
+    position: sticky !important;
+    right: 0;
+    background-color: #ffffff;
+    z-index: 10;
+    box-shadow: -2px 0 8px rgba(0, 0, 0, 0.05);
+}
+
+thead .sticky-column {
+    background-color: var(--light-color);
+    z-index: 11;
+}
+
+.table-hover tbody tr:hover .sticky-column {
+    background-color: #f9fafb;
+}
+
+/* ==================== 表单样式 ==================== */
+.form-label {
+    font-weight: 500;
+    margin-bottom: 0.5rem;
+    color: var(--dark-color);
+}
+
+.form-control, .form-select {
+    border-radius: var(--border-radius);
+    border: 1px solid var(--border-color);
+    padding: 0.625rem 0.875rem;
+    transition: var(--transition);
+}
+
+.form-control:focus, .form-select:focus {
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 0.2rem rgba(102, 126, 234, 0.25);
+}
+
+.form-text {
+    font-size: 0.875rem;
+    color: #6b7280;
+    margin-top: 0.25rem;
+}
+
+.form-check-input {
+    cursor: pointer;
+}
+
+.form-check-input:checked {
+    background-color: var(--primary-color);
+    border-color: var(--primary-color);
+}
+
+/* ==================== 徽章样式 ==================== */
+.badge {
+    padding: 0.375rem 0.75rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    border-radius: 0.375rem;
+}
+
+.badge-menu {
+    background: #e3f2fd;
+    color: #1976d2;
+}
+
+.badge-button {
+    background: #fed7aa;
+    color: #92400e;
+}
+
+.badge-link {
+    background: #e8f5e9;
+    color: #388e3c;
+}
+
+.badge-api {
+    background: #f3e5f5;
+    color: #7b1fa2;
+}
+
+/* ==================== 模态框样式 ==================== */
+.modal-backdrop {
+    background-color: rgba(0, 0, 0, 0.5);
+}
+
+.modal-content {
+    border-radius: var(--border-radius-lg);
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.15);
+    border: none;
+}
+
+.modal-header {
+    background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-hover) 100%);
+    color: white;
+    border-radius: var(--border-radius-lg) var(--border-radius-lg) 0 0;
+    border-bottom: none;
+    padding: 1.25rem 1.5rem;
+}
+
+.modal-title {
+    font-weight: 600;
+}
+
+.modal-body {
+    padding: 1.5rem;
+}
+
+.modal-footer {
+    border-top: none;
+    padding: 1rem 1.5rem 1.5rem;
+}
+
+/* ==================== 固定底部操作栏样式 ==================== */
+/* 占位区域：防止内容被固定按钮遮挡 */
+.fixed-bottom-actions-spacer {
+    height: 80px; /* 按钮高度 + padding，根据实际调整 */
+    width: 100%;
+}
+
+.fixed-bottom-actions {
+    position: fixed;
+    bottom: 0;
+    left: var(--sidebar-width, 260px);
+    right: 0;
+    background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-hover) 100%);
+    box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.1);
+    padding: 1rem 0;
+    z-index: 1030;
+    animation: slideUp 0.3s ease-out;
+    transition: left 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.sidebar.collapsed ~ main .fixed-bottom-actions,
+body:has(.sidebar.collapsed) .fixed-bottom-actions {
+    left: var(--sidebar-collapsed-width, 80px);
+}
+
+.fixed-bottom-actions .btn {
+    min-width: 100px;
+}
+
+.fixed-bottom-actions .btn-outline-secondary,
+.fixed-bottom-actions .btn-light {
+    background: rgba(255, 255, 255, 0.9);
+    border-color: rgba(255, 255, 255, 0.9);
+    color: var(--primary-color);
+}
+
+.fixed-bottom-actions .btn-outline-secondary:hover,
+.fixed-bottom-actions .btn-light:hover {
+    background: #fff;
+    border-color: #fff;
+    color: var(--primary-hover);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+}
+
+.fixed-bottom-actions .btn-primary {
+    background: #fff;
+    border-color: #fff;
+    color: var(--primary-color);
+    font-weight: 600;
+}
+
+.fixed-bottom-actions .btn-primary:hover {
+    background: rgba(255, 255, 255, 0.95);
+    border-color: rgba(255, 255, 255, 0.95);
+    color: var(--primary-hover);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+.fixed-bottom-actions .text-muted {
+    color: rgba(255, 255, 255, 0.8) !important;
+}
+
+.fixed-bottom-actions[data-embed="1"] {
+    left: 0;
+    right: 0;
+    border-radius: 16px 16px 0 0;
+}
+
+.fixed-bottom-actions[data-embed="1"] .container-fluid {
+    padding-left: 1.5rem;
+    padding-right: 1.5rem;
+}
+
+.fixed-bottom-actions-spacer[data-embed="1"] {
+    height: 96px;
+}
+
+@keyframes slideUp {
+    from {
+        transform: translateY(100%);
+        opacity: 0;
+    }
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
+}
+
+/* 响应式：移动端 */
+@media (max-width: 768px) {
+    .fixed-bottom-actions-spacer {
+        height: 60px; /* 移动端减少占位高度，因为隐藏了提示文字 */
+    }
+
+    .fixed-bottom-actions {
+        left: 0 !important;
+    }
+
+    .fixed-bottom-actions .text-muted {
+        display: none;
+    }
+}
+
+/* ==================== 面包屑样式 ==================== */
+.breadcrumb {
+    background: transparent;
+    padding: 0;
+    margin-bottom: 0.5rem;
+}
+
+.breadcrumb-item + .breadcrumb-item::before {
+    content: "›";
+    color: #9ca3af;
+}
+
+.breadcrumb-item a {
+    color: var(--primary-color);
+    text-decoration: none;
+}
+
+.breadcrumb-item a:hover {
+    color: var(--primary-hover);
+    text-decoration: underline;
+}
+
+.breadcrumb-item.active {
+    color: #6b7280;
+}
+
+/* ==================== 分页样式 ==================== */
+.pagination {
+    margin-bottom: 0;
+}
+
+.page-link {
+    color: var(--primary-color);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius);
+    margin: 0 0.25rem;
+    transition: var(--transition);
+}
+
+.page-link:hover {
+    background-color: var(--light-color);
+    color: var(--primary-hover);
+    transform: translateY(-1px);
+}
+
+.page-item.active .page-link {
+    background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-hover) 100%);
+    border-color: var(--primary-color);
+}
+
+.page-item.disabled .page-link {
+    color: #9ca3af;
+    background-color: var(--light-color);
+    border-color: var(--border-color);
+}
+
+/* ==================== Toast 通知样式 ==================== */
+.toast-container {
+    z-index: 9999;
+}
+
+.toast {
+    border-radius: var(--border-radius);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+/* ==================== 其他通用样式 ==================== */
+.text-primary {
+    color: var(--primary-color) !important;
+}
+
+.bg-primary {
+    background-color: var(--primary-color) !important;
+    color: white !important;
+}
+
+.bg-success {
+    background-color: var(--success-color) !important;
+    color: white !important;
+}
+
+.bg-info {
+    background-color: var(--info-color) !important;
+    color: white !important;
+}
+
+.bg-warning {
+    background-color: var(--warning-color) !important;
+    color: white !important;
+}
+
+.bg-danger {
+    background-color: var(--danger-color) !important;
+    color: white !important;
+}
+
+.bg-secondary {
+    background-color: var(--secondary-color) !important;
+    color: white !important;
+}
+
+.shadow-sm {
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05) !important;
+}
+
+.rounded-pill {
+    border-radius: 50rem !important;
+}
+
+/* 头像样式 */
+.user-avatar {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 2px solid var(--border-color);
+}
+
+/* 菜单/权限层级缩进 */
+.menu-level-0, .permission-level-0 { padding-left: 1rem; }
+.menu-level-1, .permission-level-1 { padding-left: 2.5rem; }
+.menu-level-2, .permission-level-2 { padding-left: 4rem; }
+.menu-level-3, .permission-level-3 { padding-left: 5.5rem; }
+
+/* 图标容器 */
+.menu-icon, .permission-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    background: var(--light-color);
+    border-radius: 6px;
+    font-size: 1.1rem;
+}
+
+/* 侧边栏主体与折叠/展开 */
+.sidebar {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: var(--sidebar-width);
+    height: 100vh;
+    z-index: 1020;
+    background: #f8fafc;
+    border-right: 1px solid #e2e8f0;
+    transition: transform 0.3s ease, width 0.3s ease;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+@media (max-width: 768px) {
+    .sidebar {
+        padding-top: var(--header-height);
+    }
+}
+@media (min-width: 769px) {
+    .sidebar.collapsed { width: var(--sidebar-collapsed-width); }
+    .sidebar.collapsed .nav-link span { display: none; }
+    .sidebar.collapsed .nav-link { justify-content: center; padding: 0.75rem; }
+    .sidebar.collapsed .nav-link svg { margin-right: 0; }
+    .sidebar.collapsed .sidebar-heading { display: none; }
+    .sidebar.collapsed ~ main { margin-left: var(--sidebar-collapsed-width); }
+}
+@media (max-width: 768px) {
+    .sidebar { transform: translateX(-100%); }
+    .sidebar.show { transform: translateX(0); box-shadow: 4px 0 12px rgba(0, 0, 0, 0.15); }
+}
+
+/* 侧边栏品牌区域 */
+.sidebar-header {
+    padding: 1.5rem 1.5rem 1.25rem;
+    border-bottom: 1px solid #e2e8f0;
+}
+
+.sidebar-brand {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    text-decoration: none;
+    color: #0f172a;
+}
+
+.sidebar-brand__logo {
+    width: 48px;
+    height: 48px;
+    border-radius: 14px;
+    background: var(--primary-gradient);
+    color: #fff;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 1.1rem;
+    letter-spacing: 0.05em;
+}
+
+.sidebar-brand__text {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    line-height: 1.2;
+}
+
+.sidebar-brand__title {
+    font-size: 1.125rem;
+    font-weight: 600;
+    color: #0f172a;
+}
+
+.sidebar-brand__desc {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: #94a3b8;
+}
+
+.sidebar.collapsed .sidebar-header {
+    padding: 1.25rem 0.5rem;
+    justify-content: center;
+}
+
+.sidebar.collapsed .sidebar-brand {
+    justify-content: center;
+}
+
+.sidebar.collapsed .sidebar-brand__text {
+    display: none;
+}
+
+/* 遮罩层 */
+.sidebar-backdrop {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100vh;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 1019;
+    transition: opacity 0.3s ease;
+}
+@media (max-width: 768px) { .sidebar-backdrop.show { display: block; } }
+
+/* 侧边栏内部滚动与样式 */
+.sidebar-sticky { flex: 1; overflow-x: hidden; overflow-y: auto; padding: 1.5rem 0; }
+.sidebar-sticky::-webkit-scrollbar { width: 6px; }
+.sidebar-sticky::-webkit-scrollbar-track { background: transparent; }
+.sidebar-sticky::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+.sidebar-sticky::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+.sidebar .nav-link { position: relative; display: flex; align-items: center; padding: 0.75rem 1.5rem; margin: 0.25rem 0.75rem; font-weight: 500; color: #64748b; border-radius: 8px; transition: all 0.2s ease; }
+.sidebar .nav-link:hover { color: #1e293b; background: #e2e8f0; }
+.sidebar .nav-link.active { color: #fff; background: #3b82f6; }
+.sidebar .nav-link svg { margin-right: 0.75rem; color: currentColor; transition: all 0.2s ease; flex-shrink: 0; }
+.sidebar .nav-link span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: all 0.3s ease; }
+.sidebar-heading { padding: 1rem 1.5rem 0.5rem; font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; color: #94a3b8; }
+.sidebar .nav .nav { padding-left: 0; margin-top: 0.25rem; margin-bottom: 0.25rem; }
+.sidebar .nav .nav .nav-link { padding-left: 3rem; font-size: 0.85rem; }
+.sidebar .nav .nav .nav .nav-link { padding-left: 4rem; }
+.sidebar .badge { font-size: 0.65rem; padding: 0.25rem 0.5rem; }
+.sidebar.collapsed .nav .nav { display: none; }
+
+/* 子菜单展开/折叠 */
+.sidebar .nav-link.has-children {
+    cursor: pointer;
+}
+
+.sidebar .nav .collapse {
+    transition: height 0.3s ease;
+    overflow: hidden;
+}
+
+.sidebar .nav .collapse:not(.show) {
+    display: none;
+}
+
+.sidebar .nav .collapse.show {
+    display: block;
+}
+
+/* 主内容区域与折叠联动 */
+main { margin-left: var(--sidebar-width);
+    padding: 0; min-height: calc(100vh - var(--header-height)); transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
+main.admin-tab-main { padding-bottom: 0; }
+main.sidebar-collapsed { margin-left: var(--sidebar-collapsed-width); }
+/* 当 main 包含 admin-tab-main 时，移除 padding 避免横向滚动 */
+main:has(.admin-tab-main) { padding: 0; }
+@media (max-width: 768px) { main { margin-left: 0; padding: 0.75rem 1rem 1.5rem; } main.sidebar-collapsed { margin-left: 0; } main:has(.admin-tab-main) { padding: 0; } }
+
+/* iframe 模式下，主内容区不应该有侧边栏边距 */
+.admin-embed-main {
+    margin-left: 0 !important;
+    padding: 1.5rem;
+}
+
+/* 侧边栏切换按钮样式（桌面/移动端） */
+.sidebar-toggle { background: transparent; border: none; color: #64748b; font-size: 1.25rem; padding: 0.5rem; cursor: pointer; transition: all 0.2s ease; }
+.sidebar-toggle:hover { color: #1e293b; }
+
+/* 移动端按钮：仅在 768px 及以下显示 */
+.sidebar-toggle-mobile {
+    display: none;
+}
+@media (max-width: 768px) {
+    .sidebar-toggle-mobile {
+        display: block;
+    }
+}
+
+/* 桌面端按钮：仅在 769px 及以上显示 */
+.sidebar-toggle-desktop {
+    display: none;
+}
+@media (min-width: 769px) {
+    .sidebar-toggle-desktop {
+        display: block;
+    }
+}
+
+
+
+.navbar {
+    height: auto;
+    background: transparent !important;
+    border-bottom: none;
+    box-shadow: none;
+    padding: 0;
+}
+.admin-topbar {
+    position: sticky;
+    top: 0;
+    margin-left: var(--sidebar-width);
+    width: calc(100% - var(--sidebar-width));
+    padding: 0;
+    z-index: 1030;
+    background: #ffffff;
+    box-shadow: 0 12px 25px rgba(15, 23, 42, 0.06);
+    border-bottom: none;
+    position: relative;
+}
+
+.admin-topbar::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 1px;
+    background: linear-gradient(90deg, rgba(226, 232, 240, 0), #cbd5e1 12%, #cbd5e1 88%, rgba(226, 232, 240, 0));
+    pointer-events: none;
+}
+body:has(.sidebar.collapsed) .admin-topbar {
+    margin-left: var(--sidebar-collapsed-width);
+    width: calc(100% - var(--sidebar-collapsed-width));
+}
+.admin-topbar-inner {
+    width: 100%;
+    margin: 0;
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    padding: 0.5rem 1rem 0 0;
+    min-height: var(--header-height);
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    flex-wrap: nowrap;
+    box-shadow: none;
+    backdrop-filter: none;
+}
+.admin-topbar .topbar-actions {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    flex: 0 0 auto;
+    /*padding-right: 0.75rem;*/
+    border-right: 1px solid #e2e8f0;
+    min-height: 40px;
+}
+.admin-topbar-layout {
+    width: 100%;
+}
+.admin-topbar-layout--desktop {
+    display: block;
+}
+.admin-topbar-layout--mobile {
+    display: none;
+}
+@media (max-width: 768px) {
+    .admin-topbar {
+        margin-left: 0;
+        width: 100%;
+        padding: 0;
+    }
+    .admin-topbar-inner {
+        border-radius: 0;
+        padding: 0.5rem 0.75rem 0;
+        flex-wrap: wrap;
+    }
+    .admin-topbar .topbar-actions {
+        width: 100%;
+        border-right: none;
+        padding-right: 0;
+        margin-bottom: 0.5rem;
+    }
+    .admin-tab-toolbar {
+        width: 100%;
+        flex: 1 1 100%;
+        margin-top: 0.5rem;
+    }
+    .admin-topbar-layout--desktop {
+        display: none;
+    }
+    .admin-topbar-layout--mobile {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.75rem;
+    }
+    .admin-topbar-mobile-left {
+        flex: 1;
+        min-width: 0;
+    }
+    .admin-topbar-mobile-left .topbar-actions {
+        margin-bottom: 0;
+        width: auto;
+    }
+    .admin-topbar-mobile-right {
+        flex-shrink: 0;
+    }
+    .admin-tab-user--mobile .admin-tab-user__name {
+        display: none;
+    }
+    .admin-tab-user--mobile .nav-link {
+        padding: 0.35rem 0.5rem !important;
+    }
+    .admin-tab-action-group {
+        display: none;
+    }
+    .admin-tab-scroll {
+        display: none;
+    }
+    .admin-tab-actions {
+        width: 100%;
+        justify-content: space-between;
+        border-left: none;
+        padding-left: 0;
+        margin-top: 0.5rem;
+    }
+    .admin-tab-user {
+        width: 100%;
+        border-left: none;
+        padding-left: 0;
+        margin-left: 0;
+        justify-content: flex-start;
+    }
+}
+.navbar-brand {
+    font-weight: 700;
+    font-size: 1.25rem;
+    letter-spacing: -0.5px;
+    background: transparent !important;
+    box-shadow: none !important;
+    padding: 0.75rem 1rem !important;
+    color: #1e293b !important;
+}
+.navbar .nav-link {
+    color: #64748b !important;
+    transition: all 0.2s ease;
+    padding: 0.5rem 1rem !important;
+    border-radius: 8px;
+}
+.navbar .nav-link:hover {
+    background: #f1f5f9;
+    color: #1e293b !important;
+}
+.dropdown-menu {
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 0.5rem;
+}
+.dropdown-item {
+    border-radius: 8px;
+    color: #1e293b;
+}
+.dropdown-item:hover {
+    background: #f1f5f9;
+}
+
+/* ==================== 多标签页管理器样式 ==================== */
+
+/* 主布局容器 */
+.admin-tab-main {
+    position: relative;
+    flex: 1 1 auto;
+    /* 移除 width: 100%，让元素使用默认块级元素宽度（auto），这样 iframe 才能正确计算宽度 */
+    max-width: 100%; /* 防止超出视口 */
+    height: calc(100vh - var(--header-height));
+    overflow: hidden;
+    background: #f8fafc; /* 统一的浅灰色背景 */
+    box-sizing: border-box; /* 确保 padding 和 border 包含在宽度内 */
+}
+
+/* 嵌入模式主容器（iframe 内） */
+.admin-layout-embedded {
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+}
+
+.admin-layout-embedded main {
+    margin-left: 0 !important;
+    padding: 0;
+}
+
+.admin-embed-main {
+    width: 100%;
+    min-height: 100vh;
+    padding: 1.5rem;
+    background: #f8fafc;
+    box-sizing: border-box;
+    margin-left: 0 !important;
+}
+
+/* iframe 模式下，确保 body 和 html 没有多余的边距 */
+.admin-layout-embedded body,
+.admin-layout-embedded html {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    overflow: hidden;
+}
+
+/* 标签页布局容器 */
+.admin-tab-layout {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+    width: 100%;
+    max-width: 100%; /* 防止超出容器 */
+    background: #f8fafc; /* 与主容器背景色一致 */
+    box-sizing: border-box; /* 确保尺寸计算正确 */
+    overflow: hidden; /* 防止内容溢出 */
+}
+
+/* 标签页工具栏 */
+.admin-tab-toolbar {
+    position: relative;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    flex: 1;
+    min-width: 0;
+    min-height: auto;
+    height: auto;
+    padding: 0.35rem 0 0 0;
+    flex-shrink: 1;
+    z-index: 20;
+    box-sizing: border-box; /* 确保 padding 包含在宽度内 */
+    overflow: visible; /* 允许下拉菜单等内容正常显示 */
+    background: transparent;
+}
+
+.admin-tab-toolbar .dropdown-menu {
+    z-index: 1200;
+}
+
+/* 标签页列表容器（可滚动） */
+.admin-tab-scroll {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    overflow-x: auto;
+    overflow-y: hidden;
+    gap: 0.25rem;
+    padding: 0.25rem 0 0 0;
+    scrollbar-width: thin;
+    scrollbar-color: #cbd5e1 transparent;
+    min-width: 0; /* 允许 flex 子元素收缩 */
+    max-width: 100%; /* 防止超出容器 */
+    box-sizing: border-box; /* 确保尺寸计算正确 */
+}
+
+.admin-tab-scroll-list {
+    display: flex;
+    align-items: stretch;
+    gap: 0.25rem;
+    flex: 1;
+    min-width: 0;
+}
+
+.admin-tab-scroll-action {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding-left: 0.5rem;
+    flex-shrink: 0;
+}
+
+.admin-tab-scroll::-webkit-scrollbar {
+    height: 4px;
+}
+
+.admin-tab-scroll::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.admin-tab-scroll::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 2px;
+}
+
+.admin-tab-scroll::-webkit-scrollbar-thumb:hover {
+    background: #94a3b8;
+}
+
+/* 标签页项 */
+.admin-tab-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 0.875rem;
+    background: #f1f5f9;
+    border: 1px solid #e2e8f0;
+    border-bottom: none;
+    border-radius: 8px 8px 0 0;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+    min-width: 100px;
+    max-width: 220px;
+    position: relative;
+    flex-shrink: 0;
+    height: 44px;
+}
+
+.admin-tab-item:hover {
+    background: #e2e8f0;
+}
+
+.admin-tab-item.active {
+    background: #f8fafc; /* 与主内容区背景色一致，实现融合效果 */
+    border-bottom-color: #f8fafc; /* 与背景色一致，消除视觉分隔 */
+    box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.05);
+    z-index: 1;
+    border-color: #cbd5e1;
+}
+
+.admin-tab-item.active::after {
+    content: '';
+    position: absolute;
+    bottom: -1px;
+    left: 0;
+    right: 0;
+    height: 4px;
+    background: var(--primary-color);
+    border-radius: 2px 2px 0 0;
+}
+
+.admin-tab-item.loading::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: var(--primary-color);
+    animation: loading-bar 1.5s infinite;
+}
+
+.admin-tab-item.error {
+    border-color: var(--danger-color);
+}
+
+@keyframes loading-bar {
+    0% {
+        transform: translateX(-100%);
+    }
+    100% {
+        transform: translateX(100%);
+    }
+}
+
+/* 标签页标题 */
+.admin-tab-title {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.8125rem;
+    color: #64748b;
+    font-weight: 500;
+    line-height: 1.4;
+    min-width: 0; /* 允许 flex 子元素收缩 */
+}
+
+.admin-tab-item.active .admin-tab-title {
+    color: var(--primary-color);
+    font-weight: 600;
+}
+
+/* 标签页关闭按钮 */
+.admin-tab-close {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    background: transparent;
+    border: none;
+    border-radius: 4px;
+    color: #94a3b8;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    flex-shrink: 0;
+    opacity: 0;
+    font-size: 0.875rem;
+    line-height: 1;
+}
+
+.admin-tab-item:hover .admin-tab-close {
+    opacity: 1;
+}
+
+.admin-tab-close:hover {
+    background: #e2e8f0;
+    color: var(--danger-color);
+}
+
+.admin-tab-close i {
+    font-size: 0.75rem;
+}
+
+/* 标签页右键菜单 */
+.admin-tab-context-menu {
+    position: fixed;
+    z-index: 1000;
+    display: none;
+    min-width: 160px;
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    padding: 4px 0;
+    font-size: 0.875rem;
+}
+
+.admin-tab-context-menu.show {
+    display: block;
+}
+
+.admin-tab-context-menu-item {
+    display: flex;
+    align-items: center;
+    padding: 0.5rem 0.75rem;
+    cursor: pointer;
+    color: #475569;
+    transition: all 0.2s ease;
+    user-select: none;
+}
+
+.admin-tab-context-menu-item:hover {
+    background: #f1f5f9;
+    color: var(--primary-color);
+}
+
+.admin-tab-context-menu-item span {
+    flex: 1;
+}
+
+/* 右键菜单分隔线 */
+.admin-tab-context-menu-divider {
+    height: 1px;
+    background: #e2e8f0;
+    margin: 4px 0;
+}
+
+/* 标签页操作按钮组 */
+.admin-tab-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding-left: 0.75rem;
+    border-left: 1px solid #e2e8f0;
+    flex-shrink: 0;
+}
+
+.admin-tab-action {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    color: #64748b;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    flex-shrink: 0;
+}
+
+.admin-tab-action:hover {
+    background: #f1f5f9;
+    color: var(--primary-color);
+}
+
+.admin-tab-action i {
+    font-size: 0.875rem;
+}
+
+.admin-tab-user {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.admin-tab-user .nav-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.25rem 0 0.25rem 0.25rem !important;
+    border-radius: 999px;
+    color: #475569 !important;
+    font-weight: 600;
+}
+
+.admin-tab-user__avatar {
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    background: #e2e8f0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: #475569;
+    font-size: 1rem;
+}
+
+.admin-tab-user__name {
+    color: #1f2937;
+    font-size: 0.95rem;
+}
+
+/* 标签页面板容器 */
+.admin-tab-panels {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+    width: 100%;
+    max-width: 100%; /* 防止超出容器 */
+    height: 100%; /* 继承父级 main 的可用高度，保证 iframe 正常展示 */
+    min-height: 0; /* 避免在 flex 布局下被内容撑开 */
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-top: none;
+    border-radius: 0 0 20px 20px;
+    box-shadow: 0 25px 60px rgba(15, 23, 42, 0.08);
+    box-sizing: border-box; /* 确保尺寸计算正确 */
+}
+
+/* 标签页面板 */
+.admin-tab-panel {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    max-width: 100%; /* 防止超出容器 */
+    height: 100%;
+    display: none;
+    background: #f8fafc; /* 统一的浅灰色背景 */
+    box-sizing: border-box; /* 确保尺寸计算正确 */
+    overflow: hidden; /* 防止内容溢出 */
+}
+
+.admin-tab-panel.active {
+    display: block;
+}
+
+.admin-tab-panel iframe {
+    width: 100%;
+    max-width: 100%; /* 防止 iframe 内容超出容器 */
+    height: 100%;
+    border: none;
+    background: #f8fafc; /* 统一的浅灰色背景 */
+    box-sizing: border-box; /* 确保尺寸计算正确 */
+    display: block; /* 移除 iframe 默认的 inline 特性 */
+}
+
+/* 标签页错误状态 */
+.admin-tab-error {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: #64748b;
+    text-align: center;
+    padding: 2rem;
+}
+
+.admin-tab-error i {
+    font-size: 3rem;
+    color: var(--danger-color);
+    margin-bottom: 1rem;
+}
+
+.admin-tab-error p {
+    font-size: 1rem;
+    margin-bottom: 1.5rem;
+    color: #64748b;
+}
+
+/* 空状态 */
+.admin-tab-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: #94a3b8;
+    text-align: center;
+    padding: 3rem;
+    background: #f8fafc; /* 统一的浅灰色背景 */
+}
+
+.admin-tab-empty__icon {
+    font-size: 4rem;
+    margin-bottom: 1.5rem;
+    opacity: 0.5;
+}
+
+.admin-tab-empty__text p {
+    font-size: 1.125rem;
+    font-weight: 500;
+    color: #64748b;
+    margin-bottom: 0.5rem;
+}
+
+.admin-tab-empty__text small {
+    font-size: 0.875rem;
+    color: #94a3b8;
+}
+
+/* 响应式调整 */
+@media (max-width: 768px) {
+    .admin-tab-item {
+        min-width: 100px;
+        max-width: 150px;
+    }
+
+    .admin-tab-title {
+        font-size: 0.8125rem;
+    }
+
+    .admin-tab-actions {
+        padding-left: 0.25rem;
+        gap: 0.125rem;
+    }
+
+    .admin-tab-action {
+        width: 28px;
+        height: 28px;
+    }
+}

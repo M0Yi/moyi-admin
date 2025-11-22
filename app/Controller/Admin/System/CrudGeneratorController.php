@@ -31,7 +31,7 @@ class CrudGeneratorController extends AbstractController
         // 获取所有CRUD配置记录（超级管理员跳过站点筛选）
         $query = AdminCrudConfig::query();
         $configs = $query->orderBy('created_at', 'desc')->get();
-        return $this->render->render('admin.system.crud-generator.index', [
+        return $this->renderAdmin('admin.system.crud-generator.index', [
             'configs' => $configs,
         ]);
     }
@@ -49,7 +49,7 @@ class CrudGeneratorController extends AbstractController
         // 只获取当前连接下的配置
         $query = AdminCrudConfig::query()->where('db_connection', $connection);
         $configs = $query->get()->keyBy('table_name');
-        return $this->render->render('admin.system.crud-generator.create', [
+        return $this->renderAdmin('admin.system.crud-generator.create', [
             'tables' => $tables,
             'configs' => $configs,
             'connections' => $connections,
@@ -87,12 +87,13 @@ class CrudGeneratorController extends AbstractController
         $baseConfig = $this->buildBaseConfig($tableName, $dbConnection, $config);
         $tableComment = $baseConfig['table_comment'] ?? null;
 
-        return $this->render->render('admin.system.crud-generator.config', [
+        return $this->renderAdmin('admin.system.crud-generator.config', [
             'tableName' => $tableName,
             'tableComment' => $tableComment,
             'config' => $baseConfig,
             'connections' => $connections,
             'dbConnection' => $dbConnection,
+            'currentConnInfo' => $connections[$dbConnection] ?? null,
         ]);
     }
 //

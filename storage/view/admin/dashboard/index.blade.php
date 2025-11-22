@@ -1,420 +1,1054 @@
 @extends('admin.layouts.admin')
 
-@section('title', '仪表盘')
+@section('title', '控制台总览')
 
-@push('admin_sidebar')
-    @include('admin.components.sidebar')
-@endpush
+@if (! $isEmbedded)
+    @push('admin_sidebar')
+        @include('admin.components.sidebar')
+    @endpush
 
-@push('admin_navbar')
-    @include('admin.components.navbar')
-@endpush
+    @push('admin_navbar')
+        @include('admin.components.navbar')
+    @endpush
+@endif
 
-@push('admin_styles')
+@push('admin-styles')
 <style>
-.page-header {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: white;
-    padding: 1.5rem 2rem;
-    margin: -1rem -2rem 1.5rem -2rem;
-    border-radius: 0 0 24px 24px;
-    box-shadow: 0 8px 24px rgba(102, 126, 234, 0.2);
+.dashboard-stage {
+    padding: 1.5rem;
+    background: #f8fafc;
+    border-radius: 24px;
 }
-.page-header h1 { font-weight: 700; margin: 0; font-size: 1.75rem; }
 
-.card {
+:root {
+    --dashboard-gap: 1.25rem;
+    --dashboard-radius: 20px;
+}
+
+.dashboard-shell {
+    display: flex;
+    flex-direction: column;
+    gap: var(--dashboard-gap);
+}
+
+.dashboard-card {
     border: none;
-    border-radius: 16px;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.04);
-    transition: box-shadow 0.3s ease, transform 0.3s ease;
-    overflow: visible;
+    border-radius: var(--dashboard-radius);
+    background: #ffffff;
+    box-shadow: 0 25px 60px rgba(15, 23, 42, 0.08);
+    overflow: hidden;
 }
-.card:hover { box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08); transform: translateY(-4px); }
-.card-header { background: transparent; border: none; padding: 1.25rem 1.5rem; font-weight: 600; }
-.card-body { padding: 1.5rem; }
 
-.btn { padding: 0.6rem 1.5rem; border-radius: 10px; font-weight: 500; transition: all 0.3s ease; border: none; }
-.btn-primary { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3); }
-.btn-primary:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4); }
-.btn-outline-secondary:hover { transform: translateY(-2px); }
+.dashboard-card__body {
+    padding: 1.5rem;
+}
 
-@keyframes fadeInUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
-.stats-card { animation: fadeInUp 0.6s ease-out; }
-.delay-0 { animation-delay: 0s; }
-.delay-1 { animation-delay: 0.1s; }
-.delay-2 { animation-delay: 0.2s; }
-.delay-3 { animation-delay: 0.3s; }
-.delay-4 { animation-delay: 0.4s; }
-.delay-5 { animation-delay: 0.5s; }
-.delay-6 { animation-delay: 0.6s; }
-.delay-7 { animation-delay: 0.7s; }
-.delay-8 { animation-delay: 0.8s; }
-.delay-9 { animation-delay: 0.9s; }
-.bg-grad-users { background: linear-gradient(135deg, #667eea, #764ba2); }
-.bg-grad-sites { background: linear-gradient(135deg, #f093fb, #f5576c); }
-.bg-grad-activities { background: linear-gradient(135deg, #4facfe, #00f2fe); }
-.bg-grad-default { background: linear-gradient(135deg, #43e97b, #38f9d7); }
+.touchpoint-chart {
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+}
+
+.touchpoint-chart__canvas {
+    position: relative;
+    padding: 1.25rem;
+    border-radius: 28px;
+    background:
+        radial-gradient(120% 120% at 80% 0%, rgba(99, 102, 241, 0.32), transparent 70%),
+        radial-gradient(140% 120% at 0% 0%, rgba(14, 165, 233, 0.25), transparent 65%),
+        linear-gradient(135deg, #0f172a, #1e1b4b);
+    box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.12), 0 20px 45px rgba(15, 23, 42, 0.14);
+}
+
+.touchpoint-chart__viewport {
+    width: 100%;
+    aspect-ratio: 16 / 7;
+}
+
+.touchpoint-chart__viewport svg {
+    width: 100%;
+    height: 100%;
+}
+
+.touchpoint-chart__grid line {
+    stroke: rgba(226, 232, 240, 0.25);
+    stroke-width: 0.5;
+    vector-effect: non-scaling-stroke;
+}
+
+.touchpoint-chart__grid line[data-variant="strong"] {
+    stroke: rgba(226, 232, 240, 0.45);
+}
+
+.touchpoint-chart__area {
+    stroke: none;
+}
+
+.touchpoint-chart__line {
+    fill: none;
+    stroke-width: 1.8;
+    vector-effect: non-scaling-stroke;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    filter: drop-shadow(0 4px 12px rgba(15, 23, 42, 0.35));
+}
+
+.touchpoint-chart__dot {
+    vector-effect: non-scaling-stroke;
+}
+
+.touchpoint-chart__axis {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 0.5rem;
+    text-align: center;
+    color: #475569;
+    font-size: 0.85rem;
+}
+
+.touchpoint-chart__axis li {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    align-items: center;
+}
+
+.touchpoint-chart__axis-bar {
+    width: 2px;
+    height: 10px;
+    border-radius: 999px;
+    background: #cbd5f5;
+    opacity: 0.5;
+}
+
+.touchpoint-chart__legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin-top: 0.25rem;
+}
+
+.touchpoint-chart__legend-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.4rem 0.75rem;
+    border-radius: 999px;
+    background: #f1f5f9;
+    border: 1px solid #e2e8f0;
+}
+
+.touchpoint-chart__legend-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+}
+
+.touchpoint-chart__legend-meta {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.85rem;
+    color: #0f172a;
+}
+
+.touchpoint-chart__legend-meta small {
+    color: #64748b;
+}
+
+.touchpoint-chart__legend-delta {
+    font-weight: 600;
+}
+
+.touchpoint-chart__tooltip {
+    --tooltip-bg: rgba(15, 23, 42, 0.98);
+    --tooltip-accent: #6366f1;
+    position: absolute;
+    background: var(--tooltip-bg);
+    color: #f8fafc;
+    padding: 0.55rem 1rem 0.55rem 1.4rem;
+    border-radius: 0.75rem;
+    font-size: 0.8rem;
+    line-height: 1.3;
+    pointer-events: none;
+    opacity: 0;
+    transform: translate(-50%, -120%);
+    transition: opacity 0.15s ease, transform 0.15s ease;
+    box-shadow: 0 18px 40px rgba(15, 23, 42, 0.35);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    min-width: 130px;
+    z-index: 3;
+}
+
+.touchpoint-chart__tooltip::before {
+    content: '';
+    position: absolute;
+    top: 10px;
+    bottom: 10px;
+    left: 10px;
+    width: 3px;
+    border-radius: 999px;
+    background: var(--tooltip-accent);
+    opacity: 0.9;
+}
+
+.touchpoint-chart__tooltip::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    bottom: -6px;
+    transform: translateX(-50%);
+    border-width: 6px 6px 0 6px;
+    border-style: solid;
+    border-color: var(--tooltip-bg) transparent transparent transparent;
+}
+
+.touchpoint-chart__tooltip strong {
+    display: block;
+    font-size: 0.7rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #cbd5f5;
+}
+
+.touchpoint-chart__tooltip span {
+    display: block;
+    font-size: 1.05rem;
+    font-weight: 600;
+    color: #fff;
+    margin-top: 0.25rem;
+}
+
+.touchpoint-chart__tooltip[data-visible="true"] {
+    opacity: 1;
+    transform: translate(-50%, -140%);
+}
+
+@media (max-width: 768px) {
+    .touchpoint-chart__canvas {
+        padding: 1rem;
+    }
+
+    .touchpoint-chart__viewport {
+        aspect-ratio: 4 / 3;
+    }
+
+    .touchpoint-chart__legend {
+        flex-direction: column;
+    }
+}
+
+.dashboard-hero {
+    background: radial-gradient(circle at top right, #c7d2fe 0%, #eef2ff 45%, #ffffff 100%);
+    position: relative;
+    padding: 2rem 2.5rem;
+}
+
+.dashboard-hero::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    border: 1px solid rgba(99, 102, 241, 0.15);
+    pointer-events: none;
+}
+
+.dashboard-hero__meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1.5rem;
+    margin-top: 1.25rem;
+}
+
+.dashboard-hero__meta-item {
+    min-width: 160px;
+}
+
+.hero-progress {
+    width: 100%;
+    height: 6px;
+    background: rgba(99, 102, 241, 0.15);
+    border-radius: 999px;
+    overflow: hidden;
+}
+
+.hero-progress span {
+    display: block;
+    height: 100%;
+    background: linear-gradient(90deg, #6366f1, #8b5cf6);
+}
+
+.metric-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+    gap: 1rem;
+}
+
+.metric-card {
+    padding: 1.25rem;
+    border-radius: 18px;
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.metric-card__icon {
+    width: 42px;
+    height: 42px;
+    border-radius: 12px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    font-size: 1.2rem;
+}
+
+.metric-card__trend {
+    font-size: 0.85rem;
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+}
+
+.metric-card__trend.up {
+    color: #16a34a;
+}
+
+.metric-card__trend.down {
+    color: #dc2626;
+}
+
+.section-title {
+    font-weight: 600;
+    color: #0f172a;
+    margin-bottom: 0.25rem;
+}
+
+.section-subtitle {
+    color: #64748b;
+    font-size: 0.95rem;
+}
+
+.list-stacked {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.timeline-dot {
+    width: 11px;
+    height: 11px;
+    border-radius: 50%;
+    background: #6366f1;
+    position: relative;
+}
+
+.timeline-dot::after {
+    content: '';
+    position: absolute;
+    top: 11px;
+    left: 50%;
+    width: 2px;
+    height: calc(100% + 13px);
+    background: rgba(99, 102, 241, 0.25);
+    transform: translateX(-50%);
+}
+
+.list-stacked li:last-child .timeline-dot::after {
+    display: none;
+}
+
+.health-pill {
+    border-radius: 999px;
+    padding: 0.2rem 0.85rem;
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+.health-pill--good {
+    background: rgba(34, 197, 94, 0.15);
+    color: #15803d;
+}
+
+.health-pill--warn {
+    background: rgba(249, 115, 22, 0.15);
+    color: #c2410c;
+}
+
+.capacity-bar {
+    height: 6px;
+    background: #e2e8f0;
+    border-radius: 999px;
+    overflow: hidden;
+}
+
+.capacity-bar span {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, #6366f1, #8b5cf6);
+}
+
+.quick-action {
+    border: 1px solid #e2e8f0;
+    border-radius: 16px;
+    padding: 1rem 1.25rem;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    transition: border-color 0.2s ease, transform 0.2s ease;
+}
+
+.quick-action:hover {
+    border-color: #c7d2fe;
+    transform: translateY(-2px);
+}
+
+.quick-action__icon {
+    width: 48px;
+    height: 48px;
+    border-radius: 14px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    font-size: 1.25rem;
+}
+
+.analytics-tabs {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.analytics-tabs button {
+    border: 1px solid #e2e8f0;
+    border-radius: 999px;
+    background: #fff;
+    padding: 0.45rem 1.25rem;
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: #475569;
+    transition: all 0.2s ease;
+}
+
+.analytics-tabs button.active,
+.analytics-tabs button:hover {
+    background: #1d4ed8;
+    color: #fff;
+    border-color: #1d4ed8;
+}
+
+@media (max-width: 992px) {
+    .dashboard-hero {
+        padding: 1.75rem;
+    }
+
+    .dashboard-hero__meta {
+        flex-direction: column;
+    }
+}
+
+@if ($isEmbedded)
+.admin-embed-main {
+    padding: 1.5rem;
+}
+@endif
 </style>
 @endpush
 
 @section('content')
+@php
+    $insights = [
+        [
+            'title' => '新增用户',
+            'value' => '1,284',
+            'trend' => '+18% 同比',
+            'direction' => 'up',
+            'icon' => 'bi-people',
+            'accent' => 'linear-gradient(135deg, #6366f1, #8b5cf6)'
+        ],
+        [
+            'title' => '活跃站点',
+            'value' => '342',
+            'trend' => '+42 本周',
+            'direction' => 'up',
+            'icon' => 'bi-globe2',
+            'accent' => 'linear-gradient(135deg, #0ea5e9, #38bdf8)'
+        ],
+        [
+            'title' => '自动化任务',
+            'value' => '96%',
+            'trend' => '-4% 失败率',
+            'direction' => 'down',
+            'icon' => 'bi-lightning-charge',
+            'accent' => 'linear-gradient(135deg, #f97316, #fb923c)'
+        ],
+        [
+            'title' => '收入预估',
+            'value' => '¥482k',
+            'trend' => '+12% QoQ',
+            'direction' => 'up',
+            'icon' => 'bi-currency-yen',
+            'accent' => 'linear-gradient(135deg, #22c55e, #4ade80)'
+        ],
+    ];
 
-{{-- 页面标题 --}}
-<div class="page-header mb-4">
-    <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center">
-        <div>
-            <h1 class="h2 mb-1">仪表盘</h1>
-            <p class="text-white-50 mb-0">欢迎回来！这是您的工作台概览</p>
-        </div>
-        <div class="btn-toolbar">
-            <div class="btn-group me-2">
-                <button type="button" class="btn btn-sm btn-light" data-demo="true" data-bs-toggle="tooltip" title="演示功能，暂不可用">
-                    <i class="bi bi-share"></i> 分享
-                </button>
-                <button type="button" class="btn btn-sm btn-light" data-demo="true" data-bs-toggle="tooltip" title="演示功能，暂不可用">
-                    <i class="bi bi-download"></i> 导出
-                </button>
-            </div>
-            <button type="button" class="btn btn-sm btn-light dropdown-toggle d-flex align-items-center gap-1" data-demo="true" data-bs-toggle="tooltip" title="演示功能，暂不可用">
-                <i class="bi bi-calendar3"></i>
-                本周
-            </button>
-        </div>
-    </div>
-</div>
+    $roadmap = [
+        [
+            'title' => 'AI 智能客服 2.0 发布',
+            'time' => '今日 · 11:00',
+            'owner' => '李倩 · 产品',
+            'status' => '上线验证'
+        ],
+        [
+            'title' => 'APM 全链路监控灰度',
+            'time' => '周三 · 14:00',
+            'owner' => '陈峰 · 后台',
+            'status' => '阶段评审'
+        ],
+        [
+            'title' => '数据湖与报表融合',
+            'time' => '周五 · 09:30',
+            'owner' => '蔡雨 · 数据',
+            'status' => '方案冻结'
+        ],
+    ];
 
-<div class="alert alert-info d-flex align-items-center mb-4" role="alert" style="border: 0; color: #0f172a; background: linear-gradient(135deg, #e0f2fe, #e2e8f0);">
-    <i class="bi bi-info-circle me-2"></i>
-    <span>演示说明：当前仪表盘为展示版，部分按钮与交互仅作为示例，不提供实际功能。</span>
-    <span class="ms-2 text-muted">如需启用，请在后台接入真实逻辑。</span>
-</div>
+    $activityFeed = [
+        [
+            'user' => 'Lynn',
+            'action' => '部署了新版本',
+            'target' => 'site-admin-core',
+            'time' => '8 分钟前'
+        ],
+        [
+            'user' => 'Marco',
+            'action' => '更新了权限策略',
+            'target' => 'Global Role/OPS',
+            'time' => '32 分钟前'
+        ],
+        [
+            'user' => 'Eva',
+            'action' => '同步了 3 份报表',
+            'target' => '数据湖 · 周报',
+            'time' => '1 小时前'
+        ],
+    ];
 
-{{-- 统计卡片 --}}
-<div class="row g-4 mb-4">
-    @foreach($stats as $key => $stat)
-    <div class="col-12 col-sm-6 col-lg-3">
-        <div class="card stats-card h-100 border-0 delay-{{ $loop->index }}">
-            <div class="card-body p-4">
-                <div class="d-flex align-items-start justify-content-between mb-3">
-                    <div class="flex-shrink-0">
-                        <div class="rounded-3 d-flex align-items-center justify-content-center{{ $key === 'users' ? ' bg-grad-users' : ($key === 'sites' ? ' bg-grad-sites' : ($key === 'activities' ? ' bg-grad-activities' : ' bg-grad-default')) }}"
-                             style="width: 56px; height: 56px;">
-                            @if($key === 'users')
-                                <i class="bi bi-people fs-3 text-white"></i>
-                            @elseif($key === 'sites')
-                                <i class="bi bi-globe fs-3 text-white"></i>
-                            @elseif($key === 'activities')
-                                <i class="bi bi-calendar-event fs-3 text-white"></i>
-                            @else
-                                <i class="bi bi-currency-dollar fs-3 text-white"></i>
-                            @endif
+    $systemHealth = [
+        ['service' => 'API 网关', 'uptime' => '99.98%', 'latency' => '112ms', 'status' => 'good'],
+        ['service' => '消息队列', 'uptime' => '99.92%', 'latency' => '86ms', 'status' => 'good'],
+        ['service' => 'ElasticSearch', 'uptime' => '99.31%', 'latency' => '210ms', 'status' => 'warn'],
+    ];
+
+    $teamCapacity = [
+        ['name' => '核心后端', 'usage' => 0.78, 'slots' => '7 / 9 Sprint Slot'],
+        ['name' => '设计体验', 'usage' => 0.52, 'slots' => '5 / 9 Sprint Slot'],
+        ['name' => '数据智能', 'usage' => 0.64, 'slots' => '6 / 10 Sprint Slot'],
+    ];
+
+    $quickActions = [
+        [
+            'label' => '创建多品牌站点',
+            'description' => '10 分钟完成一键模板和数据初始化',
+            'icon' => 'bi-grid-3x3-gap-fill',
+            'accent' => '#6366f1',
+            'href' => admin_route('sites/create')
+        ],
+        [
+            'label' => '批量导入运营账号',
+            'description' => 'Excel/CSV 支持校验，自动关联权限',
+            'icon' => 'bi-people-fill',
+            'accent' => '#0ea5e9',
+            'href' => admin_route('users/import')
+        ],
+        [
+            'label' => '构建自动化流程',
+            'description' => '通过可视化编排联动 10+ 服务',
+            'icon' => 'bi-diagram-3-fill',
+            'accent' => '#f97316',
+            'href' => admin_route('automation/designer')
+        ],
+    ];
+
+    $experienceLabels = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
+    $experienceSeries = [
+        [
+            'label' => '转化路径',
+            'color' => '#6366f1',
+            'points' => [42, 48, 46, 53, 58, 55, 61],
+        ],
+        [
+            'label' => '工单解决率',
+            'color' => '#0ea5e9',
+            'points' => [32, 36, 38, 40, 44, 45, 47],
+            'dash' => '4 2',
+        ],
+    ];
+
+    $experienceMaxValue = 0;
+    foreach ($experienceSeries as $series) {
+        $experienceMaxValue = max($experienceMaxValue, max($series['points']));
+    }
+    $experienceMaxValue = max($experienceMaxValue, 10);
+
+    $chartSpace = [
+        'width' => 160,
+        'height' => 70,
+        'top' => 6,
+        'bottom' => 64,
+        'dot_radius' => 1.05,
+    ];
+    $pointCount = count($experienceLabels);
+    $horizontalStep = $pointCount > 1 ? $chartSpace['width'] / ($pointCount - 1) : 0;
+
+    foreach ($experienceSeries as $index => $series) {
+        $seriesPoints = [];
+        foreach ($series['points'] as $key => $value) {
+            $x = $pointCount > 1 ? round($key * $horizontalStep, 2) : 0;
+            $y = round($chartSpace['bottom'] - ($value / $experienceMaxValue) * ($chartSpace['bottom'] - $chartSpace['top']), 2);
+            $seriesPoints[] = [
+                'x' => $x,
+                'y' => $y,
+                'value' => $value,
+                'label' => $experienceLabels[$key] ?? '',
+            ];
+        }
+        $polyline = implode(' ', array_map(static fn ($point) => "{$point['x']},{$point['y']}", $seriesPoints));
+        $firstPoint = $seriesPoints[0] ?? ['x' => 0, 'y' => $chartSpace['bottom']];
+        $lastPoint = $seriesPoints[array_key_last($seriesPoints)] ?? $firstPoint;
+        $areaPath = trim($polyline . " {$lastPoint['x']},{$chartSpace['bottom']} {$firstPoint['x']},{$chartSpace['bottom']}") . ' Z';
+        $latest = $series['points'][count($series['points']) - 1] ?? null;
+        $previous = $series['points'][count($series['points']) - 2] ?? null;
+
+        $experienceSeries[$index]['polyline'] = $polyline;
+        $experienceSeries[$index]['area'] = $areaPath;
+        $experienceSeries[$index]['points_meta'] = $seriesPoints;
+        $experienceSeries[$index]['latest'] = $latest;
+        $experienceSeries[$index]['delta'] = $previous !== null ? $latest - $previous : null;
+        $experienceSeries[$index]['dash'] = $series['dash'] ?? '0';
+    }
+@endphp
+
+<div class="dashboard-stage">
+<div class="dashboard-shell">
+    <section class="dashboard-card dashboard-hero">
+        <div class="d-flex flex-column flex-lg-row align-items-lg-center justify-content-between gap-4">
+            <div>
+                <p class="text-uppercase text-muted fw-semibold mb-2" style="letter-spacing: 0.2em;">Central Command</p>
+                <h1 class="fw-bold mb-3" style="color: #0f172a;">智能运营总览</h1>
+                <p class="text-muted mb-0" style="max-width: 460px;">
+                    聚焦体验质量、自动化效率与业务增长。通过统一的 iframe-shell + 标签体系，随时切换关键模块而不中断上下文。
+                </p>
+                <div class="dashboard-hero__meta">
+                    <div class="dashboard-hero__meta-item">
+                        <small class="text-muted">本周 OKR 完成度</small>
+                        <div class="d-flex align-items-baseline gap-2">
+                            <strong class="fs-3">72%</strong>
+                            <span class="badge bg-success-subtle text-success">+8%</span>
                         </div>
+                        <div class="hero-progress mt-2"><span style="width: 72%"></span></div>
                     </div>
-                    @if(isset($stat['today']) || isset($stat['active']) || isset($stat['this_month']))
-                    <span class="badge rounded-pill" style="background: linear-gradient(135deg, #a8edea, #fed6e3); color: #1e293b; font-weight: 600;">
-                        @if(isset($stat['today']))
-                            今日 +{{ $stat['today'] }}
-                        @elseif(isset($stat['active']))
-                            活跃 {{ $stat['active'] }}
-                        @elseif(isset($stat['this_month']))
-                            本月 +{{ $stat['this_month'] }}
-                        @endif
-                    </span>
-                    @endif
-                </div>
-                <div>
-                    <div class="small text-muted text-uppercase fw-semibold mb-2" style="letter-spacing: 0.5px;">
-                        @if($key === 'users')
-                            用户总数
-                        @elseif($key === 'sites')
-                            站点数量
-                        @elseif($key === 'activities')
-                            活动总数
-                        @else
-                            总收入
-                        @endif
+                    <div class="dashboard-hero__meta-item">
+                        <small class="text-muted">自动化节省工时</small>
+                        <div class="fs-4 fw-semibold">312 h</div>
+                        <span class="text-muted small">过去 30 天 · 42 条流程</span>
                     </div>
-                    <div class="h2 mb-0 fw-bold" style="color: #1e293b;">{{ $stat['total'] }}</div>
+                    <div class="dashboard-hero__meta-item">
+                        <small class="text-muted">实时 SLA</small>
+                        <div class="fs-4 fw-semibold">99.94%</div>
+                        <span class="text-muted small">4 条核心链路全部稳定</span>
+                    </div>
                 </div>
             </div>
-        </div>
-    </div>
-    @endforeach
-</div>
-
-{{-- 图表区域 --}}
-<div class="row g-4 mb-4">
-    <div class="col-12">
-        <div class="card border-0">
-            <div class="card-header bg-transparent d-flex justify-content-between align-items-center py-3">
-                <div>
-                    <h5 class="card-title mb-1">访问趋势</h5>
-                    <p class="text-muted mb-0 small">最近7天的访问量统计</p>
+            <div class="text-center text-lg-end">
+                <div class="mb-3">
+                    <span class="badge rounded-pill bg-primary-subtle text-primary fw-semibold">Live Insight</span>
                 </div>
-                <div class="btn-group btn-group-sm">
-                    <button class="btn btn-outline-secondary active" data-demo="true" data-bs-toggle="tooltip" title="演示功能，暂不可用">7天</button>
-                    <button class="btn btn-outline-secondary" data-demo="true" data-bs-toggle="tooltip" title="演示功能，暂不可用">30天</button>
-                    <button class="btn btn-outline-secondary" data-demo="true" data-bs-toggle="tooltip" title="演示功能，暂不可用">90天</button>
-                </div>
-            </div>
-            <div class="card-body pt-2">
-                <canvas class="my-2 w-100" id="myChart" width="900" height="250"></canvas>
-            </div>
-        </div>
-    </div>
-</div>
-
-{{-- 最近活动 --}}
-<div class="row g-4">
-    <div class="col-12 col-lg-6">
-        <div class="card border-0 h-100">
-            <div class="card-header bg-transparent py-3">
-                <div class="d-flex justify-content-between align-items-center">
-                    <div>
-                        <h5 class="card-title mb-1">最近活动</h5>
-                        <p class="text-muted mb-0 small">实时动态更新</p>
-                    </div>
-                    <button class="btn btn-sm btn-outline-primary" data-demo="true" data-bs-toggle="tooltip" title="演示功能，暂不可用">
-                        <i class="bi bi-arrow-clockwise"></i>
+                <h2 class="display-6 fw-bold mb-1" style="color: #1d4ed8;">¥2.84M</h2>
+                <p class="text-muted mb-3">季度 MRR 预估 · 45% 来自自建生态插件</p>
+                <div class="d-flex flex-wrap gap-2 justify-content-center justify-content-lg-end">
+                    <button type="button" class="btn btn-dark d-flex align-items-center gap-2" data-demo="true">
+                        <i class="bi bi-lightning-charge"></i>
+                        快速巡检
+                    </button>
+                    <button type="button" class="btn btn-outline-dark d-flex align-items-center gap-2" data-demo="true">
+                        <i class="bi bi-diagram-3"></i>
+                        洞察配置
                     </button>
                 </div>
             </div>
-            <div class="card-body p-0">
-                <div class="list-group list-group-flush">
-                    @forelse($recentActivities as $activity)
-                    <div class="list-group-item border-0 py-3 px-4" style="transition: all 0.3s ease;">
-                        <div class="d-flex align-items-start">
-                            <div class="flex-shrink-0 position-relative">
-                                <div class="rounded-circle text-white d-flex align-items-center justify-content-center"
-                                     style="width: 44px; height: 44px; font-weight: 600; background: linear-gradient(135deg, #667eea, #764ba2);">
+        </div>
+    </section>
+
+    <section class="dashboard-card">
+        <div class="dashboard-card__body">
+            <div class="d-flex flex-wrap justify-content-between align-items-center mb-4 gap-2">
+                <div>
+                    <p class="section-title mb-1">实时关键指标</p>
+                    <p class="section-subtitle mb-0">以弹性标签页形式读取，不打断当前工作流</p>
+                </div>
+                <div class="analytics-tabs">
+                    <button type="button" class="active" data-demo="true">本周</button>
+                    <button type="button" data-demo="true">本月</button>
+                    <button type="button" data-demo="true">季度</button>
+                </div>
+            </div>
+            <div class="metric-grid">
+                @foreach ($insights as $item)
+                    <div class="metric-card">
+                        <div class="metric-card__icon" style="background: {{ $item['accent'] }};">
+                            <i class="bi {{ $item['icon'] }}"></i>
+                        </div>
+                        <div>
+                            <small class="text-muted text-uppercase">{{ $item['title'] }}</small>
+                            <div class="d-flex align-items-baseline gap-2">
+                                <span class="fs-3 fw-bold" style="color: #0f172a;">{{ $item['value'] }}</span>
+                                <span class="metric-card__trend {{ $item['direction'] }}">
+                                    <i class="bi {{ $item['direction'] === 'up' ? 'bi-arrow-up-right' : 'bi-arrow-down-right' }}"></i>
+                                    {{ $item['trend'] }}
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+                @endforeach
+            </div>
+        </div>
+    </section>
+
+    <div class="row g-4">
+        <div class="col-12 col-xl-7">
+            <section class="dashboard-card h-100">
+                <div class="dashboard-card__body">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <div>
+                            <p class="section-title mb-1">体验触点趋势</p>
+                            <p class="section-subtitle mb-0">整合 iframe shell 数据采集 · 每 5 分钟刷新</p>
+                        </div>
+                        <button type="button" class="btn btn-sm btn-outline-dark" data-demo="true">
+                            导出 CSV
+                        </button>
+                    </div>
+                    <div class="touchpoint-chart">
+                        <div class="touchpoint-chart__canvas js-touchpoint-chart" role="img" aria-label="体验触点趋势图表">
+                            <div class="touchpoint-chart__viewport">
+                                <svg viewBox="0 0 {{ $chartSpace['width'] }} {{ $chartSpace['height'] }}" preserveAspectRatio="none">
+                                    <defs>
+                                        @foreach ($experienceSeries as $series)
+                                            <linearGradient id="experience-fill-{{ $loop->index }}" x1="0" y1="0" x2="0" y2="1">
+                                                <stop offset="0%" stop-color="{{ $series['color'] }}" stop-opacity="0.35"></stop>
+                                                <stop offset="100%" stop-color="{{ $series['color'] }}" stop-opacity="0"></stop>
+                                            </linearGradient>
+                                        @endforeach
+                                    </defs>
+                                    <g class="touchpoint-chart__grid">
+                                        @for ($line = 0; $line <= 4; $line++)
+                                            @php
+                                                $y = $chartSpace['bottom'] - ($line * ($chartSpace['bottom'] - $chartSpace['top']) / 4);
+                                            @endphp
+                                            <line x1="0" y1="{{ $y }}" x2="{{ $chartSpace['width'] }}" y2="{{ $y }}" data-variant="{{ $line === 0 ? 'strong' : 'soft' }}"></line>
+                                        @endfor
+                                        @foreach ($experienceLabels as $index => $label)
+                                            @php
+                                                $x = $pointCount > 1 ? round(($index / ($pointCount - 1)) * $chartSpace['width'], 2) : 0;
+                                            @endphp
+                                            <line x1="{{ $x }}" y1="{{ $chartSpace['top'] }}" x2="{{ $x }}" y2="{{ $chartSpace['bottom'] }}"></line>
+                                        @endforeach
+                                    </g>
+                                    @foreach ($experienceSeries as $series)
+                                        <path class="touchpoint-chart__area" d="M {{ $series['area'] }}" fill="url(#experience-fill-{{ $loop->index }})"></path>
+                                        <polyline
+                                            class="touchpoint-chart__line"
+                                            points="{{ $series['polyline'] }}"
+                                            style="stroke: {{ $series['color'] }}; stroke-dasharray: {{ $series['dash'] }};"
+                                        ></polyline>
+                                        @foreach ($series['points_meta'] as $point)
+                                            <circle
+                                                class="touchpoint-chart__dot"
+                                                cx="{{ $point['x'] }}"
+                                                cy="{{ $point['y'] }}"
+                                                r="{{ $chartSpace['dot_radius'] }}"
+                                                fill="#fff"
+                                                stroke="{{ $series['color'] }}"
+                                                stroke-width="0.5"
+                                                tabindex="0"
+                                                aria-label="{{ $series['label'] }} · {{ $point['label'] }}：{{ $point['value'] }}"
+                                                data-series="{{ $series['label'] }}"
+                                                data-label="{{ $point['label'] }}"
+                                                data-value="{{ $point['value'] }}"
+                                                data-color="{{ $series['color'] }}"
+                                            >
+                                                <title>{{ $series['label'] }} · {{ $point['label'] }}：{{ $point['value'] }}</title>
+                                            </circle>
+                                        @endforeach
+                                    @endforeach
+                                </svg>
+                            </div>
+                            <div class="touchpoint-chart__tooltip" role="tooltip" aria-hidden="true">
+                                <strong data-tooltip-label>体验指标</strong>
+                                <span data-tooltip-value>--</span>
+                            </div>
+                        </div>
+                        <ul class="touchpoint-chart__axis" style="grid-template-columns: repeat({{ $pointCount }}, minmax(0, 1fr));">
+                            @foreach ($experienceLabels as $label)
+                                <li>
+                                    <span class="touchpoint-chart__axis-bar"></span>
+                                    <span>{{ $label }}</span>
+                                </li>
+                            @endforeach
+                        </ul>
+                        <div class="touchpoint-chart__legend">
+                            @foreach ($experienceSeries as $series)
+                                <div class="touchpoint-chart__legend-item">
+                                    <span class="touchpoint-chart__legend-dot" style="background: {{ $series['color'] }};"></span>
+                                    <div class="touchpoint-chart__legend-meta">
+                                        <span>{{ $series['label'] }}</span>
+                                        <small>{{ $series['latest'] }}</small>
+                                        @if ($series['delta'] !== null)
+                                            <span class="touchpoint-chart__legend-delta {{ $series['delta'] >= 0 ? 'text-success' : 'text-danger' }}">
+                                                <i class="bi {{ $series['delta'] >= 0 ? 'bi-arrow-up-right' : 'bi-arrow-down-right' }}"></i>
+                                                {{ $series['delta'] >= 0 ? '+' : '' }}{{ $series['delta'] }}
+                                            </span>
+                                        @endif
+                                    </div>
+                                </div>
+                            @endforeach
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </div>
+        <div class="col-12 col-xl-5">
+            <section class="dashboard-card h-100">
+                <div class="dashboard-card__body">
+                    <p class="section-title mb-1">交付里程碑 / Roadmap</p>
+                    <p class="section-subtitle">标签页可直接打开相关页面并固定</p>
+                    <ul class="list-stacked mt-4">
+                        @foreach ($roadmap as $index => $node)
+                            <li class="d-flex gap-3">
+                                <div class="timeline-dot mt-1 {{ $index === array_key_last($roadmap) ? 'last' : '' }}"></div>
+                                <div>
+                                    <div class="d-flex justify-content-between flex-wrap gap-2">
+                                        <strong>{{ $node['title'] }}</strong>
+                                        <span class="text-muted small">{{ $node['time'] }}</span>
+                                    </div>
+                                    <div class="text-muted small">{{ $node['owner'] }}</div>
+                                    <span class="badge bg-primary-subtle text-primary mt-2">{{ $node['status'] }}</span>
+                                </div>
+                            </li>
+                        @endforeach
+                    </ul>
+                </div>
+            </section>
+        </div>
+    </div>
+
+    <div class="row g-4">
+        <div class="col-12 col-lg-5">
+            <section class="dashboard-card h-100">
+                <div class="dashboard-card__body">
+                    <p class="section-title mb-1">系统健康分层</p>
+                    <p class="section-subtitle">实时链路监控 + 自动自愈编排入口</p>
+                    <div class="mt-4 d-flex flex-column gap-3">
+                        @foreach ($systemHealth as $service)
+                            <div class="p-3 border rounded-4 d-flex flex-column gap-2">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <strong>{{ $service['service'] }}</strong>
+                                    <span class="health-pill {{ $service['status'] === 'good' ? 'health-pill--good' : 'health-pill--warn' }}">
+                                        {{ $service['status'] === 'good' ? 'Healthy' : 'Observe' }}
+                                    </span>
+                                </div>
+                                <div class="d-flex justify-content-between text-muted small">
+                                    <span>可用性 {{ $service['uptime'] }}</span>
+                                    <span>延迟 {{ $service['latency'] }}</span>
+                                </div>
+                            </div>
+                        @endforeach
+                    </div>
+                </div>
+            </section>
+        </div>
+        <div class="col-12 col-lg-7">
+            <section class="dashboard-card h-100">
+                <div class="dashboard-card__body">
+                    <p class="section-title mb-1">团队容量 / Sprint 负载</p>
+                    <p class="section-subtitle">结合 iframe 标签的实际使用行为推算</p>
+                    <div class="mt-4 d-flex flex-column gap-4">
+                        @foreach ($teamCapacity as $team)
+                            <div>
+                                <div class="d-flex justify-content-between mb-2">
+                                    <strong>{{ $team['name'] }}</strong>
+                                    <span class="text-muted small">{{ $team['slots'] }}</span>
+                                </div>
+                                <div class="capacity-bar">
+                                    <span style="width: {{ $team['usage'] * 100 }}%;"></span>
+                                </div>
+                            </div>
+                        @endforeach
+                    </div>
+                </div>
+            </section>
+        </div>
+    </div>
+
+    <div class="row g-4">
+        <div class="col-12 col-xl-6">
+            <section class="dashboard-card h-100">
+                <div class="dashboard-card__body">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <div>
+                            <p class="section-title mb-1">标签 / Iframe 活跃事件</p>
+                            <p class="section-subtitle mb-0">展示最近 10 条跨标签动作</p>
+                        </div>
+                        <button class="btn btn-sm btn-outline-dark" data-demo="true">查看全部</button>
+                    </div>
+                    <div class="list-group list-group-flush">
+                        @foreach ($activityFeed as $activity)
+                            <div class="list-group-item border-0 px-0 py-3 d-flex gap-3">
+                                <div class="rounded-circle bg-primary text-white d-flex align-items-center justify-content-center" style="width: 44px; height: 44px;">
                                     {{ mb_substr($activity['user'], 0, 1) }}
                                 </div>
-                                <span class="position-absolute bottom-0 end-0 p-1 bg-success border border-2 border-white rounded-circle" style="width: 12px; height: 12px;"></span>
-                            </div>
-                            <div class="flex-grow-1 ms-3">
-                                <div class="mb-1">
-                                    <strong class="text-dark">{{ $activity['user'] }}</strong>
-                                    <span class="text-muted ms-1">{{ $activity['action'] }}</span>
-                                    @if($activity['target'])
-                                        <span class="fw-semibold" style="color: #667eea;">{{ $activity['target'] }}</span>
-                                    @endif
+                                <div>
+                                    <div class="fw-semibold">
+                                        {{ $activity['user'] }} <span class="text-muted">{{ $activity['action'] }}</span>
+                                    </div>
+                                    <div class="text-primary small fw-semibold">{{ $activity['target'] }}</div>
+                                    <div class="text-muted small">{{ $activity['time'] }}</div>
                                 </div>
-                                <small class="text-muted d-flex align-items-center">
-                                    <i class="bi bi-clock me-1"></i> {{ $activity['time'] }}
-                                </small>
                             </div>
-                        </div>
+                        @endforeach
                     </div>
-                    @empty
-                    <div class="list-group-item border-0 text-center py-5">
-                        <div class="mb-3">
-                            <i class="bi bi-inbox fs-1" style="color: #cbd5e1;"></i>
-                        </div>
-                        <p class="text-muted mb-0">暂无活动记录</p>
-                    </div>
-                    @endforelse
                 </div>
-            </div>
+            </section>
         </div>
-    </div>
-
-    {{-- 快速操作 --}}
-    <div class="col-12 col-lg-6">
-        <div class="card border-0 h-100">
-            <div class="card-header bg-transparent py-3">
-                <h5 class="card-title mb-1">快速操作</h5>
-                <p class="text-muted mb-0 small">常用功能快捷入口</p>
-            </div>
-            <div class="card-body">
-                <div class="d-grid gap-3">
-                    <a href="{{ admin_route('users/create') }}" class="btn btn-lg text-start d-flex align-items-center" style="background: linear-gradient(135deg, rgba(102, 126, 234, 0.1), rgba(118, 75, 162, 0.1)); border: 2px solid rgba(102, 126, 234, 0.2); color: #667eea; font-weight: 600;">
-                        <div class="rounded-3 d-flex align-items-center justify-content-center me-3" style="width: 40px; height: 40px; background: linear-gradient(135deg, #667eea, #764ba2);">
-                            <i class="bi bi-person-plus text-white"></i>
-                        </div>
-                        <span>添加用户</span>
-                        <i class="bi bi-arrow-right ms-auto"></i>
-                    </a>
-                    <a href="{{ admin_route('sites/create') }}" class="btn btn-lg text-start d-flex align-items-center" style="background: linear-gradient(135deg, rgba(245, 87, 108, 0.1), rgba(240, 147, 251, 0.1)); border: 2px solid rgba(245, 87, 108, 0.2); color: #f5576c; font-weight: 600;">
-                        <div class="rounded-3 d-flex align-items-center justify-content-center me-3" style="width: 40px; height: 40px; background: linear-gradient(135deg, #f093fb, #f5576c);">
-                            <i class="bi bi-globe-americas text-white"></i>
-                        </div>
-                        <span>创建站点</span>
-                        <i class="bi bi-arrow-right ms-auto"></i>
-                    </a>
-                    <a href="{{ admin_route('settings') }}" class="btn btn-lg text-start d-flex align-items-center" style="background: linear-gradient(135deg, rgba(79, 172, 254, 0.1), rgba(0, 242, 254, 0.1)); border: 2px solid rgba(79, 172, 254, 0.2); color: #4facfe; font-weight: 600;">
-                        <div class="rounded-3 d-flex align-items-center justify-content-center me-3" style="width: 40px; height: 40px; background: linear-gradient(135deg, #4facfe, #00f2fe);">
-                            <i class="bi bi-gear text-white"></i>
-                        </div>
-                        <span>系统设置</span>
-                        <i class="bi bi-arrow-right ms-auto"></i>
-                    </a>
-                    <a href="{{ admin_route('logs/operations') }}" class="btn btn-lg text-start d-flex align-items-center" style="background: linear-gradient(135deg, rgba(67, 233, 123, 0.1), rgba(56, 249, 215, 0.1)); border: 2px solid rgba(67, 233, 123, 0.2); color: #43e97b; font-weight: 600;">
-                        <div class="rounded-3 d-flex align-items-center justify-content-center me-3" style="width: 40px; height: 40px; background: linear-gradient(135deg, #43e97b, #38f9d7);">
-                            <i class="bi bi-file-text text-white"></i>
-                        </div>
-                        <span>查看日志</span>
-                        <i class="bi bi-arrow-right ms-auto"></i>
-                    </a>
+        <div class="col-12 col-xl-6">
+            <section class="dashboard-card h-100">
+                <div class="dashboard-card__body">
+                    <p class="section-title mb-1">自动化快捷操作</p>
+                    <p class="section-subtitle">所有入口都支持在标签中打开并保持状态</p>
+                    <div class="mt-4 d-flex flex-column gap-3">
+                        @foreach ($quickActions as $action)
+                            <a class="quick-action text-decoration-none text-reset" href="{{ $action['href'] }}" target="_blank">
+                                <div class="quick-action__icon" style="background: {{ $action['accent'] }};">
+                                    <i class="bi {{ $action['icon'] }}"></i>
+                                </div>
+                                <div>
+                                    <div class="fw-semibold">{{ $action['label'] }}</div>
+                                    <p class="text-muted small mb-0">{{ $action['description'] }}</p>
+                                </div>
+                                <i class="bi bi-arrow-up-right text-muted ms-auto"></i>
+                            </a>
+                        @endforeach
+                    </div>
                 </div>
-            </div>
+            </section>
         </div>
     </div>
 </div>
-
-{{-- 系统信息 --}}
-<div class="row g-4 mt-0">
-    <div class="col-12">
-        <div class="card border-0">
-            <div class="card-header bg-transparent py-3">
-                <h5 class="card-title mb-1">系统信息</h5>
-                <p class="text-muted mb-0 small">服务器运行状态</p>
-            </div>
-            <div class="card-body">
-                <div class="row g-3">
-                    <div class="col-12 col-md-6 col-lg-3">
-                        <div class="p-3 rounded-3" style="background: linear-gradient(135deg, rgba(102, 126, 234, 0.05), rgba(118, 75, 162, 0.05));">
-                            <div class="small text-muted mb-1">站点名称</div>
-                            <div class="fw-bold" style="color: #1e293b;">{{ site()?->name ?? '站点名称' }}</div>
-                        </div>
-                    </div>
-                    <div class="col-12 col-md-6 col-lg-3">
-                        <div class="p-3 rounded-3" style="background: linear-gradient(135deg, rgba(245, 87, 108, 0.05), rgba(240, 147, 251, 0.05));">
-                            <div class="small text-muted mb-1">PHP 版本</div>
-                            <div class="fw-bold" style="color: #1e293b;">{{ PHP_VERSION }}</div>
-                        </div>
-                    </div>
-                    <div class="col-12 col-md-6 col-lg-3">
-                        <div class="p-3 rounded-3" style="background: linear-gradient(135deg, rgba(79, 172, 254, 0.05), rgba(0, 242, 254, 0.05));">
-                            <div class="small text-muted mb-1">Hyperf 版本</div>
-                            <div class="fw-bold" style="color: #1e293b;">3.1.x</div>
-                        </div>
-                    </div>
-                    <div class="col-12 col-md-6 col-lg-3">
-                        <div class="p-3 rounded-3" style="background: linear-gradient(135deg, rgba(67, 233, 123, 0.05), rgba(56, 249, 215, 0.05));">
-                            <div class="small text-muted mb-1">服务器时间</div>
-                            <div class="fw-bold" style="color: #1e293b;">{{ date('H:i:s') }}</div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
 </div>
+@endsection
 
-@push('admin_scripts')
-{{-- Chart.js
-    类型：图表 / 数据可视化
-    作用：在仪表盘中渲染访问趋势折线图等统计图表
---}}
-@include('components.plugin.chart-js')
+@push('scripts')
 <script>
 (function () {
-    'use strict'
+    const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
 
-    // 图表配置
-    const ctx = document.getElementById('myChart')
-    if (ctx) {
-        const myChart = new Chart(ctx, {
-            type: 'line',
-            data: {
-                labels: ['周一', '周二', '周三', '周四', '周五', '周六', '周日'],
-                datasets: [{
-                    label: '访问量',
-                    data: [15339, 21345, 18483, 24003, 23489, 24092, 12034],
-                    lineTension: 0.3,
-                    backgroundColor: 'rgba(99, 102, 241, 0.1)',
-                    borderColor: 'rgba(99, 102, 241, 1)',
-                    borderWidth: 2,
-                    pointBackgroundColor: 'rgba(99, 102, 241, 1)',
-                    pointBorderColor: '#fff',
-                    pointHoverBackgroundColor: '#fff',
-                    pointHoverBorderColor: 'rgba(99, 102, 241, 1)'
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: {
-                        display: false
-                    },
-                    tooltip: {
-                        intersect: false,
-                        mode: 'index'
-                    }
-                },
-                scales: {
-                    y: {
-                        beginAtZero: true,
-                        ticks: {
-                            callback: function(value) {
-                                return value.toLocaleString()
-                            }
-                        }
-                    }
+    const initExperienceChart = () => {
+        document.querySelectorAll('.js-touchpoint-chart').forEach((chart) => {
+            const tooltip = chart.querySelector('.touchpoint-chart__tooltip');
+            const tooltipLabel = tooltip?.querySelector('[data-tooltip-label]');
+            const tooltipValue = tooltip?.querySelector('[data-tooltip-value]');
+            const points = chart.querySelectorAll('circle[data-series]');
+
+            if (!tooltip || !tooltipLabel || !tooltipValue || !points.length) {
+                return;
+            }
+
+            let activeCircle = null;
+
+            const setTooltipPosition = (clientX, clientY) => {
+                const rect = chart.getBoundingClientRect();
+                const x = clamp(clientX - rect.left, 8, rect.width - 8);
+                const y = clamp(clientY - rect.top, 8, rect.height - 8);
+                tooltip.style.left = `${x}px`;
+                tooltip.style.top = `${y}px`;
+            };
+
+            const showTooltip = (circle, event) => {
+                activeCircle = circle;
+                tooltipLabel.textContent = `${circle.dataset.series} · ${circle.dataset.label}`;
+                tooltipValue.textContent = circle.dataset.value;
+                tooltip.style.setProperty('--tooltip-accent', circle.dataset.color || '#6366f1');
+                tooltip.setAttribute('data-visible', 'true');
+                tooltip.setAttribute('aria-hidden', 'false');
+
+                if (event?.clientX) {
+                    setTooltipPosition(event.clientX, event.clientY);
+                    return;
                 }
-            }
-        })
+
+                const circleRect = circle.getBoundingClientRect();
+                setTooltipPosition(
+                    circleRect.left + circleRect.width / 2,
+                    circleRect.top + circleRect.height / 2
+                );
+            };
+
+            const hideTooltip = () => {
+                activeCircle = null;
+                tooltip.removeAttribute('data-visible');
+                tooltip.setAttribute('aria-hidden', 'true');
+            };
+
+            points.forEach((circle) => {
+                const handleEnter = (event) => showTooltip(circle, event);
+                const handleMove = (event) => {
+                    if (activeCircle !== circle) {
+                        return;
+                    }
+                    setTooltipPosition(event.clientX, event.clientY);
+                };
+
+                circle.addEventListener('pointerenter', handleEnter);
+                circle.addEventListener('pointermove', handleMove);
+                circle.addEventListener('pointerleave', hideTooltip);
+                circle.addEventListener('focus', handleEnter);
+                circle.addEventListener('blur', hideTooltip);
+            });
+
+            chart.addEventListener('pointerleave', hideTooltip);
+        });
+    };
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initExperienceChart, { once: true });
+    } else {
+        initExperienceChart();
     }
-
-    const demoMsg = '演示提示：该交互为展示效果，暂无实际功能'
-    if (window.bootstrap && typeof bootstrap.Tooltip === 'function') {
-        document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(function (el) {
-            new bootstrap.Tooltip(el)
-        })
-    }
-
-    function showDemoNotice() {
-        const msg = demoMsg
-        if (typeof bootstrap !== 'undefined' && typeof bootstrap.Toast === 'function') {
-            let container = document.getElementById('demoToastContainer')
-            if (!container) {
-                container = document.createElement('div')
-                container.id = 'demoToastContainer'
-                container.className = 'toast-container position-fixed bottom-0 end-0 p-3'
-                document.body.appendChild(container)
-            }
-
-            const toastEl = document.createElement('div')
-            toastEl.className = 'toast align-items-center text-bg-info border-0'
-            toastEl.setAttribute('role', 'alert')
-            toastEl.setAttribute('aria-live', 'assertive')
-            toastEl.setAttribute('aria-atomic', 'true')
-
-            const wrapper = document.createElement('div')
-            wrapper.className = 'd-flex'
-
-            const body = document.createElement('div')
-            body.className = 'toast-body'
-            body.textContent = msg
-
-            const closeBtn = document.createElement('button')
-            closeBtn.type = 'button'
-            closeBtn.className = 'btn-close btn-close-white me-2 m-auto'
-            closeBtn.setAttribute('data-bs-dismiss', 'toast')
-            closeBtn.setAttribute('aria-label', 'Close')
-
-            wrapper.appendChild(body)
-            wrapper.appendChild(closeBtn)
-            toastEl.appendChild(wrapper)
-            container.appendChild(toastEl)
-
-            const bsToast = new bootstrap.Toast(toastEl, { delay: 2500, autohide: true })
-            bsToast.show()
-            toastEl.addEventListener('hidden.bs.toast', function () { toastEl.remove() })
-        } else {
-            window.alert(msg)
-        }
-    }
-
-    document.querySelectorAll('[data-demo="true"]').forEach(function (el) {
-        el.addEventListener('click', function (e) {
-            e.preventDefault()
-            e.stopPropagation()
-            showDemoNotice()
-        })
-    })
-})()
+})();
 </script>
 @endpush
-@endsection
+
+@push('admin_scripts')
+<script>
+(function () {
+    'use strict';
+
+    document.querySelectorAll('[data-demo="true"]').forEach(function (el) {
+        el.addEventListener('click', function (event) {
+            event.preventDefault();
+            event.stopPropagation();
+            window.alert('演示交互：接入真实逻辑后即可生效');
+        });
+    });
+})();
+</script>
+@endpush

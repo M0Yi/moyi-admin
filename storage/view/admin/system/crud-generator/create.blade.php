@@ -2,29 +2,21 @@
 
 @section('title', 'CRUD生成器 - 选择数据表')
 
-@push('admin_sidebar')
-    @include('admin.components.sidebar')
-@endpush
+@if (! $isEmbedded)
+    @push('admin_sidebar')
+        @include('admin.components.sidebar')
+    @endpush
 
-@push('admin_navbar')
-    @include('admin.components.navbar')
-@endpush
+    @push('admin_navbar')
+        @include('admin.components.navbar')
+    @endpush
+@endif
 
 @section('content')
-<div class="container-fluid">
-    <!-- 页面头部 -->
-    <div class="d-flex justify-content-between align-items-center mb-4">
-        <div>
-            <h3 class="mb-2">选择数据表</h3>
-            <p class="text-muted mb-0">
-                选择要生成 CRUD 代码的数据表
-            </p>
-        </div>
-        <div>
-            <a href="{{ admin_route('system/crud-generator') }}" class="btn btn-secondary">
-                <i class="bi bi-arrow-left"></i> 返回
-            </a>
-        </div>
+<div class="container-fluid {{ $isEmbedded ? 'py-3 px-2 px-md-4' : 'py-4' }}">
+    <div class="mb-3">
+        <h6 class="mb-1 fw-bold">选择数据表</h6>
+        <small class="text-muted">挑选要生成 CRUD 代码的数据表</small>
     </div>
 
     <!-- 数据库连接选择器 -->
@@ -128,17 +120,28 @@
                             </td>
                             @endif
                             <td class="text-center">
-                                @if(isset($configs[$table['name']]))
-                                    <a href="{{ admin_route('system/crud-generator/config/' . $table['name']) }}?connection={{ $currentConnection }}"
-                                       class="btn btn-sm btn-info">
+                                @php
+                                    $configUrl = admin_route('system/crud-generator/config/' . $table['name']) . '?connection=' . $currentConnection;
+                                    if ($isEmbedded) {
+                                        $configUrl .= '&_embed=1';
+                                    }
+                                @endphp
+                                @php
+                                    $isConfigured = isset($configs[$table['name']]);
+                                    $shellTitle = ($isConfigured ? '编辑 CRUD：' : '开始配置：') . $table['name'];
+                                @endphp
+                                <a href="{{ $configUrl }}"
+                                   class="btn btn-sm {{ $isConfigured ? 'btn-info' : 'btn-success' }}"
+                                   data-iframe-shell-trigger="crud-generator-config-{{ $table['name'] }}"
+                                   data-iframe-shell-src="{{ $configUrl }}"
+                                   data-iframe-shell-title="{{ $shellTitle }}"
+                                   data-iframe-shell-channel="crud-generator">
+                                    @if($isConfigured)
                                         <i class="bi bi-pencil"></i> 编辑配置
-                                    </a>
-                                @else
-                                    <a href="{{ admin_route('system/crud-generator/config/' . $table['name']) }}?connection={{ $currentConnection }}"
-                                       class="btn btn-sm btn-success">
+                                    @else
                                         <i class="bi bi-plus-lg"></i> 开始配置
-                                    </a>
-                                @endif
+                                    @endif
+                                </a>
                             </td>
                         </tr>
                         @empty
@@ -176,7 +179,7 @@
 </div>
 @endsection
 
-@push('styles')
+@push('admin-styles')
 <style>
 .table th {
     background-color: #f8f9fa;

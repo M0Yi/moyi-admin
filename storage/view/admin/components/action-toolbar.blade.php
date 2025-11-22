@@ -9,6 +9,7 @@
  *   - icon: Bootstrap Icon 类名
  *   - variant: 按钮样式 'primary' | 'light' | 'outline-secondary'
  *   - onclick: 点击事件（type=button时）
+ *   - attributes: 额外属性数组，如 ['data-track' => 'xxx']
  *
  * @param array $rightButtons 右侧辅助按钮配置数组（可选）
  *   - icon: Bootstrap Icon 类名
@@ -39,10 +40,16 @@
             @foreach($buttons ?? [] as $button)
                 @if(($button['type'] ?? 'button') === 'link')
                     {{-- 链接类型按钮 --}}
+                    @php
+                        $attributes = $button['attributes'] ?? [];
+                    @endphp
                     <a
                         href="{{ $button['href'] ?? '#' }}"
                         class="btn btn-{{ $button['variant'] ?? 'primary' }} px-4 py-2 shadow-sm"
                         style="border-radius: 10px;{{ ($button['variant'] ?? 'primary') === 'light' ? ' border: 1px solid #e9ecef;' : '' }}"
+                        @foreach($attributes as $attr => $value)
+                            {{ $attr }}="{{ htmlspecialchars($value, ENT_QUOTES, 'UTF-8') }}"
+                        @endforeach
                     >
                         @if(isset($button['icon']))
                             <i class="bi {{ $button['icon'] }} me-2"></i>
@@ -51,11 +58,17 @@
                     </a>
                 @else
                     {{-- 按钮类型 --}}
+                    @php
+                        $attributes = $button['attributes'] ?? [];
+                    @endphp
                     <button
                         type="button"
                         class="btn btn-{{ $button['variant'] ?? 'light' }} px-4 py-2 shadow-sm"
                         style="border-radius: 10px;{{ ($button['variant'] ?? 'light') === 'light' ? ' border: 1px solid #e9ecef;' : '' }}"
                         @if(isset($button['onclick'])) onclick="{{ $button['onclick'] }}" @endif
+                        @foreach($attributes as $attr => $value)
+                            {{ $attr }}="{{ htmlspecialchars($value, ENT_QUOTES, 'UTF-8') }}"
+                        @endforeach
                     >
                         @if(isset($button['icon']))
                             <i class="bi {{ $button['icon'] }} me-2"></i>

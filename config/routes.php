@@ -63,6 +63,15 @@ Router::addGroup('/admin/{adminPath:[a-zA-Z0-9\-_]+}', function () {
         // 测试页面
         Router::get('/test', 'App\\Controller\\Admin\\TestController@index');
 
+        // iframe 模式体验页
+        Router::get('/system/iframe-demo', 'App\Controller\Admin\System\IframeDemoController@index');
+        Router::get('/system/iframe-demo/modal-demo', 'App\Controller\Admin\System\IframeDemoController@modalDemo');
+
+        // ========================================
+        // 图片上传 API（客户端直传PUT方案）
+        // ========================================
+        Router::post('/api/admin/upload/token', 'App\Controller\Admin\System\ImageUploadController@getUploadToken');
+        Router::put('/api/admin/upload/{path:.+}', 'App\Controller\Admin\System\ImageUploadController@upload');
 
 
 
@@ -74,12 +83,12 @@ Router::addGroup('/admin/{adminPath:[a-zA-Z0-9\-_]+}', function () {
         // 例如：/admin/admin/universal/AdminUser -> 管理 AdminUser 模型（对应 admin_users 表）
         // 注意：推荐使用 model_name，但也兼容 route_slug、table_name 和 ID
         Router::addGroup('/u/{model}', function () {
+            // 保存数据
+            Router::post('', 'App\Controller\Admin\System\UniversalCrudController@store');
             // 列表页面
             Router::get('', 'App\Controller\Admin\System\UniversalCrudController@index');
             // 创建页面
             Router::get('/create', 'App\Controller\Admin\System\UniversalCrudController@create');
-            // 保存数据
-            Router::post('', 'App\Controller\Admin\System\UniversalCrudController@store');
             // 编辑页面
             Router::get('/{id:\d+}/edit', 'App\Controller\Admin\System\UniversalCrudController@edit');
             // 更新数据

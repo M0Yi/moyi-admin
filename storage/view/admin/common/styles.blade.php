@@ -385,6 +385,21 @@ body:has(.sidebar.collapsed) .fixed-bottom-actions {
     color: rgba(255, 255, 255, 0.8) !important;
 }
 
+.fixed-bottom-actions[data-embed="1"] {
+    left: 0;
+    right: 0;
+    border-radius: 16px 16px 0 0;
+}
+
+.fixed-bottom-actions[data-embed="1"] .container-fluid {
+    padding-left: 1.5rem;
+    padding-right: 1.5rem;
+}
+
+.fixed-bottom-actions-spacer[data-embed="1"] {
+    height: 96px;
+}
+
 @keyframes slideUp {
     from {
         transform: translateY(100%);

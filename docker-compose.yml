@@ -55,7 +55,7 @@ services:
       # - "3306:3306"                          # 如需外部直接连接，取消注释映射端口
     volumes:
       - mysql-data:/var/lib/mysql              # 数据目录持久化到命名卷
-      - ./docker/mysql-init:/docker-entrypoint-initdb.d  # 初始化 SQL/脚本目录
+#      - ./docker/mysql-init:/docker-entrypoint-initdb.d  # 初始化 SQL/脚本目录
     networks:
       - moyi
 #     configs:

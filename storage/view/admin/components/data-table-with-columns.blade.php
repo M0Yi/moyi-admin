@@ -28,8 +28,6 @@
  *   - class: 列样式类（可选）
  *   - toggleable: 是否可切换显示（可选，默认 true，false 表示此列不会出现在列显示控制中）
  *   - ... 其他类型特定参数（详见文档 docs/refactoring/column-type-system.md）
- * @param array $data 表格初始数据（会被 AJAX 动态替换）
- *
  * === 必填参数 ===
  * @param string $ajaxUrl API 数据加载地址（必填，用于 AJAX 模式加载数据）
  * @param string $searchFormId 搜索表单ID（默认 'searchForm'，用于收集过滤条件）
@@ -97,7 +95,6 @@
  * === 工具栏参数（可选） ===
  * 
  * 方式1：使用按钮配置数组（推荐）
- * @param array $buttons 左侧主操作按钮配置数组（向后兼容，等同于 leftButtons）
  * @param array $leftButtons 左侧主操作按钮配置数组
  *   - type: 'link' | 'button'
  *   - href: 链接地址（type=link时）
@@ -119,7 +116,7 @@
  *
  * 方式2：完全自定义工具栏（高级用法）
  * @param string $toolbarSlot 完全自定义工具栏HTML（优先级最高，如果设置则忽略所有按钮配置）
- * @param string $leftSlot 自定义左侧工具栏HTML（优先级高于 leftButtons/buttons）
+ * @param string $leftSlot 自定义左侧工具栏HTML（优先级高于 leftButtons）
  * @param string $rightSlot 自定义右侧工具栏HTML（优先级高于 rightButtons）
  *
  * @param bool $showToolbar 是否显示工具栏（默认 true）
@@ -141,7 +138,6 @@
  *             ['type' => 'link', 'href' => '/admin/users/{id}/view', 'icon' => 'bi-eye', 'variant' => 'info', 'title' => '查看', 'visible' => function(row) { return row.status == 1; }],
  *         ]],
  *     ],
- *     'data' => [],  // 初始数据（AJAX 模式下会被动态替换，通常为空数组）
  *     'ajaxUrl' => '/admin/users',  // 必填：AJAX 数据加载地址
  *     'searchConfig' => [  // 传递搜索配置，组件会自动渲染搜索表单
  *         'search_fields' => ['username', 'email', 'status'],
@@ -176,7 +172,6 @@
  *         ['index' => 1, 'label' => '用户名', 'field' => 'username', 'type' => 'text', 'visible' => true],
  *         ['index' => 2, 'label' => '操作', 'type' => 'actions', 'visible' => true],
  *     ],
- *     'data' => [],
  *     'ajaxUrl' => '/admin/users',
  *     'batchDestroyRoute' => '/admin/users/batch-destroy',  // 启用批量删除（添加复选框列）
  *     'leftButtons' => [
@@ -198,31 +193,11 @@
  *     // 批量删除按钮需要在 leftButtons 中手动配置
  * ])
  *
- * 使用示例 1.1（AJAX 模式 + 外部搜索表单 - 兼容旧方式）：
- * // 如果需要在外部自定义搜索表单，可以先渲染搜索表单，然后传递 searchFormRendered 标记
- * @php $searchFormRendered = true; @endphp
- * @include('admin.components.search-form', [
- *     'config' => $config,
- *     'columns' => $columns,
- *     'formId' => 'searchForm',
- *     'panelId' => 'searchPanel'
- * ])
- * @include('admin.components.data-table-with-columns', [
- *     'tableId' => 'userTable',
- *     'storageKey' => 'userTableColumns',
- *     'columns' => $columns,
- *     'data' => [],
- *     'ajaxUrl' => '/admin/users',
- *     'searchFormRendered' => true,  // 标记搜索表单已外部渲染
- *     'editRouteTemplate' => admin_route('universal/users'),
- * ])
- *
  * 使用示例 2（自定义左侧工具栏）：
  * @include('admin.components.data-table-with-columns', [
  *     'tableId' => 'dataTable',
  *     'storageKey' => 'dataTableColumns',
  *     'columns' => [...],
- *     'data' => $data,
  *     'leftSlot' => '
  *         <button class="btn btn-primary" onclick="customAction()">自定义操作</button>
  *         <div class="dropdown">
@@ -243,7 +218,6 @@
  *     'tableId' => 'dataTable',
  *     'storageKey' => 'dataTableColumns',
  *     'columns' => [...],
- *     'data' => $data,
  *     'toolbarSlot' => '
  *         <div class="mb-4">
  *             <div class="d-flex justify-content-between">
@@ -258,147 +232,498 @@
 --}}
 
 @php
+    if (!function_exists('universal_bool_value')) {
+        function universal_bool_value($value, bool $default = false): bool
+        {
+            if (is_bool($value)) {
+                return $value;
+            }
+
+            if ($value === null) {
+                return $default;
+            }
+
+            if (is_numeric($value)) {
+                return (int)$value !== 0;
+            }
+
+            if (is_string($value)) {
+                $normalized = strtolower(trim($value));
+                if (in_array($normalized, ['1', 'true', 'yes', 'on'], true)) {
+                    return true;
+                }
+                if (in_array($normalized, ['0', 'false', 'no', 'off'], true)) {
+                    return false;
+                }
+            }
+
+            return $default;
+        }
+    }
+
+    if (!function_exists('universal_normalize_options')) {
+        function universal_normalize_options(array $options): array
+        {
+            $result = [];
+            foreach ($options as $key => $option) {
+                if (is_array($option)) {
+                    $normalizedKey = (string)($option['key'] ?? $key);
+                    $result[$normalizedKey] = [
+                        'label' => $option['value'] ?? $option['label'] ?? $normalizedKey,
+                        'color' => $option['color'] ?? null,
+                    ];
+                } else {
+                    $normalizedKey = (string)$key;
+                    $result[$normalizedKey] = [
+                        'label' => (string)$option,
+                        'color' => null,
+                    ];
+                }
+            }
+            return $result;
+        }
+    }
+
+    if (!function_exists('universal_get_variant_for_value')) {
+        function universal_get_variant_for_value($key, string $label, array $variants, int $variantIndex): string
+        {
+            $labelLower = mb_strtolower($label);
+
+            if (preg_match('/^(启用|激活|是|开启|正常|在线|公开|显示)$/u', $label)) {
+                return 'success';
+            }
+
+            if (preg_match('/^(禁用|停用|否|关闭|异常|离线|隐藏|删除)$/u', $label)) {
+                return 'secondary';
+            }
+
+            if (preg_match('/^(警告|待审核|待处理|待发布|草稿)$/u', $label)) {
+                return 'warning';
+            }
+
+            if (preg_match('/^(错误|拒绝|失败|已删除|已禁用)$/u', $label)) {
+                return 'danger';
+            }
+
+            if (preg_match('/^(信息|默认|其他)$/u', $label)) {
+                return 'info';
+            }
+
+            if (is_numeric($key)) {
+                $numKey = (int)$key;
+                if ($numKey === 0) {
+                    return 'secondary';
+                }
+                if ($numKey === 1) {
+                    return 'success';
+                }
+            }
+
+            return $variants[$variantIndex % count($variants)];
+        }
+    }
+
+    if (!function_exists('universal_build_badge_map_from_options')) {
+        function universal_build_badge_map_from_options(array $options, string $fieldName): array
+        {
+            $badgeMap = [];
+            $variants = ['primary', 'success', 'info', 'warning', 'danger', 'secondary'];
+            $variantIndex = 0;
+
+            $specialMappings = [
+                'status' => [
+                    '0' => 'secondary',
+                    '1' => 'success',
+                    '启用' => 'success',
+                    '禁用' => 'secondary',
+                    '是' => 'success',
+                    '否' => 'secondary',
+                    'active' => 'success',
+                    'inactive' => 'secondary',
+                ],
+                'type' => [
+                    'menu' => 'primary',
+                    'button' => 'info',
+                    'link' => 'warning',
+                ],
+            ];
+
+            $fieldMapping = $specialMappings[$fieldName] ?? [];
+
+            foreach ($options as $key => $option) {
+                $label = $option['label'] ?? (string)$key;
+                $color = $option['color'] ?? null;
+                $optionKey = (string)$key;
+
+                $variant = $color
+                    ?? ($fieldMapping[$optionKey] ?? ($fieldMapping[$label] ?? universal_get_variant_for_value($optionKey, $label, $variants, $variantIndex)));
+
+                $badgeMap[$optionKey] = [
+                    'text' => $label,
+                    'variant' => $variant,
+                ];
+
+                $variantIndex++;
+            }
+
+            return $badgeMap;
+        }
+    }
+
+    if (!function_exists('universal_convert_db_type_to_column_type')) {
+        function universal_convert_db_type_to_column_type(string $dbType, string $fieldName, ?string $formType = null): string
+        {
+            $supportedColumnTypes = [
+                'text', 'number', 'date', 'icon', 'image', 'images',
+                'switch', 'badge', 'code', 'custom', 'link', 'relation', 'columns'
+            ];
+
+            if ($formType) {
+                $directSupportedTypes = [
+                    'text', 'textarea', 'number', 'date', 'image', 'images',
+                    'icon', 'switch', 'code', 'custom'
+                ];
+
+                $formTypeToColumnTypeMap = [
+                    'datetime' => 'date',
+                    'timestamp' => 'date',
+                    'url' => 'link',
+                    'file' => 'text',
+                    'email' => 'text',
+                    'color' => 'text',
+                    'password' => 'text',
+                    'radio' => 'badge',
+                    'select' => 'badge',
+                    'checkbox' => 'text',
+                    'relation' => 'relation',
+                    'rich_text' => 'text',
+                    'number_range' => 'text',
+                ];
+
+                if (in_array($formType, $directSupportedTypes)) {
+                    $columnType = $formType;
+                } elseif (isset($formTypeToColumnTypeMap[$formType])) {
+                    $columnType = $formTypeToColumnTypeMap[$formType];
+                } else {
+                    $columnType = 'text';
+                }
+
+                if (!in_array($columnType, $supportedColumnTypes)) {
+                    $columnType = 'text';
+                }
+
+                return $columnType;
+            }
+
+            if (str_ends_with($fieldName, '_at') || str_ends_with($fieldName, '_time')) {
+                return 'date';
+            }
+
+            if ($fieldName === 'icon' || str_ends_with($fieldName, '_icon')) {
+                return 'icon';
+            }
+
+            if ($fieldName === 'avatar') {
+                return 'icon';
+            }
+
+            if ($fieldName === 'image' || str_contains($fieldName, '_image') || str_contains($fieldName, 'image_')) {
+                return 'image';
+            }
+
+            $typeMap = [
+                'int' => 'number',
+                'integer' => 'number',
+                'bigint' => 'number',
+                'tinyint' => 'number',
+                'smallint' => 'number',
+                'decimal' => 'number',
+                'float' => 'number',
+                'double' => 'number',
+                'date' => 'date',
+                'datetime' => 'date',
+                'timestamp' => 'date',
+                'text' => 'text',
+                'longtext' => 'text',
+                'json' => 'code',
+            ];
+
+            return $typeMap[strtolower($dbType)] ?? 'text';
+        }
+    }
+
+    $tableId = $tableId ?? 'dataTable';
+    $columns = $columns ?? [];
+    $modelNameForColumns = $model ?? '';
+    $toggleStatusRouteBase = $modelNameForColumns ? admin_route("u/{$modelNameForColumns}") : '';
+    $fieldConfigs = $config['fields_config'] ?? [];
+    $actionColumnConfig = $actionColumnConfig ?? ($config['action_column'] ?? []);
+    $featuresFromInclude = $features ?? null;
+
+    $featureDefaults = [
+        'edit' => true,
+        'delete' => true,
+        'actions' => true,
+    ];
+
+    if (!empty($featuresFromInclude) && is_array($featuresFromInclude)) {
+        $featureDefaults = array_merge($featureDefaults, $featuresFromInclude);
+    } elseif (!empty($config['features']) && is_array($config['features'])) {
+        $featureDefaults = array_merge($featureDefaults, $config['features']);
+    }
+
+    $showActionsColumn = $showActionsColumn ?? null;
+    if ($showActionsColumn === null && !empty($actionColumnConfig)) {
+        foreach (['enabled', 'visible', 'show'] as $flagKey) {
+            if (array_key_exists($flagKey, $actionColumnConfig)) {
+                $showActionsColumn = universal_bool_value($actionColumnConfig[$flagKey], true);
+                break;
+            }
+        }
+    }
+    if ($showActionsColumn === null) {
+        $showActionsColumn = universal_bool_value($featureDefaults['actions'] ?? true, true);
+    }
+
+    $editFeatureEnabled = universal_bool_value($featureDefaults['edit'] ?? true, true);
+    $deleteFeatureEnabled = universal_bool_value($featureDefaults['delete'] ?? true, true);
+    $editEnabled = empty($config['readonly']) && $editFeatureEnabled;
+    $deleteEnabled = empty($config['readonly']) && $deleteFeatureEnabled;
+
+    $defaultActionButtons = [];
+
+    if ($editEnabled) {
+        $defaultActionButtons[] = [
+            'type' => 'link',
+            'href' => ($editRouteTemplate ?? '') . '/{id}/edit',
+            'icon' => 'bi-pencil',
+            'variant' => 'warning',
+            'title' => '编辑',
+            'visible' => true,
+        ];
+    }
+
+    if ($deleteEnabled) {
+        $defaultActionButtons[] = [
+            'type' => 'button',
+            'onclick' => 'deleteRow_' . ($tableId ?? 'dataTable') . '({id})',
+            'icon' => 'bi-trash',
+            'variant' => 'danger',
+            'title' => '删除',
+            'visible' => true,
+        ];
+    }
+
+    if (!empty($actionColumnConfig['actions']) && is_array($actionColumnConfig['actions'])) {
+        $defaultActionButtons = $actionColumnConfig['actions'];
+    }
+
+    if (empty($columns) && !empty($fieldConfigs)) {
+        $columns = [];
+        $columnIndex = 0;
+
+        foreach ($fieldConfigs as $field) {
+            $name = $field['name'] ?? $field['field_name'] ?? null;
+            if ($name === null) {
+                continue;
+            }
+
+            $label = $field['field_name'] ?? $field['label'] ?? $name;
+            $dbType = $field['data_type'] ?? $field['db_type'] ?? 'string';
+            $formType = $field['form_type'] ?? null;
+            $columnType = $field['column_type'] ?? $field['render_type'] ?? null;
+            $type = $columnType ?: universal_convert_db_type_to_column_type($dbType, $name, $formType);
+
+            if ($formType === 'relation' || $columnType === 'relation') {
+                $type = 'relation';
+            }
+
+            $visible = universal_bool_value($field['list_default'] ?? true, true);
+            $sortable = universal_bool_value($field['sortable'] ?? false, false);
+
+            $columnConfig = [
+                'index' => $columnIndex++,
+                'label' => $label,
+                'field' => $name,
+                'name' => $name,
+                'type' => $type,
+                'visible' => $visible,
+                'sortable' => $sortable,
+                'db_type' => $dbType,
+                'form_type' => $formType,
+                'toggleable' => true,
+            ];
+
+            if (!empty($field['options'])) {
+                $columnConfig['options'] = $field['options'];
+            }
+
+            if ($type === 'relation' && !empty($field['relation']['table'])) {
+                $relation = $field['relation'];
+                $relationMultiple = $relation['multiple'] ?? null;
+                if ($relationMultiple === null) {
+                    $relationMultiple = (($field['model_type'] ?? '') === 'array') || str_ends_with($name, '_ids');
+                }
+
+                $columnConfig['relation'] = [
+                    'table' => $relation['table'] ?? '',
+                    'label_field' => $relation['label_column'] ?? $relation['label_field'] ?? 'name',
+                    'value_field' => $relation['value_column'] ?? $relation['value_field'] ?? 'id',
+                    'multiple' => universal_bool_value($relationMultiple, false),
+                ];
+                $columnConfig['labelField'] = "{$name}_label";
+            }
+
+            if (($type === 'badge' || $formType === 'radio' || $formType === 'select') && !empty($field['options'])) {
+                $normalizedOptions = universal_normalize_options($field['options']);
+                $columnConfig['badgeMap'] = universal_build_badge_map_from_options($normalizedOptions, $name);
+            } elseif ($type === 'badge' && $name === 'status' && empty($field['options'])) {
+                $defaultStatusOptions = [
+                    '1' => ['label' => '启用', 'color' => null],
+                    '0' => ['label' => '禁用', 'color' => null],
+                ];
+                $columnConfig['badgeMap'] = universal_build_badge_map_from_options($defaultStatusOptions, $name);
+            }
+
+            switch ($name) {
+                case 'id':
+                    $columnConfig['width'] = '60';
+                    if (!$formType) {
+                        $columnConfig['type'] = 'number';
+                    }
+                    break;
+                case 'icon':
+                    if (!$formType || $formType === 'icon') {
+                        $columnConfig['type'] = 'icon';
+                        $columnConfig['size'] = '1.2rem';
+                        $columnConfig['width'] = '80';
+                    }
+                    break;
+                case 'status':
+                    if (!$formType || $formType === 'switch') {
+                        $columnConfig['type'] = 'switch';
+                        if ($toggleStatusRouteBase) {
+                            $columnConfig['onChange'] = "toggleStatus({id}, this, '{$toggleStatusRouteBase}/{id}')";
+                        }
+                        $columnConfig['width'] = '70';
+                    } else {
+                        if (!isset($columnConfig['width'])) {
+                            $columnConfig['width'] = '150';
+                        }
+                    }
+                    break;
+                case 'sort':
+                case 'order':
+                    if (!$formType) {
+                        $columnConfig['type'] = 'number';
+                    }
+                    $columnConfig['width'] = '70';
+                    break;
+                case 'created_at':
+                case 'updated_at':
+                    if (!$formType) {
+                        $columnConfig['type'] = 'date';
+                    }
+                    $columnConfig['format'] = 'Y-m-d H:i:s';
+                    $columnConfig['width'] = '150';
+                    $columnConfig['visible'] = false;
+                    break;
+            }
+
+            if ($type === 'switch') {
+                if (!isset($columnConfig['onChange']) && $toggleStatusRouteBase) {
+                    $columnConfig['onChange'] = "toggleStatus({id}, this, '{$toggleStatusRouteBase}/{id}')";
+                }
+                $columnConfig['fieldName'] = $name;
+                if (!isset($columnConfig['width'])) {
+                    $columnConfig['width'] = '70';
+                }
+            }
+
+            if ($type === 'image') {
+                $columnConfig['width'] = '150';
+                $columnConfig['imageWidth'] = '80px';
+                $columnConfig['imageHeight'] = '80px';
+            } elseif ($type === 'images') {
+                $columnConfig['width'] = '200';
+                $columnConfig['imageWidth'] = '60px';
+                $columnConfig['imageHeight'] = '60px';
+            } elseif ($type === 'icon' && $name !== 'icon') {
+                if (!isset($columnConfig['width'])) {
+                    $columnConfig['width'] = '80';
+                }
+            }
+
+            if (!isset($columnConfig['width'])) {
+                if (in_array(strtolower($dbType), ['text', 'longtext'], true)) {
+                    $columnConfig['width'] = '200';
+                } elseif (in_array(strtolower($dbType), ['varchar', 'string'], true)) {
+                    $columnConfig['width'] = '150';
+                }
+            }
+
+            $columns[] = $columnConfig;
+        }
+
+        $actionColumnActions = $defaultActionButtons;
+
+        if ($showActionsColumn && !empty($actionColumnActions)) {
+            $actionColumn = [
+                'index' => count($columns),
+                'label' => $actionColumnConfig['label'] ?? '操作',
+                'type' => 'actions',
+                'visible' => universal_bool_value($actionColumnConfig['visible'] ?? true, true),
+                'width' => (string)($actionColumnConfig['width'] ?? '120'),
+                'class' => trim('sticky-column ' . ($actionColumnConfig['class'] ?? '')),
+                'toggleable' => universal_bool_value($actionColumnConfig['toggleable'] ?? false, false),
+                'sortable' => false,
+            ];
+
+            if (array_key_exists('readonly', $actionColumnConfig)) {
+                $actionColumn['readonly'] = universal_bool_value($actionColumnConfig['readonly'], false);
+            }
+
+            $actionColumn['actions'] = $actionColumnActions;
+
+            $columns[] = $actionColumn;
+        }
+    }
+
+    $defaultActionsForJs = $defaultActionButtons;
+
     // AJAX 模式下的默认值
     $searchFormId = $searchFormId ?? 'searchForm';
     $searchPanelId = $searchPanelId ?? 'searchPanel';
     $defaultPageSize = $defaultPageSize ?? 15;
     
-    // 统一搜索配置处理：优先从 config 中读取，如果没有则使用 searchConfig（向后兼容）
+    // 统一搜索配置处理：优先从 config 中读取，否则使用 searchConfig
     $finalSearchConfig = null;
     
-    // 1. 优先从 config['search_fields_config'] 读取（新方式）
+    // 1. 优先从 config['search_fields_config'] 读取
     if (!empty($config) && !empty($config['search_fields_config'])) {
         $finalSearchConfig = [
             'search_fields' => $config['search_fields'] ?? [],
             'fields' => $config['search_fields_config'],
         ];
     }
-    // 2. 如果没有，尝试从 config['fields'] 中提取 searchable=true 的字段
-    elseif (!empty($config) && !empty($config['fields'])) {
-        $searchFields = [];
-        $searchFieldsConfig = [];
-        
-        foreach ($config['fields'] as $field) {
-            $searchable = $field['searchable'] ?? false;
-            $searchable = filter_var($searchable, FILTER_VALIDATE_BOOLEAN);
-            
-            // 如果没有 searchable，则根据数据库类型自动判断
-            if (!$searchable && isset($field['db_type'])) {
-                $searchableTypes = ['string', 'text', 'varchar', 'char'];
-                if (in_array($field['db_type'], $searchableTypes)) {
-                    $searchable = true;
-                }
-            }
-            
-            if ($searchable) {
-                $searchFields[] = $field['name'] ?? '';
-                
-                // 构建搜索字段配置
-                $fieldName = $field['name'] ?? '';
-                $fieldLabel = $field['search_label'] ?? $field['field_name'] ?? $field['label'] ?? $fieldName;
-                
-                // 确定搜索类型
-                $searchType = $field['search_type'] ?? null;
-                if (empty($searchType)) {
-                    $formType = $field['form_type'] ?? null;
-                    $dbType = $field['db_type'] ?? null;
-                    $fieldNameLower = strtolower($fieldName);
-                    
-                    // 1. 优先检查表单类型
-                    if ($formType === 'select' || $formType === 'radio') {
-                        $searchType = 'select';
-                    } elseif (in_array($formType, ['date', 'datetime', 'datetime-local', 'time', 'month', 'week'])) {
-                        // 时间相关的表单类型，统一使用区间搜索
-                        $searchType = 'date_range';
-                    } elseif (in_array($formType, ['number', 'integer', 'number_range'])) {
-                        $searchType = 'number_range';
-                    }
-                    // 2. 如果没有表单类型，检查数据库类型
-                    elseif ($dbType !== null) {
-                        $dbTypeLower = strtolower($dbType);
-                        if (in_array($dbTypeLower, ['date', 'datetime', 'timestamp', 'time', 'year'])) {
-                            // 时间相关的数据库类型，统一使用区间搜索
-                            $searchType = 'date_range';
-                        } elseif (in_array($dbTypeLower, ['int', 'integer', 'tinyint', 'smallint', 'mediumint', 'bigint', 'decimal', 'float', 'double', 'numeric'])) {
-                            $searchType = 'number_range';
-                        }
-                    }
-                    // 3. 如果都没有，根据字段名推断（常见的时间字段名模式）
-                    if (empty($searchType)) {
-                        // 检查字段名是否包含时间相关的关键词
-                        $timeKeywords = ['_at', '_time', '_date', 'created', 'updated', 'deleted', 'start', 'end', 'begin', 'finish'];
-                        $isTimeField = false;
-                        foreach ($timeKeywords as $keyword) {
-                            if (str_contains($fieldNameLower, $keyword)) {
-                                $isTimeField = true;
-                                break;
-                            }
-                        }
-                        
-                        if ($isTimeField) {
-                            $searchType = 'date_range';
-                        } else {
-                            $searchType = 'text';
-                        }
-                    }
-                }
-                
-                $searchFieldConfig = [
-                    'name' => $fieldName,
-                    'label' => $fieldLabel,
-                    'type' => $searchType,
-                ];
-                
-                // 添加占位符
-                if ($searchType === 'text') {
-                    $searchFieldConfig['placeholder'] = $field['search_placeholder'] ?? ('搜索' . $fieldLabel);
-                }
-                
-                // 添加选项
-                if ($searchType === 'select') {
-                    $searchOptions = $field['search_options'] ?? $field['options'] ?? null;
-                    if ($searchOptions !== null) {
-                        if (is_array($searchOptions) && !isset($searchOptions[''])) {
-                            $searchFieldConfig['options'] = array_merge(['' => '全部'], $searchOptions);
-                        } else {
-                            $searchFieldConfig['options'] = $searchOptions;
-                        }
-                    }
-                }
-                
-                // 标记虚拟字段
-                if (isset($field['is_virtual']) && $field['is_virtual']) {
-                    $searchFieldConfig['is_virtual'] = true;
-                }
-                
-                $searchFieldsConfig[] = $searchFieldConfig;
-            }
-        }
-        
-        if (!empty($searchFields)) {
-            $finalSearchConfig = [
-                'search_fields' => $searchFields,
-                'fields' => $searchFieldsConfig,
-            ];
-        }
-    }
-    // 3. 最后使用 searchConfig（向后兼容）
+    // 2. 其次使用显式传入的 searchConfig
     elseif (!empty($searchConfig) && !empty($searchConfig['search_fields'])) {
         $finalSearchConfig = $searchConfig;
     }
     
     // 判断是否有搜索配置
     $hasSearchConfig = !empty($finalSearchConfig) && !empty($finalSearchConfig['search_fields']);
-    // 如果外部已经渲染了搜索表单，则不重复渲染
-    $renderSearchForm = $hasSearchConfig && !isset($searchFormRendered);
+    // 自动渲染搜索表单（如果提供了搜索配置且启用了搜索功能）
+    $showSearch = $showSearch ?? true;
+    $renderSearchForm = $hasSearchConfig && $showSearch;
     $pageSizeOptions = $pageSizeOptions ?? [10, 15, 20, 50, 100];
     $enablePageSizeStorage = $enablePageSizeStorage ?? true;
     $defaultSortField = $defaultSortField ?? 'id';
     $defaultSortOrder = $defaultSortOrder ?? 'desc';
     $showPagination = $showPagination ?? true;
     
-    // 向后兼容：如果设置了 buttons 但没有设置 leftButtons，则使用 buttons
-    $leftButtons = $leftButtons ?? $buttons ?? [];
+    // 左侧按钮配置
+    $leftButtons = $leftButtons ?? [];
     
     // 批量删除功能参数初始化
     // 注意：批量删除按钮需要通过 leftButtons 配置，不再自动添加
@@ -453,408 +778,21 @@
 @endphp
 
 {{-- 组件样式 --}}
-<style>
-/* 排序样式 */
-.sortable-column {
-    position: relative;
-    user-select: none;
-}
+@include('admin.components.data-table.styles')
 
-.sortable-column:hover {
-    background-color: #f8f9fa;
-}
+@include('admin.components.data-table.search-form')
 
-.sort-icons {
-    display: inline-flex !important;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    margin-left: 0.5rem;
-    gap: 0.1rem;
-    opacity: 0.4;
-    transition: opacity 0.2s ease;
-}
+@include('admin.components.data-table.toolbar')
 
-.sort-icons i {
-    display: block;
-    font-size: 0.7rem;
-    line-height: 1;
-    color: #6c757d;
-    transition: all 0.2s ease;
-}
+@include('admin.components.data-table.table')
 
-.sort-icons .sort-asc {
-    margin-bottom: -0.15rem;
-}
-
-.sort-icons .sort-desc {
-    margin-top: -0.15rem;
-}
-
-/* 悬停状态 */
-.sortable-column:hover .sort-icons {
-    opacity: 0.7;
-}
-
-/* 激活状态 - 更明显的颜色对比 */
-.sort-icons .sort-asc.text-primary,
-.sort-icons .sort-desc.text-primary {
-    opacity: 1 !important;
-    color: #667eea !important;
-    font-weight: 700;
-    font-size: 0.85rem;
-    filter: drop-shadow(0 1px 2px rgba(102, 126, 234, 0.4));
-    transform: scale(1.1);
-}
-
-.sort-icons.active {
-    opacity: 1;
-}
-
-.sort-icons.active .sort-asc:not(.text-primary),
-.sort-icons.active .sort-desc:not(.text-primary) {
-    opacity: 0.2;
-    color: #adb5bd !important;
-}
-
-/* 搜索面板样式 */
-#{{ $searchPanelId }} {
-    padding: 1.25rem 0;
-    margin-bottom: 1.5rem;
-    border-bottom: 1px solid #e9ecef;
-    transition: opacity 0.3s ease, transform 0.3s ease;
-}
-
-#{{ $searchPanelId }} form {
-    margin-bottom: 0;
-}
-
-/* 搜索按钮激活状态 */
-#searchToggleBtn_{{ $tableId }}.active {
-    background-color: #667eea;
-    border-color: #667eea;
-    color: #fff;
-}
-
-#searchToggleBtn_{{ $tableId }}.active i {
-    color: #fff;
-}
-
-#searchToggleBtn_{{ $tableId }}:hover {
-    background-color: #667eea;
-    border-color: #667eea;
-    color: #fff;
-}
-
-#searchToggleBtn_{{ $tableId }}:hover i {
-    color: #fff;
-}
-
-#searchToggleBtn_{{ $tableId }} i {
-    transition: transform 0.2s ease;
-}
-
-/* 批量删除按钮禁用状态 */
-#batchDeleteBtn_{{ $tableId }}.disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-    pointer-events: none;
-}
-
-/* 复选框样式优化 */
-#{{ $tableId }} .form-check-input {
-    cursor: pointer;
-}
-
-#{{ $tableId }} .form-check-input:indeterminate {
-    background-color: #667eea;
-    border-color: #667eea;
-}
-</style>
-
-{{-- 搜索表单（如果提供了搜索配置，则自动渲染） --}}
-@if($renderSearchForm)
-    @include('admin.components.search-form', [
-        'config' => $finalSearchConfig,
-        'columns' => $columns,
-        'model' => $model ?? '',
-        'formId' => $searchFormId,
-        'panelId' => $searchPanelId
-    ])
-@endif
-
-{{-- 操作按钮工具栏 --}}
-@if($showToolbar ?? true)
-    @if(isset($toolbarSlot))
-        {{-- 完全自定义工具栏 --}}
-        {!! $toolbarSlot !!}
-    @else
-        {{-- 使用独立的工具栏组件 --}}
-        @include('admin.components.table-toolbar', [
-            'tableId' => $tableId,
-            'storageKey' => $storageKey,
-            'columns' => $columns,
-            'leftButtons' => $leftButtons,
-            'rightButtons' => $rightButtons ?? [],
-            'leftSlot' => $leftSlot ?? null,
-            'rightSlot' => $rightSlot ?? null,
-            'showColumnToggle' => $showColumnToggle ?? true,
-            'showSearch' => ($showSearch ?? true) && ($hasSearchConfig || !isset($searchFormRendered)),
-        ])
-    @endif
-@endif
-
-{{-- 数据表格 --}}
-
-<div class="table-responsive">
-    <table class="table table-hover align-middle" id="{{ $tableId }}" style="table-layout: auto;">
-        <thead class="table-light">
-            <tr>
-                {{-- 批量删除复选框列（如果启用了批量删除） --}}
-                @if($enableBatchDelete)
-                    <th width="50" style="white-space: nowrap;">
-                        <div class="form-check">
-                            <input class="form-check-input" type="checkbox" id="checkAll_{{ $tableId }}" 
-                                   onclick="toggleCheckAll_{{ $tableId }}(this)" 
-                                   title="全选/取消全选">
-                        </div>
-                    </th>
-                @endif
-                @foreach($columns as $column)
-                    @php
-                        // 构建表头样式：禁止换行 + 显示/隐藏
-                        $thStyle = 'white-space: nowrap;';
-                        if (!($column['visible'] ?? true)) {
-                            $thStyle .= ' display: none;';
-                        }
-                        
-                        // 是否支持排序
-                        $sortable = $column['sortable'] ?? false;
-                        $sortable = filter_var($sortable, FILTER_VALIDATE_BOOLEAN);
-                        
-                        // 排序样式类
-                        $sortClass = '';
-                        if ($sortable) {
-                            $sortClass = 'sortable-column';
-                        }
-                    @endphp
-                    <th
-                        @if(isset($column['width'])) width="{{ $column['width'] }}" @endif
-                        data-column="{{ $column['index'] }}"
-                        data-field="{{ $column['field'] ?? '' }}"
-                        @if($sortable) data-sortable="1" @endif
-                        @if(isset($column['class'])) class="{{ $column['class'] }} {{ $sortClass }}" @elseif($sortable) class="{{ $sortClass }}" @endif
-                        style="{{ $sortable ? 'cursor: pointer; ' : '' }}{{ $thStyle }}"
-                        @if($sortable) onclick="if(typeof handleSort_{{$tableId}} === 'function') handleSort_{{$tableId}}(this)" @endif
-                    >
-                        <div class="d-flex align-items-center justify-content-between">
-                            <span>{{ $column['label'] }}</span>
-                            @if($sortable)
-                                <span class="sort-icons ms-2">
-                                    <i class="bi bi-caret-up-fill sort-asc"></i>
-                                    <i class="bi bi-caret-down-fill sort-desc"></i>
-                                </span>
-                            @endif
-                        </div>
-                    </th>
-                @endforeach
-            </tr>
-        </thead>
-        <tbody>
-            {{-- 数据通过 AJAX 动态加载并渲染 --}}
-            <tr>
-                <td colspan="{{ count($columns) + ($enableBatchDelete ? 1 : 0) }}" class="text-center text-muted py-4">
-                    <i class="bi bi-inbox fs-1 d-block mb-2"></i>
-                    {{ $emptyMessage ?? '加载中...' }}
-                </td>
-            </tr>
-        </tbody>
-    </table>
-</div>
-
-{{-- 分页 --}}
-@if($showPagination ?? true)
-    <div id="{{ $tableId }}_pagination" class="d-flex justify-content-between align-items-center mt-4" style="display: none;">
-        <div class="d-flex align-items-center gap-3">
-            <div id="{{ $tableId }}_pageInfo" class="text-muted"></div>
-            {{-- 分页尺寸选择器 --}}
-            @php
-                $pageSizeOptionsArray = $pageSizeOptions ?? [10, 15, 20, 50, 100];
-                $defaultPageSizeValue = $defaultPageSize ?? 15;
-            @endphp
-            <div class="d-flex align-items-center gap-2">
-                <label for="{{ $tableId }}_pageSizeSelect" class="text-muted mb-0 small">每页显示：</label>
-                <select id="{{ $tableId }}_pageSizeSelect" class="form-select form-select-sm" style="width: 80px; padding-right: 1.75rem;">
-                    @foreach($pageSizeOptionsArray as $size)
-                        <option value="{{ $size }}" {{ $size == $defaultPageSizeValue ? 'selected' : '' }}>
-                            {{ $size }}
-                        </option>
-                    @endforeach
-                </select>
-            </div>
-        </div>
-        <div class="d-flex align-items-center gap-3">
-        <nav>
-            <ul class="pagination mb-0" id="{{ $tableId }}_pageLinks"></ul>
-        </nav>
-            {{-- 页码跳转输入框 --}}
-            <div class="d-flex align-items-center gap-2" id="{{ $tableId }}_pageJump" style="display: none;">
-                <label for="{{ $tableId }}_pageInput" class="text-muted mb-0 small">跳转到：</label>
-                <input type="number" 
-                       id="{{ $tableId }}_pageInput" 
-                       class="form-control form-control-sm" 
-                       style="width: 70px;" 
-                       min="1" 
-                       placeholder="页码"
-                       onkeypress="if(event.key === 'Enter') { jumpToPage_{{ $tableId }}(); }">
-                <button type="button" 
-                        class="btn btn-sm btn-outline-secondary" 
-                        onclick="jumpToPage_{{ $tableId }}()">
-                    跳转
-                </button>
-            </div>
-        </div>
-    </div>
-@endif
+@include('admin.components.data-table.pagination')
 
 
 
-{{-- 删除确认模态框 --}}
-@if($showDeleteModal)
-    <div class="modal fade" id="{{ $deleteModalId }}" tabindex="-1" aria-labelledby="{{ $deleteModalId }}Label" aria-hidden="true">
-        <div class="modal-dialog modal-dialog-centered">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title" id="{{ $deleteModalId }}Label">
-                        <i class="bi bi-exclamation-triangle-fill me-2"></i>
-                        {{ $deleteModalTitle }}
-                    </h5>
-                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="关闭"></button>
-                </div>
-                <div class="modal-body">
-                    <div class="alert alert-warning" role="alert">
-                        <i class="bi bi-exclamation-circle-fill me-2"></i>
-                        <strong>{{ $deleteWarningMessage }}</strong>
-                    </div>
-                    <p class="mb-0">{{ $deleteConfirmMessage }}</p>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
-                        <i class="bi bi-x-circle me-1"></i>
-                        {{ $deleteCancelButtonText }}
-                    </button>
-                    <button type="button" class="btn btn-danger" id="{{ $deleteModalId }}ConfirmBtn">
-                        <i class="bi bi-trash me-1"></i>
-                        {{ $deleteConfirmButtonText }}
-                    </button>
-                </div>
-            </div>
-        </div>
-    </div>
-@endif
+@include('admin.components.data-table.modals')
 
-@if($showBatchDeleteModal)
-{{-- 批量删除确认模态框 --}}
-<div class="modal fade" id="{{ $batchDeleteModalId }}" tabindex="-1" aria-labelledby="{{ $batchDeleteModalId }}Label" aria-hidden="true">
-    <div class="modal-dialog modal-dialog-centered">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title" id="{{ $batchDeleteModalId }}Label">
-                    <i class="bi bi-exclamation-triangle-fill me-2"></i>
-                    {{ $batchDeleteModalTitle }}
-                </h5>
-                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="关闭"></button>
-            </div>
-            <div class="modal-body">
-                <div class="alert alert-warning" role="alert">
-                    <i class="bi bi-exclamation-circle-fill me-2"></i>
-                    <strong>{{ $batchDeleteWarningMessage }}</strong>
-                </div>
-                <p class="mb-0" id="{{ $batchDeleteModalId }}Message">{{ $batchDeleteConfirmMessage }}</p>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
-                    <i class="bi bi-x-circle me-1"></i>
-                    {{ $batchDeleteCancelButtonText }}
-                </button>
-                <button type="button" class="btn btn-danger" id="{{ $batchDeleteModalId }}ConfirmBtn">
-                    <i class="bi bi-trash me-1"></i>
-                    {{ $batchDeleteConfirmButtonText }}
-                </button>
-            </div>
-        </div>
-    </div>
-</div>
-@endif
-
-{{-- JavaScript 配置项（可以使用 PHP 和 Blade 语法） --}}
-@php
-    // 将列配置转换为 JSON（供 JavaScript 使用）
-    $columnsJson = json_encode($columns);
-    $editRouteTemplate = $editRouteTemplate ?? '';
-    
-    // 准备页面大小选项
-    $pageSizeOptionsForJson = $pageSizeOptions ?? [10, 15, 20, 50, 100];
-    
-    // 准备可搜索字段列表
-    // 从最终搜索配置中提取可搜索字段列表
-    $searchableFields = [];
-    if (!empty($finalSearchConfig) && !empty($finalSearchConfig['search_fields'])) {
-        $searchableFields = $finalSearchConfig['search_fields'];
-    }
-@endphp
-
-<script>
-    // 表格配置对象（从 PHP/Blade 获取）
-    window['tableConfig_{{ $tableId }}'] = {
-        tableId: '{{ $tableId }}',
-        storageKey: '{{ $storageKey }}',
-        ajaxUrl: '{{ $ajaxUrl ?? '' }}',
-        searchFormId: '{{ $searchFormId }}',
-        searchPanelId: '{{ $searchPanelId ?? 'searchPanel' }}',
-        batchDestroyRoute: '{{ $batchDestroyRoute ?? '' }}',
-        columns: @json($columns),
-        editRouteTemplate: '{{ $editRouteTemplate ?? '' }}',
-        deleteModalId: '{{ $deleteModalId }}',
-        defaultPageSize: {{ $defaultPageSize }},
-        enablePageSizeStorage: {{ ($enablePageSizeStorage ?? true) ? 'true' : 'false' }},
-        pageSizeOptions: @json($pageSizeOptionsForJson),
-        defaultSortField: '{{ $defaultSortField }}',
-        defaultSortOrder: '{{ $defaultSortOrder }}',
-        searchableFields: @json($searchableFields),
-        searchConfig: @json($finalSearchConfig),
-        showBatchDeleteModal: {{ ($showBatchDeleteModal ?? false) ? 'true' : 'false' }},
-        batchDeleteModalId: '{{ $batchDeleteModalId ?? '' }}',
-        batchDeleteConfirmMessage: '{{ $batchDeleteConfirmMessage ?? '' }}',
-        enableBatchDelete: {{ ($enableBatchDelete ?? false) ? 'true' : 'false' }},
-        showDeleteModal: {{ ($showDeleteModal ?? true) ? 'true' : 'false' }},
-        exportRoute: '{{ $exportRoute ?? '' }}',
-        onDataLoaded: '{{ $onDataLoaded ?? '' }}',
-        ajaxParams: @json($ajaxParams ?? [])
-    };
-    
-    // 打印完整的搜索配置到控制台
-    console.log('=== [DataTable {{ $tableId }}] 搜索配置 ===');
-    console.log('完整搜索配置:', window['tableConfig_{{ $tableId }}'].searchConfig);
-    console.log('可搜索字段列表:', window['tableConfig_{{ $tableId }}'].searchableFields);
-    if (window['tableConfig_{{ $tableId }}'].searchConfig && window['tableConfig_{{ $tableId }}'].searchConfig.fields) {
-        console.log('搜索字段详细配置:', window['tableConfig_{{ $tableId }}'].searchConfig.fields);
-        window['tableConfig_{{ $tableId }}'].searchConfig.fields.forEach((field, index) => {
-            console.log(`字段 ${index + 1}:`, {
-                name: field.name,
-                label: field.label,
-                type: field.type,
-                placeholder: field.placeholder || '(无)',
-                options: field.options || '(无)',
-                is_virtual: field.is_virtual || false
-            });
-        });
-    }
-    console.log('==========================================');
-    
-    // 设置当前表格ID，供第二个 script 标签使用
-    window['_currentTableId'] = '{{ $tableId }}';
-</script>
+@include('admin.components.data-table.scripts-config')
 
 {{-- 纯 JavaScript 代码（不能使用 PHP 和 Blade 语法） --}}
 <script>
@@ -894,26 +832,8 @@
         // 选中行ID数组（用于批量操作）
         let selectedIds = [];
         
-        // 操作列配置：从列配置中获取 actions 数组，如果没有则使用默认配置
-        // 默认操作按钮配置
-        const defaultActions = [
-            {
-                type: 'link',
-                href: editRouteTemplate ? editRouteTemplate + '/{id}/edit' : null,
-                icon: 'bi-pencil',
-                variant: 'warning',
-                title: '编辑',
-                visible: true  // 可以是一个函数，返回 true/false
-            },
-            {
-                type: 'button',
-                onclick: 'deleteRow_' + tableId + '({id})',
-                icon: 'bi-trash',
-                variant: 'danger',
-                title: '删除',
-                visible: true
-            }
-        ];
+        // 操作列默认操作按钮配置（可通过 PHP 层传入）
+        const defaultActions = Array.isArray(config.defaultActions) ? config.defaultActions : [];
         
         // 分页和排序状态
         let currentPage = 1;
@@ -976,6 +896,12 @@
         
         // 从 URL 参数初始化搜索表单
         function initSearchFormFromURL() {
+            // 如果搜索功能被禁用，跳过初始化
+            const showSearch = config.showSearch !== false; // 默认为 true
+            if (!showSearch) {
+                return;
+            }
+            
             const form = document.getElementById(searchFormId);
             if (!form) return;
             
@@ -1401,6 +1327,18 @@
                     const switchClass = isChecked ? 'bg-success' : 'bg-secondary';
                     const fieldName = column.fieldName || column.field || 'status';
                     const onChangeHandler = column.onChange ? column.onChange.replace('{id}', row.id) : '';
+                    
+                    // 记录 switch 渲染日志
+                    console.log(`[DataTable ${tableId}] Switch 列渲染:`, {
+                        rowId: row.id,
+                        field: fieldName,
+                        currentValue: value,
+                        onValue: onValue,
+                        offValue: offValue,
+                        isChecked: isChecked,
+                        onChangeHandler: onChangeHandler
+                    });
+                    
                     return `
                         <div class="form-check form-switch">
                             <input class="form-check-input ${switchClass}"
@@ -1873,27 +1811,33 @@
                     });
                     
                     // 绑定搜索表单提交事件（防止重复绑定）
-                    const searchForm = document.getElementById(searchFormId);
-                    if (searchForm) {
-                        console.log(`[DataTable ${tableId}] 绑定搜索表单提交事件`);
-                        // 移除旧的事件监听器
-                        const oldHandler = window['_searchFormSubmitHandler_' + tableId];
-                        if (oldHandler) {
-                            console.log(`[DataTable ${tableId}] 移除旧的搜索表单事件监听器`);
-                            searchForm.removeEventListener('submit', oldHandler);
+                    // 只有当 showSearch 为 true 时才尝试查找和绑定搜索表单
+                    const showSearch = config.showSearch !== false; // 默认为 true
+                    if (showSearch) {
+                        const searchForm = document.getElementById(searchFormId);
+                        if (searchForm) {
+                            console.log(`[DataTable ${tableId}] 绑定搜索表单提交事件`);
+                            // 移除旧的事件监听器
+                            const oldHandler = window['_searchFormSubmitHandler_' + tableId];
+                            if (oldHandler) {
+                                console.log(`[DataTable ${tableId}] 移除旧的搜索表单事件监听器`);
+                                searchForm.removeEventListener('submit', oldHandler);
+                            }
+                            // 创建新的事件处理函数
+                            window['_searchFormSubmitHandler_' + tableId] = function(e) {
+                                console.log(`[DataTable ${tableId}] 搜索表单提交事件触发`);
+                                e.preventDefault();
+                                currentPage = 1;
+                                window['loadData_' + tableId]();
+                            };
+                            // 添加新的事件监听器
+                            searchForm.addEventListener('submit', window['_searchFormSubmitHandler_' + tableId]);
+                            console.log(`[DataTable ${tableId}] 搜索表单事件绑定成功`);
+                        } else {
+                            console.warn(`[DataTable ${tableId}] 未找到搜索表单元素:`, searchFormId);
                         }
-                        // 创建新的事件处理函数
-                        window['_searchFormSubmitHandler_' + tableId] = function(e) {
-                            console.log(`[DataTable ${tableId}] 搜索表单提交事件触发`);
-                            e.preventDefault();
-                            currentPage = 1;
-                            window['loadData_' + tableId]();
-                        };
-                        // 添加新的事件监听器
-                        searchForm.addEventListener('submit', window['_searchFormSubmitHandler_' + tableId]);
-                        console.log(`[DataTable ${tableId}] 搜索表单事件绑定成功`);
                     } else {
-                        console.warn(`[DataTable ${tableId}] 未找到搜索表单元素:`, searchFormId);
+                        console.log(`[DataTable ${tableId}] 搜索功能已禁用，跳过搜索表单绑定`);
                     }
                     
                     // 分页尺寸选择器事件（防止重复绑定）
@@ -1923,7 +1867,10 @@
                     
                     // 从 URL 参数初始化搜索表单和分页/排序
                     console.log(`[DataTable ${tableId}] 初始化搜索表单和分页/排序`);
-                    initSearchFormFromURL();
+                    // 只有当 showSearch 为 true 时才初始化搜索表单
+                    if (config.showSearch !== false) {
+                        initSearchFormFromURL();
+                    }
                     
                     // 从 URL 参数读取分页信息
                     const urlParams = new URLSearchParams(window.location.search);
@@ -1989,11 +1936,6 @@
             }
         };
         
-        // 为了向后兼容，如果没有指定 tableId 后缀的 deleteRow，则使用默认的
-        if (tableId === 'dataTable') {
-            window.deleteRow = window['deleteRow_' + tableId];
-        }
-        
         // 绑定确认删除按钮事件（防止重复绑定）
         const deleteConfirmHandlerName = '_deleteConfirmHandler_' + tableId;
         const deleteConfirmBoundName = '_deleteConfirmBound_' + tableId;
@@ -2022,8 +1964,8 @@
                     return;
                 }
                 
-                // 如果页面中定义了 destroyRouteTemplate，则使用它
-                const destroyRouteTemplate = window['destroyRouteTemplate_' + tableId] || window.destroyRouteTemplate;
+                // 获取删除路由模板
+                const destroyRouteTemplate = window['destroyRouteTemplate_' + tableId];
                 console.log(`[DataTable ${tableId}] 删除路由模板:`, destroyRouteTemplate);
                 console.log(`[DataTable ${tableId}] executeDelete 函数存在:`, typeof executeDelete === 'function');
                 
@@ -2122,46 +2064,42 @@
             }
         };
         
-        // 为了向后兼容，如果没有指定 tableId 后缀的 resetSearch，则使用默认的
-        if (tableId === 'dataTable') {
-            window.resetSearch = window['resetSearch_' + tableId];
-        }
-        
         // 导出数据函数（如果提供了 exportRoute）
         if (config.exportRoute) {
         window['exportData_' + tableId] = function() {
             // 获取搜索表单数据（使用与 loadData 函数相同的逻辑）
-            const searchForm = document.getElementById(searchFormId);
-            if (!searchForm) {
-                console.error('搜索表单不存在，ID: ' + searchFormId);
-                return;
-            }
-            
-            // 收集搜索表单的所有字段值（与 loadData 函数保持一致）
-            const formData = new FormData(searchForm);
             const filters = {};
+            const showSearch = config.showSearch !== false; // 默认为 true
             
-            // 收集所有 filters 字段
-            for (const [key, value] of formData.entries()) {
-                if (key.startsWith('filters[') && key.endsWith(']')) {
-                    // 提取字段名：filters[field_name] -> field_name
-                    const fieldName = key.replace('filters[', '').replace(']', '');
-                    const fieldValue = value.trim();
-                    // 只添加非空值
-                    if (fieldValue !== '') {
-                        filters[fieldName] = fieldValue;
+            if (showSearch) {
+                const searchForm = document.getElementById(searchFormId);
+                if (searchForm) {
+                    // 收集搜索表单的所有字段值（与 loadData 函数保持一致）
+                    const formData = new FormData(searchForm);
+                    
+                    // 收集所有 filters 字段
+                    for (const [key, value] of formData.entries()) {
+                        if (key.startsWith('filters[') && key.endsWith(']')) {
+                            // 提取字段名：filters[field_name] -> field_name
+                            const fieldName = key.replace('filters[', '').replace(']', '');
+                            const fieldValue = value.trim();
+                            // 只添加非空值
+                            if (fieldValue !== '') {
+                                filters[fieldName] = fieldValue;
+                            }
+                        }
+                    }
+                    
+                    // 添加搜索关键词（向后兼容）
+                    const keyword = formData.get('keyword') || '';
+                    if (keyword) {
+                        filters['keyword'] = keyword;
                     }
                 }
             }
             
             // 构建查询参数
             const params = new URLSearchParams();
-            
-            // 添加搜索关键词（向后兼容）
-            const keyword = formData.get('keyword') || '';
-            if (keyword) {
-                params.append('keyword', keyword);
-            }
             
             // 如果有过滤条件，添加到参数中
             if (Object.keys(filters).length > 0) {
@@ -2185,11 +2123,6 @@
             // 打开新窗口下载文件
             window.open(exportUrl, '_blank');
         };
-        
-        // 为了向后兼容，如果没有指定 tableId 后缀的 exportData，则使用默认的
-        if (tableId === 'dataTable') {
-            window.exportData_dataTable = window['exportData_' + tableId];
-        }
         }
         
         // 切换搜索面板显示/隐藏
@@ -2247,11 +2180,6 @@
             }
         };
         
-        // 为了向后兼容，如果没有指定 tableId 后缀的 toggleSearchPanel，则使用默认的
-        if (tableId === 'dataTable') {
-            window.toggleSearchPanel = window['toggleSearchPanel_' + tableId];
-        }
-        
         // 全选/取消全选
         window['toggleCheckAll_' + tableId] = function(checkbox) {
             const checkboxes = document.querySelectorAll('#' + tableId + ' .row-check');
@@ -2260,11 +2188,6 @@
             });
             window['toggleRowCheck_' + tableId]();
         };
-        
-        // 为了向后兼容，如果没有指定 tableId 后缀的 toggleCheckAll，则使用默认的
-        if (tableId === 'dataTable') {
-            window.toggleCheckAll = window['toggleCheckAll_' + tableId];
-        }
         
         // 更新选中状态
         window['toggleRowCheck_' + tableId] = function() {
@@ -2289,11 +2212,6 @@
                 }
             }
         };
-        
-        // 为了向后兼容，如果没有指定 tableId 后缀的 toggleRowCheck，则使用默认的
-        if (tableId === 'dataTable') {
-            window.toggleRowCheck = window['toggleRowCheck_' + tableId];
-        }
         
         // 批量删除
         if (batchDestroyRoute) {
@@ -2587,11 +2505,6 @@
                 });
             }
             }
-            
-            // 为了向后兼容，如果没有指定 tableId 后缀的 batchDelete，则使用默认的
-            if (tableId === 'dataTable') {
-                window.batchDelete = window['batchDelete_' + tableId];
-            }
         }
         
         // 格式化日期（全局函数，不需要 tableId 后缀）
@@ -2609,69 +2522,8 @@
             };
         }
         
-        // 切换状态（全局函数，不需要 tableId 后缀）
-        if (typeof window.toggleStatus === 'undefined') {
-            window.toggleStatus = function(id, element, url) {
-                const checked = element.checked;
-                const field = element.dataset.field || 'status';
-
-                // 替换 URL 中的 {id}
-                const requestUrl = url.replace('{id}', id) + '/toggle-status';
-
-                // 禁用开关防止重复点击
-                element.disabled = true;
-
-                fetch(requestUrl, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-Requested-With': 'XMLHttpRequest',
-                    },
-                    body: JSON.stringify({ field: field })
-                })
-                .then(response => response.json())
-                .then(result => {
-                    if (result.code === 200) {
-                        if (typeof showToast === 'function') {
-                            showToast('success', result.msg || '状态更新成功');
-                        } else {
-                            alert(result.msg || '状态更新成功');
-                        }
-
-                        // 更新开关样式
-                        if (checked) {
-                            element.classList.remove('bg-secondary');
-                            element.classList.add('bg-success');
-                        } else {
-                            element.classList.remove('bg-success');
-                            element.classList.add('bg-secondary');
-                        }
-                    } else {
-                        // 失败时恢复原状态
-                        element.checked = !checked;
-                        if (typeof showToast === 'function') {
-                            showToast('danger', result.msg || '状态更新失败');
-                        } else {
-                            alert(result.msg || '状态更新失败');
-                        }
-                    }
-                })
-                .catch(error => {
-                    console.error('Error:', error);
-                    // 失败时恢复原状态
-                    element.checked = !checked;
-                    if (typeof showToast === 'function') {
-                        showToast('danger', '状态更新失败');
-                    } else {
-                        alert('状态更新失败');
-                    }
-                })
-                .finally(() => {
-                    // 重新启用开关
-                    element.disabled = false;
-                });
-            };
-        }
+        // 注意：toggleStatus 函数定义在 admin.common.scripts 中
+        // 这里不再重复定义，避免冲突
         
         // 绑定行复选框事件（用于更新选中状态，防止重复绑定）
         const rowCheckHandlerName = '_rowCheckHandler_' + tableId;

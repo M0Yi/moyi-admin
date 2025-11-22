@@ -2,15 +2,17 @@
 
 @section('title', 'CRUD生成器 - 配置')
 
-@push('admin_sidebar')
-    @include('admin.components.sidebar')
-@endpush
+@if (! $isEmbedded)
+    @push('admin_sidebar')
+        @include('admin.components.sidebar')
+    @endpush
 
-@push('admin_navbar')
-    @include('admin.components.navbar')
-@endpush
+    @push('admin_navbar')
+        @include('admin.components.navbar')
+    @endpush
+@endif
 
-@push('admin_styles')
+@push('admin-styles')
 <style>
 /* 加载状态 */
 .fields-loading {
@@ -21,6 +23,47 @@
 .fields-loading .spinner-border {
     width: 3rem;
     height: 3rem;
+}
+
+/* 拖拽排序样式 */
+.field-row {
+    cursor: move;
+}
+
+.field-row.sortable-ghost {
+    opacity: 0.4;
+    background-color: #f0f0f0;
+}
+
+.field-row.sortable-drag {
+    opacity: 0.8;
+    background-color: #e3f2fd;
+}
+
+/* 已禁用：拖动功能BUG太多，暂时禁用，待后续优化 */
+.drag-handle {
+    /* cursor: grab; */
+    /* color: #6c757d; */
+    /* font-size: 1.2rem; */
+    /* padding: 0.5rem; */
+    /* display: flex; */
+    display: none; /* 隐藏拖拽手柄 */
+    /* align-items: center; */
+    /* justify-content: center; */
+    /* transition: color 0.2s; */
+}
+
+.drag-handle:hover {
+    /* color: #495057; */
+    /* cursor: grabbing; */
+}
+
+.drag-handle:active {
+    /* cursor: grabbing; */
+}
+
+.field-row:hover .drag-handle {
+    color: #0d6efd;
 }
 
 /* 字段配置区域 */
@@ -130,40 +173,51 @@
 </style>
 @endpush
 
+{{-- 引入 Sortable.js 插件 --}}
+{{-- 已禁用：拖动功能BUG太多，暂时禁用，待后续优化 --}}
+{{-- @include('components.plugin.sortable-js') --}}
+
+@push('admin-scripts')
+@endpush
+
 @section('content')
 @include('admin.common.styles')
 
-<div class="container-fluid">
-    <!-- 页面头部 -->
-    <div class="d-flex justify-content-between align-items-center mb-3">
-        <div>
-            <h3 class="mb-1">配置 CRUD 生成器 <span class="badge bg-success">V2</span></h3>
-            <p class="text-muted mb-0">
-                数据表：<code class="text-primary">{{ $tableName }}</code>
-                <span class="ms-2 text-muted" id="tableCommentText" style="{{ $tableComment ? '' : 'display:none;' }}">
-                    {{ $tableComment }}
-                </span>
-                @php
-                    $currentConnInfo = isset($connections[$dbConnection]) ? $connections[$dbConnection] : null;
-                @endphp
-                @if($currentConnInfo)
-                    <span class="ms-2">
-                        <span class="badge bg-info" id="connectionBadgeName">
-                            <i class="bi bi-database"></i> {{ $dbConnection }}
-                        </span>
-                        <small class="text-muted ms-2" id="connectionHostInfo" style="{{ $currentConnInfo ? '' : 'display:none;' }}">
-                            @if($currentConnInfo)
-                                ({{ $currentConnInfo['database'] }} @ {{ $currentConnInfo['host'] }}:{{ $currentConnInfo['port'] }})
-                            @endif
-                        </small>
+@php
+    $currentConnInfo = $currentConnInfo ?? ($connections[$dbConnection] ?? null);
+@endphp
+
+<div class="container-fluid {{ $isEmbedded ? 'py-3 px-2 px-md-4' : 'py-4' }}">
+    <div class="mb-3">
+        <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
+            <div>
+                <h6 class="mb-1 fw-bold">配置 CRUD 生成器 <span class="badge bg-success">V2</span></h6>
+                <small class="text-muted d-block">
+                    数据表：<code class="text-primary">{{ $tableName }}</code>
+                    <span class="ms-2 text-muted" id="tableCommentText" style="{{ $tableComment ? '' : 'display:none;' }}">
+                        {{ $tableComment }}
                     </span>
-                @endif
-            </p>
-        </div>
-        <div>
-            <a href="{{ admin_route('system/crud-generator') }}?connection={{ $dbConnection }}" class="btn btn-secondary">
-                <i class="bi bi-arrow-left"></i> 返回列表
-            </a>
+                    @if($currentConnInfo)
+                        <span class="ms-2">
+                            <span class="badge bg-info" id="connectionBadgeName">
+                                <i class="bi bi-database"></i> {{ $dbConnection }}
+                            </span>
+                            <small class="text-muted ms-2" id="connectionHostInfo" style="{{ $currentConnInfo ? '' : 'display:none;' }}">
+                                @if($currentConnInfo)
+                                    ({{ $currentConnInfo['database'] }} @ {{ $currentConnInfo['host'] }}:{{ $currentConnInfo['port'] }})
+                                @endif
+                            </small>
+                        </span>
+                    @endif
+                </small>
+            </div>
+            @if (! $isEmbedded)
+                <div class="mt-2 mt-sm-0">
+                    <a href="{{ admin_route('system/crud-generator') }}?connection={{ $dbConnection }}" class="btn btn-secondary">
+                        <i class="bi bi-arrow-left"></i> 返回列表
+                    </a>
+                </div>
+            @endif
         </div>
     </div>
 
@@ -384,7 +438,9 @@
 <!-- 固定在底部的操作栏 -->
 @include('admin.components.fixed-bottom-actions', [
     'infoText' => '配置完成后点击保存按钮提交（当前为模拟提交，仅输出到控制台）',
-    'cancelUrl' => admin_route('system/crud-generator') . '?connection=' . ($dbConnection ?? 'default'),
+    'cancelUrl' => $isEmbedded ? 'javascript:void(0);' : admin_route('system/crud-generator') . '?connection=' . ($dbConnection ?? 'default'),
+    'cancelText' => $isEmbedded ? '关闭' : '返回列表',
+    'cancelBtnId' => 'crudConfigCancelBtn',
     'submitText' => '保存配置',
     'formId' => 'configForm'
 ])
@@ -414,6 +470,37 @@ const BADGE_COLORS = [
 ];
 
 const DEFAULT_ICON_CLASS = 'bi bi-table';
+const MAIN_REFRESH_MESSAGE = '菜单配置已更新，正在刷新主框架...';
+
+function refreshMainFrame(payload = {}) {
+    const options = Object.assign({
+        message: MAIN_REFRESH_MESSAGE,
+        showToast: true,
+        toastType: 'info',
+        delay: 0,
+    }, payload);
+
+    const hasIframeClient = window.AdminIframeClient && typeof window.AdminIframeClient.refreshMainFrame === 'function';
+
+    if (hasIframeClient) {
+        try {
+            window.AdminIframeClient.refreshMainFrame(options);
+            return true;
+        } catch (error) {
+            console.warn('AdminIframeClient.refreshMainFrame 调用失败，启用降级方案:', error);
+        }
+    }
+
+    // 降级方案：如果处于 iframe 内，尝试强制刷新父窗口；否则刷新当前窗口
+    const targetWindow = window.top && window.top !== window ? window.top : window;
+    try {
+        targetWindow.location.reload();
+        return true;
+    } catch (fallbackError) {
+        console.warn('刷新主窗口失败:', fallbackError);
+        return false;
+    }
+}
 
 // CRUD 功能开关默认配置（无配置时使用）
 // 在这里统一配置每个功能默认是打开(true)还是关闭(false)
@@ -494,6 +581,7 @@ const INFO_KEYWORDS = ['信息', '提示', 'info', 'notice', '消息'];
 
 // ==================== 全局变量 ====================
 const PAGE_VARS = window.__CRUD_GENERATOR_PAGE_VARS__ || {};
+const IS_EMBEDDED_PAGE = document.documentElement?.dataset?.embed === '1';
 const { tableName = '', dbConnection = '' } = PAGE_VARS;
 let fieldsData = []; // 存储字段数据
 let hasRegisteredUserInputTracking = false;
@@ -932,15 +1020,52 @@ function loadFieldsConfig() {
                     console.warn('[字段配置加载] 以下字段已从数据库表中删除，将在配置中移除:', removedFields);
                 }
                 
-                // 3. 统计信息
+                // 3. 如果有已保存的配置，按照已保存配置的数组顺序排列字段
+                // 如果没有已保存的配置，保持数据库字段的原始顺序
+                if (savedFieldsConfig.length > 0) {
+                    // 创建已保存配置的顺序映射（按数组索引）
+                    const savedOrderMap = new Map();
+                    savedFieldsConfig.forEach((field, index) => {
+                        if (field.name) {
+                            savedOrderMap.set(field.name, index);
+                        }
+                    });
+                    
+                    // 按照已保存配置的顺序排序 mergedColumns
+                    mergedColumns.sort((a, b) => {
+                        const orderA = savedOrderMap.has(a.name) ? savedOrderMap.get(a.name) : 999999;
+                        const orderB = savedOrderMap.has(b.name) ? savedOrderMap.get(b.name) : 999999;
+                        
+                        // 如果都在已保存配置中，按照保存顺序
+                        if (orderA !== 999999 && orderB !== 999999) {
+                            return orderA - orderB;
+                        }
+                        
+                        // 如果只有一个在已保存配置中，已保存的在前
+                        if (orderA !== 999999) return -1;
+                        if (orderB !== 999999) return 1;
+                        
+                        // 如果都不在已保存配置中，保持数据库原始顺序
+                        const indexA = columns.findIndex(col => col.name === a.name);
+                        const indexB = columns.findIndex(col => col.name === b.name);
+                        return (indexA === -1 ? 999999 : indexA) - (indexB === -1 ? 999999 : indexB);
+                    });
+                }
+                
+                // 4. 统计信息
                 const newFieldsCount = mergedColumns.filter(col => !savedConfigMap[col.name]).length;
                 console.log('[字段配置加载] 字段比对完成:', {
                     '原始字段数': columns.length,
                     '已保存配置字段数': savedFieldsConfig.length,
                     '合并后字段数': mergedColumns.length,
                     '新增字段数': newFieldsCount,
-                    '删除字段数': removedFields.length
+                    '删除字段数': removedFields.length,
+                    '已按保存顺序排列': savedFieldsConfig.length > 0
                 });
+                console.log('[字段配置加载] 字段顺序（按数组顺序）:', mergedColumns.map((col, i) => ({
+                    index: i,
+                    name: col.name
+                })));
                 
                 fieldsData = mergedColumns;
                 renderFieldsConfig(fieldsData);
@@ -1657,6 +1782,10 @@ function renderFieldsConfig(columns) {
             <table class="table table-bordered table-hover">
                 <thead class="table-light">
                     <tr>
+                        {{-- 已禁用：拖动功能BUG太多，暂时禁用，待后续优化 --}}
+                        {{-- <th style="width: 50px;" class="text-center">
+                            <i class="bi bi-grip-vertical" title="拖拽排序"></i>
+                        </th> --}}
                         <th style="width: 120px;">字段名</th>
                         <th style="width: 120px;">数据库信息</th>
                         <th style="width: 100px;">模型类型</th>
@@ -1668,7 +1797,7 @@ function renderFieldsConfig(columns) {
                         <th style="width: 80px;">操作</th>
                     </tr>
                 </thead>
-                <tbody>
+                <tbody id="fieldsTableBody">
     `;
     
     columns.forEach((column, index) => {
@@ -1763,7 +1892,7 @@ function renderFieldsConfig(columns) {
         }
         
         html += `
-            <tr class="field-row" data-index="${index}">
+            <tr class="field-row" data-index="${index}" data-field-name="${escapeHtml(column.name)}">
                 <td style="word-break: break-word;">
                     <div style="margin-bottom: 4px;">
                         <strong>${escapeHtml(column.name)}</strong>
@@ -1908,7 +2037,7 @@ function renderFieldsConfig(columns) {
             </tr>
             <!-- 详细配置面板 -->
             <tr>
-                <td colspan="11" class="p-0 border-0">
+                <td colspan="10" class="p-0 border-0">
                     <div class="collapse" id="fieldDetails-${index}">
                         <div class="card card-body bg-light m-2">
                             <h6 class="mb-3">
@@ -2225,6 +2354,10 @@ function renderFieldsConfig(columns) {
     `;
     
     areaEl.innerHTML = html;
+    
+    // 初始化拖拽排序功能
+    // 已禁用：拖动功能BUG太多，暂时禁用，待后续优化
+    // initFieldSortable();
     
     // 检测是否有 deleted_at 字段，如果有则自动开启软删除开关
     const hasDeletedAt = columns.some(column => column.name === 'deleted_at');
@@ -2548,9 +2681,8 @@ function saveConfig() {
         }
     }
     
-    // 将 fieldsConfig 转换为数组
-    data.fields_config = Object.keys(fieldsConfig).map(index => {
-        const field = fieldsConfig[index];
+    // 辅助函数：清理字段配置
+    function cleanFieldConfig(field) {
         // 处理 options，过滤空选项
         if (field.options && Array.isArray(field.options)) {
             field.options = field.options.filter(opt => opt && opt.key && opt.value);
@@ -2594,7 +2726,52 @@ function saveConfig() {
             }
         }
         return field;
+    }
+    
+    // 将 fieldsConfig 转换为数组，按照 fieldsData 的顺序排序
+    // 首先创建一个映射，将字段名映射到配置
+    const fieldConfigMap = {};
+    Object.keys(fieldsConfig).forEach(index => {
+        const field = fieldsConfig[index];
+        if (field.name) {
+            fieldConfigMap[field.name] = cleanFieldConfig(field);
+        }
     });
+    
+    // 按照 fieldsData 的顺序构建最终的字段配置数组
+    // 先过滤掉无效的元素（undefined、null 或没有 name 属性的对象）
+    data.fields_config = fieldsData
+        .filter(column => column && column.name) // 过滤无效元素
+        .map((column, index) => {
+            const fieldName = column.name;
+            let fieldConfig;
+            
+            if (fieldConfigMap[fieldName]) {
+                fieldConfig = fieldConfigMap[fieldName];
+            } else {
+                // 如果找不到配置，返回一个基础配置
+                fieldConfig = cleanFieldConfig({
+                    name: fieldName,
+                    type: column.type || '',
+                    data_type: column.data_type || '',
+                    comment: column.comment || '',
+                    nullable: column.nullable ? '1' : '0',
+                    is_primary: column.is_primary ? '1' : '0',
+                    is_auto_increment: column.is_auto_increment ? '1' : '0',
+                });
+            }
+            
+            // 不添加 sort 字段，直接按照 fieldsData 数组的顺序保存
+            // 数组顺序即为用户拖拽后的顺序
+            
+            return fieldConfig;
+        });
+    
+    // 确保字段配置按照 fieldsData 的顺序排列（数组顺序即为拖拽后的顺序）
+    console.log('[保存配置] 字段顺序（按数组顺序）:', data.fields_config.map((f, i) => ({
+        index: i,
+        name: f.name
+    })));
     
     // ========== 提交配置到服务器 ==========
     console.log('========== CRUD 生成器配置提交（V2） ==========');
@@ -2702,11 +2879,28 @@ function saveConfig() {
             } else {
                 alert('保存成功！');
             }
-            
-            // 延迟跳转到列表页，让用户看到成功提示
-            setTimeout(() => {
-                window.location.href = window.adminRoute('system/crud-generator');
-            }, 1000);
+            refreshMainFrame({
+                message: result.message || MAIN_REFRESH_MESSAGE,
+                toastType: 'success',
+            });
+
+            const successPayload = {
+                action: 'crud-config-saved',
+                table: data.table_name || PAGE_VARS.tableName || '',
+                configId: result.data?.config_id || data.config_id || null
+            };
+
+            if (IS_EMBEDDED_PAGE && window.AdminIframeClient) {
+                window.AdminIframeClient.success(successPayload);
+                setTimeout(() => {
+                    window.AdminIframeClient.close(successPayload);
+                }, 300);
+            } else {
+                // 延迟跳转到列表页，让用户看到成功提示
+                setTimeout(() => {
+                    window.location.href = window.adminRoute('system/crud-generator');
+                }, 1000);
+            }
         } else {
             console.error('保存失败:', result);
             const errorMsg = result.msg || result.message || '未知错误';
@@ -2735,6 +2929,278 @@ function saveConfig() {
             alert('保存失败，请重试：' + error.message);
         }
     });
+}
+
+// ==================== 拖拽排序功能 ====================
+
+/**
+ * 初始化字段拖拽排序功能
+ */
+/**
+ * 字段拖拽排序功能
+ * 
+ * 已禁用：拖动功能BUG太多，暂时禁用，待后续优化
+ * 
+ * 已知问题：
+ * 1. 拖拽后字段顺序保存和加载不一致
+ * 2. 拖拽时字段数据可能丢失
+ * 3. 拖拽后索引更新不及时
+ * 4. 与字段配置合并逻辑冲突
+ * 
+ * 待优化方向：
+ * 1. 重新设计字段顺序保存机制
+ * 2. 优化拖拽事件处理逻辑
+ * 3. 确保拖拽后数据完整性
+ * 4. 改进字段配置合并算法
+ */
+function initFieldSortable() {
+    // 已禁用：拖动功能BUG太多，暂时禁用，待后续优化
+    console.warn('[字段排序] 拖动功能已禁用，待后续优化');
+    return;
+    
+    /* 原始代码已注释，待后续优化
+    const tbody = document.getElementById('fieldsTableBody');
+    if (!tbody) {
+        console.warn('[字段排序] 未找到表格 tbody 元素');
+        return;
+    }
+
+    // 检查是否已加载 Sortable.js（通过插件加载）
+    if (typeof Sortable === 'undefined') {
+        console.error('[字段排序] Sortable.js 未加载，请确保已引入 components.plugin.sortable-js');
+        return;
+    }
+
+    // 如果已存在实例，先销毁
+    if (window.fieldsSortable) {
+        window.fieldsSortable.destroy();
+        window.fieldsSortable = null;
+    }
+
+    // 创建 Sortable 实例
+    const sortable = new Sortable(tbody, {
+        handle: '.drag-handle', // 指定拖拽手柄
+        animation: 150, // 动画时长
+        ghostClass: 'sortable-ghost', // 拖拽时的占位符样式
+        dragClass: 'sortable-drag', // 拖拽元素的样式
+        chosenClass: 'sortable-chosen', // 选中元素的样式
+        forceFallback: false, // 使用 HTML5 拖拽 API
+        fallbackOnBody: true, // 如果拖拽到 body 外，回退到 body
+        swapThreshold: 0.65, // 交换阈值
+        group: 'fields', // 分组名称
+        onEnd: function(evt) {
+            // 拖拽结束后的回调
+            console.log('[字段排序] onEnd 事件触发', evt);
+            const oldIndex = evt.oldIndex;
+            const newIndex = evt.newIndex;
+            
+            console.log('[字段排序] Sortable 索引变化:', { oldIndex, newIndex, changed: oldIndex !== newIndex });
+            
+            if (oldIndex !== newIndex) {
+                // 方法：根据 DOM 中字段行的实际顺序重新排列 fieldsData
+                // 这样更可靠，不依赖于 Sortable.js 的索引
+                const tbody = document.getElementById('fieldsTableBody');
+                if (!tbody) {
+                    console.error('[字段排序] 未找到 tbody 元素');
+                    return;
+                }
+                
+                // 获取所有字段行（按 DOM 顺序）
+                const fieldRows = tbody.querySelectorAll('tr.field-row');
+                console.log('[字段排序] 找到字段行数量:', fieldRows.length, 'fieldsData 长度:', fieldsData.length);
+                
+                if (fieldRows.length !== fieldsData.length) {
+                    console.warn('[字段排序] 字段行数量与数据数组长度不匹配，可能存在问题');
+                }
+                
+                // 根据 DOM 顺序创建新的 fieldsData 数组
+                const newFieldsData = [];
+                const fieldNameMap = new Map();
+                
+                // 先建立字段名到字段数据的映射
+                fieldsData.forEach(field => {
+                    if (field && field.name) {
+                        fieldNameMap.set(field.name, field);
+                    }
+                });
+                
+                // 按照 DOM 中的顺序重新排列
+                fieldRows.forEach((row, domIndex) => {
+                    const fieldName = row.getAttribute('data-field-name');
+                    if (fieldName && fieldNameMap.has(fieldName)) {
+                        const field = fieldNameMap.get(fieldName);
+                        // 不设置 sort 字段，直接按照数组顺序保存
+                        newFieldsData.push(field);
+                        console.log(`[字段排序] 字段 "${fieldName}" 移动到位置 ${domIndex}`);
+                    } else {
+                        console.warn(`[字段排序] 未找到字段 "${fieldName}" 的数据`);
+                    }
+                });
+                
+                // 检查是否有字段丢失
+                if (newFieldsData.length !== fieldsData.length) {
+                    console.error('[字段排序] 字段数量不匹配，可能存在数据丢失', {
+                        oldLength: fieldsData.length,
+                        newLength: newFieldsData.length
+                    });
+                    // 添加丢失的字段
+                    fieldsData.forEach(field => {
+                        if (field && field.name && !newFieldsData.find(f => f.name === field.name)) {
+                            console.warn(`[字段排序] 添加丢失的字段: ${field.name}`);
+                            newFieldsData.push(field);
+                        }
+                    });
+                }
+                
+                // 更新 fieldsData 数组
+                fieldsData.length = 0;
+                fieldsData.push(...newFieldsData);
+                
+                console.log('[字段排序] 已更新字段顺序:', fieldsData.map((f, i) => ({
+                    index: i,
+                    name: f.name
+                })));
+                
+                // 重新渲染表格以更新索引
+                reindexFieldRows();
+                
+                // 显示提示信息
+                console.log('[字段排序] 准备显示提示信息');
+                showSortHint('字段顺序已更新，保存后生效');
+            } else {
+                console.log('[字段排序] 索引未变化，不显示提示');
+            }
+        }
+    });
+
+    // 保存到全局变量，以便后续使用
+    window.fieldsSortable = sortable;
+    
+    console.log('[字段排序] 拖拽排序功能已初始化');
+    */
+}
+
+/**
+ * 重新索引字段行（拖拽后调用）
+ */
+function reindexFieldRows() {
+    const tbody = document.getElementById('fieldsTableBody');
+    if (!tbody) return;
+
+    const rows = tbody.querySelectorAll('tr.field-row');
+    rows.forEach((row, newIndex) => {
+        const oldIndex = parseInt(row.getAttribute('data-index'));
+        
+        // 更新 data-index 属性
+        row.setAttribute('data-index', newIndex);
+        
+        // 更新所有表单字段的 name 属性中的索引
+        const inputs = row.querySelectorAll('input, select, textarea');
+        inputs.forEach(input => {
+            if (input.name && input.name.includes('fields_config[')) {
+                // 替换索引
+                input.name = input.name.replace(
+                    /fields_config\[\d+\]/,
+                    `fields_config[${newIndex}]`
+                );
+            }
+        });
+        
+        // 更新详细配置面板的 ID
+        const collapseId = `fieldDetails-${oldIndex}`;
+        const newCollapseId = `fieldDetails-${newIndex}`;
+        const collapseEl = document.getElementById(collapseId);
+        if (collapseEl) {
+            collapseEl.id = newCollapseId;
+            // 更新按钮的 data-bs-target
+            const toggleBtn = row.querySelector(`button[data-bs-target="#${collapseId}"]`);
+            if (toggleBtn) {
+                toggleBtn.setAttribute('data-bs-target', `#${newCollapseId}`);
+                toggleBtn.setAttribute('aria-controls', newCollapseId);
+            }
+        }
+        
+        // 更新所有 ID 中包含索引的元素
+        const idElements = row.querySelectorAll('[id*="' + oldIndex + '"]');
+        idElements.forEach(el => {
+            if (el.id) {
+                el.id = el.id.replace(new RegExp('_' + oldIndex + '|' + oldIndex + '_'), '_' + newIndex);
+            }
+        });
+        
+        // 更新选项列表的 data-index
+        const optionsList = row.querySelector(`.options-list[data-index="${oldIndex}"]`);
+        if (optionsList) {
+            optionsList.setAttribute('data-index', newIndex);
+        }
+        
+        // 更新徽章预览区域的 ID
+        const badgePreview = document.getElementById(`badge-preview-${oldIndex}`);
+        if (badgePreview) {
+            badgePreview.id = `badge-preview-${newIndex}`;
+        }
+    });
+    
+    console.log('[字段排序] 字段行索引已更新');
+}
+
+/**
+ * 显示排序提示
+ */
+function showSortHint(message) {
+    console.log('[showSortHint] 函数被调用，消息:', message);
+    
+    // 先移除之前的提示（如果有）
+    const existingHint = document.querySelector('.sort-hint-alert');
+    if (existingHint) {
+        existingHint.remove();
+    }
+    
+    // 创建临时提示元素
+    const hint = document.createElement('div');
+    hint.className = 'sort-hint-alert alert alert-info alert-dismissible fade show position-fixed';
+    hint.style.cssText = 'top: 20px; right: 20px; z-index: 99999; min-width: 250px; max-width: 400px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);';
+    
+    // 使用更简单的 HTML，不依赖 Bootstrap Icons
+    hint.innerHTML = `
+        <strong><i class="bi bi-info-circle me-2"></i>提示</strong>
+        <div class="mt-1">${message}</div>
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+    `;
+    
+    // 如果 Bootstrap 不可用，使用原生关闭按钮
+    const closeBtn = hint.querySelector('.btn-close');
+    if (closeBtn) {
+        closeBtn.addEventListener('click', function() {
+            hint.remove();
+        });
+    }
+    
+    document.body.appendChild(hint);
+    console.log('[showSortHint] 提示元素已添加到页面:', hint);
+    
+    // 确保元素可见
+    setTimeout(() => {
+        if (hint.parentNode) {
+            hint.style.display = 'block';
+            hint.style.opacity = '1';
+            console.log('[showSortHint] 提示元素应该已显示');
+        }
+    }, 10);
+    
+    // 3秒后自动移除
+    setTimeout(() => {
+        if (hint.parentNode) {
+            hint.style.opacity = '0';
+            hint.style.transition = 'opacity 0.3s';
+            setTimeout(() => {
+                if (hint.parentNode) {
+                    hint.remove();
+                    console.log('[showSortHint] 提示元素已自动移除');
+                }
+            }, 300);
+        }
+    }, 3000);
 }
 
 // ==================== 工具函数 ====================

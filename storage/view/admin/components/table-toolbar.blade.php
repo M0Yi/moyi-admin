@@ -14,6 +14,7 @@
  *   - id: 按钮ID（可选）
  *   - class: 自定义CSS类（可选）
  *   - title: 提示文字（可选）
+ *   - attributes: 额外属性数组（可选，如 data-iframe-shell-*）
  *
  * @param array $rightButtons 右侧辅助按钮配置数组
  *   - icon: Bootstrap Icon 类名
@@ -22,6 +23,7 @@
  *   - id: 按钮ID（可选）
  *   - variant: 按钮样式（默认 'outline-secondary'）
  *   - class: 自定义CSS类（可选）
+ *   - attributes: 额外属性数组（可选）
  *
  * @param string $leftSlot 左侧自定义内容插槽（HTML字符串，可选）
  *   用于完全自定义左侧工具栏内容，优先级高于 leftButtons
@@ -96,6 +98,10 @@
                             $buttonClass = $button['class'] ?? '';
                             $buttonId = $button['id'] ?? '';
                             $buttonTitle = $button['title'] ?? '';
+                            $buttonAttributes = [];
+                            if (!empty($button['attributes']) && is_array($button['attributes'])) {
+                                $buttonAttributes = $button['attributes'];
+                            }
                         @endphp
 
                         @if($buttonType === 'link')
@@ -106,6 +112,9 @@
                                 style="border-radius: 10px;{{ $buttonVariant === 'light' ? ' border: 1px solid #e9ecef;' : '' }}"
                                 @if($buttonId) id="{{ $buttonId }}" @endif
                                 @if($buttonTitle) title="{{ $buttonTitle }}" @endif
+                                @foreach($buttonAttributes as $attr => $value)
+                                    {{ $attr }}="{{ htmlspecialchars((string) $value, ENT_QUOTES, 'UTF-8') }}"
+                                @endforeach
                             >
                                 @if(isset($button['icon']))
                                     <i class="bi {{ $button['icon'] }} me-2"></i>
@@ -121,6 +130,9 @@
                                 @if($buttonId) id="{{ $buttonId }}" @endif
                                 @if($buttonTitle) title="{{ $buttonTitle }}" @endif
                                 @if(isset($button['onclick'])) onclick="{{ $button['onclick'] }}" @endif
+                                @foreach($buttonAttributes as $attr => $value)
+                                    {{ $attr }}="{{ htmlspecialchars((string) $value, ENT_QUOTES, 'UTF-8') }}"
+                                @endforeach
                             >
                                 @if(isset($button['icon']))
                                     <i class="bi {{ $button['icon'] }} me-2"></i>
@@ -145,6 +157,10 @@
                             $buttonClass = $button['class'] ?? '';
                             $buttonId = $button['id'] ?? '';
                             $buttonTitle = $button['title'] ?? '';
+                            $buttonAttributes = [];
+                            if (!empty($button['attributes']) && is_array($button['attributes'])) {
+                                $buttonAttributes = $button['attributes'];
+                            }
                         @endphp
                         <button
                             type="button"
@@ -153,6 +169,9 @@
                             @if($buttonId) id="{{ $buttonId }}" @endif
                             @if($buttonTitle) title="{{ $buttonTitle }}" @endif
                             @if(isset($button['onclick'])) onclick="{{ $button['onclick'] }}" @endif
+                            @foreach($buttonAttributes as $attr => $value)
+                                {{ $attr }}="{{ htmlspecialchars((string) $value, ENT_QUOTES, 'UTF-8') }}"
+                            @endforeach
                         >
                             @if(isset($button['icon']))
                                 <i class="bi {{ $button['icon'] }}"></i>

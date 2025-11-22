@@ -260,6 +260,18 @@ class InstallController extends AbstractController
                 'status' => 1,
                 'sort' => 1,
             ],
+            // iframe 模式体验
+            [
+                'site_id' => $siteId,
+                'parent_id' => 0,
+                'name' => 'Iframe 模式体验',
+                'slug' => 'system.iframe-demo.view',
+                'type' => 'menu',
+                'icon' => 'columns-gap',
+                'path' => '/system/iframe-demo',
+                'status' => 1,
+                'sort' => 902,
+            ],
 //            // 用户管理
 //            [
 //                'site_id' => $siteId,
@@ -530,6 +542,29 @@ class InstallController extends AbstractController
                 'visible' => 1,
                 'status' => 1,
                 'sort' => 1900,
+                'cache' => 1,
+                'config' => null,
+                'remark' => '系统菜单',
+            ]
+        );
+
+        AdminMenu::query()->firstOrCreate(
+            ['site_id' => $siteId, 'path' => '/system/iframe-demo'],
+            [
+                'parent_id' => $system->id,
+                'name' => 'system.iframe-demo',
+                'title' => 'Iframe 模式体验',
+                'icon' => 'bi bi-columns-gap',
+                'component' => 'admin/system/iframe-demo/index',
+                'redirect' => null,
+                'type' => AdminMenu::TYPE_MENU,
+                'target' => AdminMenu::TARGET_SELF,
+                'badge' => null,
+                'badge_type' => null,
+                'permission' => 'system.iframe-demo.view',
+                'visible' => 1,
+                'status' => 1,
+                'sort' => 1910,
                 'cache' => 1,
                 'config' => null,
                 'remark' => '系统菜单',

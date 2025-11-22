@@ -19,7 +19,7 @@
 @endphp
 
 <div class="d-flex gap-1">
-    <a href="{{ admin_route("universal/{$model}/{$id}/edit") }}"
+    <a href="{{ admin_route("u/{$model}/{$id}/edit") }}"
        class="btn btn-sm btn-warning btn-action"
        title="编辑">
         <i class="bi bi-pencil"></i>

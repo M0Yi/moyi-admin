@@ -2,6 +2,7 @@
 
 @section('title', 'CRUD生成器')
 
+@if (! $isEmbedded)
 @push('admin_sidebar')
     @include('admin.components.sidebar')
 @endpush
@@ -9,16 +10,15 @@
 @push('admin_navbar')
     @include('admin.components.navbar')
 @endpush
+@endif
 
 @section('content')
 <div class="container-fluid py-4">
-    <!-- 页面标题 -->
     <div class="mb-3">
         <h6 class="mb-1 fw-bold">CRUD 代码生成器</h6>
         <small class="text-muted">管理已生成的 CRUD 配置记录</small>
     </div>
 
-    <!-- CRUD 配置记录列表卡片 -->
     <div class="card border-0 shadow-sm">
         <div class="card-body">
             @include('admin.components.action-toolbar', [
@@ -28,7 +28,14 @@
                         'href' => admin_route('system/crud-generator/create'),
                         'text' => '新建 CRUD',
                         'icon' => 'bi-plus-lg',
-                        'variant' => 'primary'
+                        'variant' => 'primary',
+                        'attributes' => [
+                            'data-iframe-shell-trigger' => 'crud-generator-create',
+                            'data-iframe-shell-src' => admin_route('system/crud-generator/create'),
+                            'data-iframe-shell-title' => '创建 CRUD 配置',
+                            'data-iframe-shell-channel' => 'crud-generator',
+                            'data-iframe-shell-behavior' => 'tab',
+                        ],
                     ]
                 ],
                 'rightButtons' => [
@@ -95,9 +102,16 @@
                             </td>
                             <td class="sticky-column">
                                 <div class="d-flex gap-1">
-                                    <a href="{{ admin_route('system/crud-generator/config/' . $config->table_name) }}?connection={{ $dbConn }}"
+                                    @php
+                                        $editUrl = admin_route('system/crud-generator/config/' . $config->table_name) . '?connection=' . $dbConn;
+                                    @endphp
+                                    <a href="{{ $editUrl }}"
                                        class="btn btn-sm btn-warning btn-action"
-                                       title="编辑配置">
+                                       title="编辑配置"
+                                       data-iframe-shell-trigger="crud-generator-edit"
+                                       data-iframe-shell-src="{{ $editUrl }}"
+                                       data-iframe-shell-title="编辑 CRUD：{{ $config->table_name }}"
+                                       data-iframe-shell-channel="crud-generator">
                                         <i class="bi bi-pencil"></i>
                                     </a>
                                     <button class="btn btn-sm btn-danger btn-action"
@@ -122,7 +136,6 @@
         </div>
     </div>
 
-    <!-- 功能说明 -->
     <div class="card border-0 shadow-sm mt-3">
         <div class="card-header bg-light">
             <h6 class="mb-0"><i class="bi bi-info-circle"></i> 功能说明</h6>
@@ -147,7 +160,6 @@
         </div>
     </div>
 
-    <!-- 删除确认模态框 -->
     <div class="modal fade" id="deleteModal" tabindex="-1" aria-labelledby="deleteModalLabel" aria-hidden="true">
         <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content">
@@ -184,25 +196,195 @@
     </div>
 </div>
 
-@include('admin.common.scripts')
-
+@push('admin_scripts')
 <script>
-/**
- * 删除配置
- */
-function deleteConfig(id, name) {
-    showDeleteModal(id, name, false, 'deleteModal', 'deleteConfigName');
-}
+(function () {
+    document.addEventListener('DOMContentLoaded', function () {
+        if (!window.Admin || !window.Admin.iframeShell) {
+            return;
+        }
 
-// 绑定确认删除按钮事件
-document.addEventListener('DOMContentLoaded', function() {
-    const confirmBtn = document.getElementById('confirmDeleteBtn');
-    if (confirmBtn) {
-        confirmBtn.addEventListener('click', function() {
-            // 使用通用的 executeDelete 函数
-            executeDelete((id) => adminRoute(`system/crud-generator/${id}`));
+        window.Admin.iframeShell.onMessage(function (message) {
+            if (!message || typeof message !== 'object') {
+                return;
+            }
+
+            const action = message.action || message?.payload?.action;
+            if (action === 'crud-created' || action === 'success') {
+                            window.location.reload();
+            }
         });
-    }
-});
+    });
+})();
 </script>
+<script>
+(function () {
+    'use strict'
+
+    function buildAdminUrl(path) {
+        if (window.Admin && typeof window.Admin.route === 'function') {
+            return window.Admin.route(path)
+        }
+
+        if (typeof window.adminRoute === 'function') {
+            return window.adminRoute(path)
+        }
+
+        if (!path) {
+            return '/'
+        }
+
+        return path.startsWith('/') ? path : '/' + path
+    }
+
+    const deleteApiBase = "{{ admin_route('system/crud-generator') }}";
+    const fallbackHeaders = {
+        'Content-Type': 'application/json',
+        'X-Requested-With': 'XMLHttpRequest',
+    };
+
+    const MAIN_REFRESH_MESSAGE = '菜单配置已更新，正在刷新主框架...';
+
+    function notify(type, message) {
+        if (typeof window.showToast === 'function') {
+            window.showToast(type, message);
+            return;
+        }
+        if (type === 'danger') {
+            console.error(message);
+        } else {
+            console.info(message);
+        }
+        alert(message);
+    }
+
+    function hideDeleteModal(modalId = 'deleteModal') {
+        const modalElement = document.getElementById(modalId);
+        if (!modalElement) {
+            return;
+        }
+
+        if (window.bootstrap && typeof window.bootstrap.Modal?.getInstance === 'function') {
+            const instance = window.bootstrap.Modal.getInstance(modalElement);
+            if (instance) {
+                instance.hide();
+                return;
+            }
+        }
+
+        modalElement.style.display = 'none';
+    }
+
+    function refreshMainFrame(payload = {}) {
+        const options = Object.assign({
+            message: MAIN_REFRESH_MESSAGE,
+            showToast: true,
+            toastType: 'info',
+            delay: 0,
+        }, payload);
+
+        if (!window.AdminIframeClient || typeof window.AdminIframeClient.refreshMainFrame !== 'function') {
+            return false;
+        }
+
+        try {
+            window.AdminIframeClient.refreshMainFrame(options);
+            return true;
+        } catch (error) {
+            console.warn('AdminIframeClient.refreshMainFrame 调用失败:', error);
+            return false;
+        }
+    }
+
+    function handleDeleteSuccess() {
+        refreshMainFrame();
+        setTimeout(() => window.location.reload(), 800);
+    }
+
+    async function manualDelete(deleteId) {
+        if (!deleteId) {
+            return;
+        }
+
+        const confirmBtn = document.getElementById('confirmDeleteBtn');
+        const originalHtml = confirmBtn?.innerHTML;
+
+        if (confirmBtn) {
+            confirmBtn.disabled = true;
+            confirmBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> 删除中...';
+        }
+
+        try {
+            const response = await fetch(`${deleteApiBase}/${deleteId}`, {
+                method: 'DELETE',
+                headers: fallbackHeaders,
+            });
+            let result = {};
+            try {
+                result = await response.json();
+            } catch (error) {
+                result = {};
+            }
+
+            const success = result && (result.code === 200 || result.code === 0);
+            if (success) {
+                notify('success', result.message || result.msg || '删除成功');
+                hideDeleteModal();
+                handleDeleteSuccess();
+            } else {
+                notify('danger', result.message || result.msg || '删除失败');
+            }
+        } catch (error) {
+            console.error('manualDelete error:', error);
+            notify('danger', '删除失败，请稍后重试');
+        } finally {
+            if (confirmBtn) {
+                confirmBtn.disabled = false;
+                confirmBtn.innerHTML = originalHtml || '<i class="bi bi-trash me-1"></i> 确认删除';
+            }
+            window._deleteItemId = null;
+        }
+    }
+
+    function runDelete(selectedId) {
+        const id = selectedId || window._deleteItemId;
+        if (!id) {
+            return;
+        }
+
+        if (typeof window.executeDelete === 'function') {
+            window.executeDelete(function () {
+                return `${deleteApiBase}/${id}`;
+            }, 'deleteModal', 'confirmDeleteBtn', handleDeleteSuccess);
+            return;
+        }
+
+        manualDelete(id);
+    }
+
+    window.deleteConfig = function (id, name) {
+        if (typeof window.showDeleteModal === 'function') {
+            window.showDeleteModal(id, name, false, 'deleteModal', 'deleteConfigName');
+            return;
+        }
+
+        console.warn('showDeleteModal 函数不可用，将直接执行删除操作');
+        window._deleteItemId = id;
+        runDelete(id);
+    };
+
+    document.addEventListener('DOMContentLoaded', function () {
+        const confirmBtn = document.getElementById('confirmDeleteBtn')
+
+        if (!confirmBtn) {
+            return
+        }
+
+        confirmBtn.addEventListener('click', function () {
+            runDelete();
+        });
+    });
+})();
+</script>
+@endpush
 @endsection

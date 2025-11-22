@@ -5,7 +5,7 @@
 ## 目录结构
 
 ```
-components/vendor/
+components/plugin/
 ├── bootstrap-css.blade.php      # Bootstrap CSS (版本: 5.3.2)
 ├── bootstrap-js.blade.php       # Bootstrap JavaScript (版本: 5.3.2)
 ├── bootstrap-icons.blade.php    # Bootstrap Icons (版本: 1.11.3)
@@ -13,7 +13,8 @@ components/vendor/
 ├── tom-select-js.blade.php     # Tom Select JavaScript (版本: 2.3.1)
 ├── flatpickr-css.blade.php     # Flatpickr CSS (版本: latest)
 ├── flatpickr-js.blade.php      # Flatpickr JavaScript (版本: latest)
-└── flatpickr-zh.blade.php       # Flatpickr 中文语言包 (版本: latest)
+├── flatpickr-zh.blade.php       # Flatpickr 中文语言包 (版本: latest)
+└── sortable-js.blade.php        # Sortable.js JavaScript (版本: 1.15.0)
 ```
 
 ## 使用方式
@@ -46,6 +47,9 @@ components/vendor/
 
 {{-- 引入 Flatpickr 中文语言包 --}}
 @include('components.plugin.flatpickr-zh')
+
+{{-- 引入 Sortable.js --}}
+@include('components.plugin.sortable-js')
 ```
 
 ## 版本管理
@@ -87,6 +91,10 @@ components/vendor/
 - **JS**: `flatpickr-js.blade.php` - Flatpickr 日期选择器 JavaScript
 - **中文包**: `flatpickr-zh.blade.php` - Flatpickr 中文语言包
 
+### Sortable.js
+
+- **JS**: `sortable-js.blade.php` - Sortable.js 1.15.0 拖拽排序库
+
 ## 使用示例
 
 ### 后台布局（完整功能）
@@ -107,6 +115,7 @@ components/vendor/
     @include('components.plugin.tom-select-js')
     @include('components.plugin.flatpickr-js')
     @include('components.plugin.flatpickr-zh')
+    @include('components.plugin.sortable-js')
 </body>
 ```
 

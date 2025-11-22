@@ -43,55 +43,20 @@ class UniversalCrudService
     protected function getCrudConfigFromDatabase(string $modelIdentifier): ?AdminCrudConfig
     {
         $siteId = site_id();
-
-        // 1. 尝试按 model_name 查询（最优先，推荐方式）
-        $config = AdminCrudConfig::query()
-            ->where('site_id', $siteId)
-            // ->where('status', AdminCrudConfig::STATUS_GENERATED)
-            ->where('model_name', $modelIdentifier)
-            ->first();
-
-        if ($config) {
-            return $config;
-        }
-
-        // 2. 如果没找到，尝试按 ID 查询
-        if (is_numeric($modelIdentifier)) {
-            $config = AdminCrudConfig::query()
-                ->where('site_id', $siteId)
-                // ->where('status', AdminCrudConfig::STATUS_GENERATED)
-                ->where('id', (int) $modelIdentifier)
-                ->first();
-
-            if ($config) {
-                return $config;
-            }
-        }
-
-        // 3. 尝试按 route_slug 查询（向后兼容）
-        $config = AdminCrudConfig::query()
-            ->where('site_id', $siteId)
-            // ->where('status', AdminCrudConfig::STATUS_GENERATED)
+        $query = AdminCrudConfig::query()
             ->where('route_slug', $modelIdentifier)
-            ->first();
-
-        if ($config) {
-            return $config;
+            ->where('status', AdminCrudConfig::STATUS_GENERATED);
+        if (!is_super_admin()){
+            $query->where('site_id', $siteId);
         }
-
-        // 4. 尝试通过转换后的表名查询（向后兼容，最后的后备方案）
-        $tableName = $this->convertRouteParamToTableName($modelIdentifier);
-        $config = AdminCrudConfig::query()
-            ->where('site_id', $siteId)
-            // ->where('status', AdminCrudConfig::STATUS_GENERATED)
-            ->where('table_name', $tableName)
-            ->first();
-
-        if ($config) {
-            return $config;
+        $config = $query->first();
+        if (!empty($config['fields_config']) && is_array($config['fields_config'])) {
+            $config['fields_config'] = array_values(array_filter(
+                $config['fields_config'],
+                fn($fieldConfig) => (bool) ($fieldConfig['show_in_list'] ?? $fieldConfig['list_default'] ?? true)
+            ));
         }
-
-        return null;
+        return $config;
     }
 
     /**
@@ -1722,6 +1687,49 @@ class UniversalCrudService
     }
 
     /**
+     * 验证表名格式，防止 SQL 注入
+     *
+     * @param string $tableName 表名
+     * @throws \InvalidArgumentException 如果表名格式不合法
+     */
+    protected function validateTableName(string $tableName): void
+    {
+        // 表名只能包含字母、数字、下划线和连字符
+        // 长度限制：1-64 个字符（MySQL 限制）
+        if (!preg_match('/^[a-zA-Z0-9_-]{1,64}$/', $tableName)) {
+            logger()->warning('[UniversalCrudService] 非法的表名格式', [
+                'table_name' => $tableName,
+            ]);
+            throw new \InvalidArgumentException("非法的表名格式: {$tableName}");
+        }
+
+        // 禁止以数字开头（MySQL 限制）
+        if (preg_match('/^\d/', $tableName)) {
+            throw new \InvalidArgumentException("表名不能以数字开头: {$tableName}");
+        }
+    }
+
+    /**
+     * 验证 ID 参数，防止越界和非法值
+     *
+     * @param int $id ID 值
+     * @param string $paramName 参数名称（用于错误信息）
+     * @throws \InvalidArgumentException 如果 ID 不合法
+     */
+    protected function validateId(int $id, string $paramName = 'id'): void
+    {
+        // ID 必须是正整数
+        if ($id <= 0) {
+            throw new \InvalidArgumentException("{$paramName} 必须是正整数，当前值: {$id}");
+        }
+
+        // ID 不能超过 PHP_INT_MAX（防止整数溢出）
+        if ($id > PHP_INT_MAX) {
+            throw new \InvalidArgumentException("{$paramName} 超出最大允许值");
+        }
+    }
+
+    /**
      * 验证并转义数据库字段名
      * 
      * 防止 SQL 注入：确保字段名只包含字母、数字、下划线和连字符
@@ -2692,17 +2700,47 @@ class UniversalCrudService
      */
     public function update(string $model, int $id, array $data): bool
     {
+        // 验证 ID
+        $this->validateId($id);
+
+        // 验证数据不为空
+        if (empty($data)) {
+            throw new \InvalidArgumentException('更新数据不能为空');
+        }
+
         $tableName = $this->getTableName($model);
         $config = $this->getModelConfig($model);
+
+        // 验证表名
+        $this->validateTableName($tableName);
 
         // 过滤字段
         $data = $this->filterFields($model, $data);
 
-        return $this->crudService->update($tableName, $id, $data, [
-            'fillable' => $config['fillable'] ?? null,
-            'has_site_id' => !empty($config['has_site_id']),
-            'timestamps' => !empty($config['timestamps']),
-        ]);
+        // 验证过滤后的数据不为空
+        if (empty($data)) {
+            throw new \InvalidArgumentException('过滤后的更新数据为空，请检查 fillable 配置');
+        }
+
+        // 将空字符串转换为 null
+        $data = $this->convertEmptyStringsToNull($data);
+
+        // 自动更新时间戳
+        if (!empty($config['timestamps'])) {
+            $data['updated_at'] = date('Y-m-d H:i:s');
+        }
+
+        // 使用 DB 更新
+        $query = Db::table($tableName)->where('id', $id);
+
+        // 添加站点过滤（超级管理员跳过）
+        $hasSiteId = !empty($config['has_site_id']);
+        $siteId = site_id();
+        if ($hasSiteId && $siteId && !is_super_admin()) {
+            $query->where('site_id', $siteId);
+        }
+
+        return $query->update($data) > 0;
     }
 
     /**
@@ -2847,18 +2885,23 @@ class UniversalCrudService
             $protected = ['domain', 'admin_entry_path'];
         }
 
+        // 移除受保护的字段
+        foreach ($protected as $field) {
+            unset($data[$field]);
+        }
+
         // 如果没有定义 fillable，允许所有字段（除了 id）
         if (empty($fillable)) {
             unset($data['id']);
-            // 将空字符串转换为 null
-            return $this->crudService->convertEmptyStringsToNull($data);
+            return $data;
         }
 
-        // 使用 CrudService 的 filterFields 方法
-        $filtered = $this->crudService->filterFields($data, $fillable, $protected);
+        // 只保留 fillable 中定义的字段
+        $filtered = array_filter($data, function ($key) use ($fillable) {
+            return in_array($key, $fillable);
+        }, ARRAY_FILTER_USE_KEY);
 
-        // 将空字符串转换为 null
-        return $this->crudService->convertEmptyStringsToNull($filtered);
+        return $filtered;
     }
 
     /**
@@ -2869,7 +2912,18 @@ class UniversalCrudService
      */
     protected function convertEmptyStringsToNull(array $data): array
     {
-        return $this->crudService->convertEmptyStringsToNull($data);
+        foreach ($data as $key => $value) {
+            // 如果值是空字符串，转换为 null
+            if ($value === '') {
+                $data[$key] = null;
+            }
+            // 如果是数组，递归处理（但数组本身不为空时不转换）
+            elseif (is_array($value) && !empty($value)) {
+                $data[$key] = $this->convertEmptyStringsToNull($value);
+            }
+        }
+
+        return $data;
     }
 
     /**
@@ -2990,7 +3044,7 @@ class UniversalCrudService
             return true;
         });
         
-        // 重新索引数组，确保索引从 0 开始连续
+        // 重新索引数组，确保索引从 0 开始连续（保持原始顺序）
         return array_values($filtered);
     }
 
