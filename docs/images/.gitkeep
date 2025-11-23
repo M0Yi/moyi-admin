@@ -1,0 +1,13 @@
+# 项目截图目录
+
+请将项目截图放在此目录下，建议使用以下命名：
+
+- login.png - 登录页面
+- dashboard.png - 仪表盘
+- list.png - 数据列表
+- edit.png - 数据编辑
+- trash.png - 回收站
+- permission.png - 权限管理
+- crud-generator.png - 代码生成器
+- operation-log.png - 操作日志
+

@@ -9,7 +9,7 @@ vendor/
 .phpintel/
 .DS_Store
 .phpunit*
-docs/
+#docs/
 *.cache
 .vscode/
 /phpstan.neon
