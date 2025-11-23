@@ -189,6 +189,34 @@ docker-compose up -d
 
 > **⚠️ 重要提示**：使用 Docker 时，需要确保主机端口 6501 未被占用。如果 6501 端口已被占用，可以修改 `docker-compose.yml` 中的端口映射，例如改为 `6601:6501`（将主机 6601 映射到容器 6501），然后通过 `http://localhost:6601` 访问。
 
+**重新编译新版本**：
+
+如果需要重新编译 Docker 镜像（例如更新了代码或依赖），可以使用以下命令：
+
+```bash
+# 停止并删除容器和卷
+docker-compose down -v
+
+# 重新构建镜像并启动容器
+docker-compose up -d --build --force-recreate
+```
+
+> **⚠️ 重要警告**：`docker-compose down -v` 命令中的 `-v` 参数会**删除所有 Docker 卷**，包括数据库数据、上传的文件等所有持久化数据。执行此命令前请确保已备份重要数据！
+>
+> **💡 说明**：
+> - `docker-compose down -v`：停止并删除所有容器，同时删除关联的卷（`-v` 参数）**⚠️ 会删除所有数据**
+> - `docker-compose up -d --build --force-recreate`：重新构建镜像（`--build`），强制重新创建容器（`--force-recreate`），并在后台运行（`-d`）
+>
+> **💡 如果只想重新编译而不删除数据**，可以使用以下命令（不包含 `-v` 参数）：
+>
+> ```bash
+> # 停止并删除容器（保留卷和数据）
+> docker-compose down
+>
+> # 重新构建镜像并启动容器
+> docker-compose up -d --build --force-recreate
+> ```
+
 #### 5. 初始化系统
 
 启动服务后，访问安装页面进行系统初始化：
