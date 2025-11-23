@@ -466,10 +466,14 @@
                 const stored = localStorage.getItem(this.storageKey);
                 if (stored) {
                     visibleColumns = JSON.parse(stored);
+                } else {
+                    // 如果没有保存的设置，使用默认的可见列（根据 column.visible 配置）
+                    visibleColumns = this.defaultVisibleColumns;
                 }
             } catch (e) {
                 console.warn('[ToolbarRenderer] 读取列显示状态失败:', e);
-                return;
+                // 出错时也使用默认可见列
+                visibleColumns = this.defaultVisibleColumns;
             }
 
             // 获取列配置，用于判断哪些列不可切换（toggleable: false）
@@ -491,7 +495,7 @@
                 const isNonToggleable = nonToggleableColumns.includes(colIdNum) || 
                                        nonToggleableColumns.includes(columnId);
                 
-                // 如果不可切换，则始终可见；否则从 localStorage 读取
+                // 如果不可切换，则始终可见；否则从 localStorage 读取（如果没有则使用默认可见列）
                 const isVisible = isNonToggleable || 
                                  visibleColumns.includes(colIdNum) || 
                                  visibleColumns.includes(columnId);

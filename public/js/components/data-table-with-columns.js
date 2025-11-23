@@ -1008,19 +1008,6 @@
         // 此函数作为后备方案（当没有工具栏渲染器时使用）
         function applyColumnVisibilityPreferences() {
             const saved = localStorage.getItem(storageKey);
-            const table = document.getElementById(tableId);
-            
-            if (!table) {
-                return;
-            }
-
-            // 检查表格是否有数据（无论是否有保存的设置都需要检查）
-            const hasData = table.querySelector('tbody td[data-column]') !== null;
-            if (!hasData) {
-                // 如果表格还没有数据，延迟重试
-                setTimeout(applyColumnVisibilityPreferences, 100);
-                return;
-            }
             
             if (!saved) {
                 // 如果没有保存的设置，应用默认的列显示状态（根据 column.visible）
@@ -1030,6 +1017,19 @@
 
             try {
                 const visibleColumns = JSON.parse(saved);
+                const table = document.getElementById(tableId);
+                
+                if (!table) {
+                    return;
+                }
+
+                // 检查表格是否有数据
+                const hasData = table.querySelector('tbody td[data-column]') !== null;
+                if (!hasData) {
+                    // 如果表格还没有数据，延迟重试
+                    setTimeout(applyColumnVisibilityPreferences, 100);
+                    return;
+                }
 
                 // 获取列配置，用于判断哪些列不可切换（toggleable: false）
                 const nonToggleableColumns = columns
@@ -1067,14 +1067,6 @@
         function applyDefaultColumnVisibility() {
             const table = document.getElementById(tableId);
             if (!table) {
-                return;
-            }
-
-            // 检查表格是否有数据
-            const hasData = table.querySelector('tbody td[data-column]') !== null;
-            if (!hasData) {
-                // 如果表格还没有数据，延迟重试
-                setTimeout(applyDefaultColumnVisibility, 100);
                 return;
             }
 
