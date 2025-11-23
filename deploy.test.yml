@@ -6,7 +6,7 @@ services:
       - "APP_PROJECT=hyperf"
       - "APP_ENV=testing"
     ports:
-      - "6601:6601"
+      - "6501:6501"
     deploy:
       replicas: 1
       restart_policy:

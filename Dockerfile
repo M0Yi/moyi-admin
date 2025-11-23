@@ -49,6 +49,6 @@ WORKDIR /opt/www
 COPY . /opt/www
 RUN composer install --no-dev -o && php bin/hyperf.php
 
-EXPOSE 6601
+EXPOSE 6501
 
 ENTRYPOINT ["php", "/opt/www/bin/hyperf.php", "start"]
