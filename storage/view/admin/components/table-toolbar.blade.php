@@ -199,11 +199,20 @@
                     @endif
 
                     {{-- 搜索按钮（默认显示，放在列显示控制后面） --}}
-                    @if($showSearch ?? true)
-                        @php
-                            $currentTableId = $tableId ?? 'dataTable';
-                            $toggleFunction = "toggleSearchPanel_{$currentTableId}";
-                        @endphp
+                    @php
+                        $shouldShowSearch = ($showSearch ?? true) !== false;
+                        $currentTableId = $tableId ?? 'dataTable';
+                        $toggleFunction = "toggleSearchPanel_{$currentTableId}";
+                    @endphp
+                    @if($shouldShowSearch)
+                        <script>
+                            console.log('[TableToolbar] 搜索按钮显示检查', {
+                                tableId: '{{ $currentTableId }}',
+                                showSearch: {{ var_export($showSearch ?? null, true) }},
+                                shouldShowSearch: {{ $shouldShowSearch ? 'true' : 'false' }},
+                                toggleFunction: '{{ $toggleFunction }}'
+                            });
+                        </script>
                         <button
                             type="button"
                             class="btn btn-outline-secondary px-3 py-2"
@@ -215,6 +224,14 @@
                         >
                             <i class="bi bi-search" id="searchToggleIcon_{{ $currentTableId }}"></i>
                         </button>
+                    @else
+                        <script>
+                            console.log('[TableToolbar] 搜索按钮被隐藏', {
+                                tableId: '{{ $currentTableId }}',
+                                showSearch: {{ var_export($showSearch ?? null, true) }},
+                                shouldShowSearch: {{ $shouldShowSearch ? 'true' : 'false' }}
+                            });
+                        </script>
                     @endif
                 @endif
             </div>

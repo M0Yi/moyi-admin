@@ -751,29 +751,72 @@
                 return;
             }
 
-            // 调试日志
-            console.log('[TabManager] Received message from tab:', {
-                tabId: tab.id,
-                action: data.action,
-                payload: data.payload
-            });
+            // 详细日志输出：接收到的消息信息
+            const timestamp = new Date().toLocaleTimeString();
+            const actionName = data.action || '(无 action)';
+            const tabTitle = tab.title || tab.id;
+            
+            // 输出详细的分组日志
+            console.group(`%c[TabManager] 收到标签页消息: ${actionName}`, 'color: #198754; font-weight: bold;');
+            console.log('%c时间:', 'color: #6c757d;', timestamp);
+            console.log('%c标签页 ID:', 'color: #6c757d;', tab.id);
+            console.log('%c标签页标题:', 'color: #6c757d;', tabTitle);
+            console.log('%c频道:', 'color: #6c757d;', data.channel || '(无频道)');
+            console.log('%c来源:', 'color: #6c757d;', data.source || '(未知来源)');
+            console.log('%cAction:', 'color: #198754; font-weight: bold;', actionName);
+            
+            if (data.payload) {
+                if (typeof data.payload === 'object') {
+                    console.log('%cPayload:', 'color: #0dcaf0; font-weight: bold;', data.payload);
+                    console.log('%cPayload (JSON):', 'color: #0dcaf0;', JSON.stringify(data.payload, null, 2));
+                } else {
+                    console.log('%cPayload:', 'color: #0dcaf0; font-weight: bold;', data.payload);
+                }
+            } else {
+                console.log('%cPayload:', 'color: #6c757d;', '(无)');
+            }
+            
+            console.log('%c完整消息数据:', 'color: #6c757d;', data);
+            console.groupEnd();
+            
+            // 同时输出一行简洁的日志（兼容原有格式）
+            let logMessage = `[${timestamp}] [TabManager] ← 收到标签页消息 [${actionName}] (标签: ${tabTitle})`;
+            if (data.payload) {
+                if (typeof data.payload === 'object') {
+                    logMessage += ': ' + JSON.stringify(data.payload, null, 2);
+                } else {
+                    logMessage += ': ' + data.payload;
+                }
+            }
+            console.log(logMessage);
+
+            // 显示消息提示（如果 payload 中包含 message）
+            // 注意：success action 的提示会在 handleSuccessMessage 中处理，这里处理其他 action
+            if (data.action !== 'success' && data.payload && typeof data.payload === 'object' && data.payload.message) {
+                this.showMessageToast(data.action, data.payload.message, data.payload.toastType);
+            }
 
             // 处理不同的 action
             switch (data.action) {
                 case 'success':
+                    console.log(`[TabManager] 处理 action: success, 标签页 ID: ${tab.id}`);
                     this.handleSuccessMessage(tab, data.payload || {});
                     break;
                 case 'close':
+                    console.log(`[TabManager] 处理 action: close, 标签页 ID: ${tab.id}`);
                     this.handleCloseMessage(tab, data.payload || {});
                     break;
                 case 'notify':
                     // 自定义事件通知，可以在这里添加自定义处理逻辑
-                    console.log('[TabManager] Received notify event:', data);
+                    console.log(`[TabManager] 处理 action: notify, 标签页 ID: ${tab.id}`);
                     this.handleNotifyMessage(tab, data.payload || {});
                     break;
                 case 'refresh-main':
+                    console.log(`[TabManager] 处理 action: refresh-main, 标签页 ID: ${tab.id}`);
                     this.handleRefreshMainMessage(tab, data.payload || {});
                     break;
+                default:
+                    console.log(`[TabManager] 未知 action: ${data.action}, 标签页 ID: ${tab.id}`);
             }
         }
 
@@ -805,6 +848,58 @@
                 }
             }
             return null;
+        }
+
+        /**
+         * 显示消息提示
+         * @param {string} action - 消息 action
+         * @param {string} message - 提示消息
+         * @param {string} toastType - 提示类型 (success, danger, warning, info)
+         */
+        showMessageToast(action, message, toastType) {
+            if (!message || typeof message !== 'string') {
+                return;
+            }
+
+            // 根据 action 确定默认的提示类型
+            let type = toastType || 'info';
+            if (!toastType) {
+                switch (action) {
+                    case 'success':
+                        type = 'success';
+                        break;
+                    case 'error':
+                    case 'danger':
+                        type = 'danger';
+                        break;
+                    case 'warning':
+                        type = 'warning';
+                        break;
+                    default:
+                        type = 'info';
+                }
+            }
+
+            // 尝试使用全局的 showToast 函数
+            try {
+                if (window.Admin && typeof window.Admin.utils?.showToast === 'function') {
+                    window.Admin.utils.showToast(type, message);
+                    console.log(`[TabManager] 显示提示: [${type}] ${message}`);
+                    return;
+                }
+                
+                if (window.showToast && typeof window.showToast === 'function') {
+                    window.showToast(type, message);
+                    console.log(`[TabManager] 显示提示: [${type}] ${message}`);
+                    return;
+                }
+            } catch (e) {
+                console.warn('[TabManager] 显示提示失败:', e);
+            }
+
+            // 降级方案：使用 alert
+            console.log(`[TabManager] 提示消息: [${type}] ${message}`);
+            alert(message);
         }
 
         /**

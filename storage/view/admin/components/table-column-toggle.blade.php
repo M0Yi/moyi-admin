@@ -245,7 +245,14 @@
                     toggleColumn(+cb.dataset.column, isDefault);
                 });
                 savePreferences();
-                showToast('已重置为默认显示');
+                // 使用全局的 showToast 函数
+                if (typeof window.showToast === 'function') {
+                    window.showToast('success', '已重置为默认显示');
+                } else if (window.Admin && typeof window.Admin.utils?.showToast === 'function') {
+                    window.Admin.utils.showToast('success', '已重置为默认显示');
+                } else {
+                    console.log('已重置为默认显示');
+                }
             };
         }
     }
@@ -276,15 +283,6 @@
             cb.checked = isVisible;
             toggleColumn(index, isVisible);
         });
-    }
-
-    function showToast(msg) {
-        const toast = document.createElement('div');
-        toast.className = 'alert alert-success position-fixed';
-        toast.style.cssText = 'top: 20px; right: 20px; z-index: 9999;';
-        toast.innerHTML = `<i class="bi bi-check-circle me-2"></i>${msg}`;
-        document.body.appendChild(toast);
-        setTimeout(() => toast.remove(), 2000);
     }
 })();
 </script>

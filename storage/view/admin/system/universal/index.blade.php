@@ -25,17 +25,19 @@
     $batchDestroyRoute = admin_route("{$baseRoute}/batch-destroy");  // 批量删除
     $destroyRouteTemplate = admin_route($baseRoute);         // 删除模板（需要拼接 /{id}）
     $exportRoute = admin_route("{$baseRoute}/export");         // 导出路由
+    $trashRoute = admin_route("{$baseRoute}/trash");           // 回收站路由
     
     // 本地存储键名（用于保存列显示设置）
     $storageKey = 'universal_' . $model . '_columns';
     
-    // 功能开关配置：增 / 删 / 改 / 查 / 导出 等功能是否启用
+    // 功能开关配置：增 / 删 / 改 / 查 / 导出 / 软删除 等功能是否启用
     $featureDefaults = [
         'search' => true,
         'add' => true,
         'edit' => true,
         'delete' => true,
         'export' => true,
+        'soft_delete' => false,  // 软删除默认关闭
     ];
 
     if (!empty($config['features']) && is_array($config['features'])) {
@@ -65,6 +67,7 @@
 <script type="application/json" id="universalCrudConfigPayload">
 {!! $configJson ?? '{}' !!}
 </script>
+<script src="/js/components/search-form-renderer.js"></script>
 <script>
 (function () {
     window.CODE_VIEWER_FILES = @json($codeViewerFiles);
@@ -75,9 +78,72 @@
         const payloadElement = document.getElementById('universalCrudConfigPayload');
         const payloadText = payloadElement ? (payloadElement.textContent || '{}') : '{}';
         window.universalCrudConfig = payloadText ? JSON.parse(payloadText) : {};
+        console.log('[UniversalCrud] 配置解析成功', {
+            hasSearchFields: !!(window.universalCrudConfig.search_fields && window.universalCrudConfig.search_fields.length > 0),
+            searchFieldsCount: window.universalCrudConfig.search_fields?.length || 0,
+            hasSearchFieldsConfig: !!(window.universalCrudConfig.search_fields_config && window.universalCrudConfig.search_fields_config.length > 0),
+            searchFieldsConfigCount: window.universalCrudConfig.search_fields_config?.length || 0,
+            features: window.universalCrudConfig.features
+        });
     } catch (error) {
         console.error('[UniversalCrud] 解析配置失败', error);
         window.universalCrudConfig = {};
+    }
+
+    // 初始化搜索表单渲染器（如果启用了搜索功能）
+    const enableSearch = {{ !empty($config['search_fields']) && ($features['search'] ?? true) ? 'true' : 'false' }};
+    console.log('[UniversalCrud] 搜索功能检查', {
+        enableSearch: enableSearch,
+        hasSearchFields: {{ !empty($config['search_fields']) ? 'true' : 'false' }},
+        searchFieldsCount: {{ count($config['search_fields'] ?? []) }},
+        searchFeatureEnabled: {{ ($features['search'] ?? true) ? 'true' : 'false' }},
+        hasSearchFormRenderer: typeof window.SearchFormRenderer !== 'undefined'
+    });
+    
+    if (enableSearch && window.SearchFormRenderer) {
+        // 等待数据表格组件初始化完成后再初始化搜索表单
+        document.addEventListener('DOMContentLoaded', function() {
+            // 延迟初始化，确保数据表格组件已经创建了搜索面板容器
+            setTimeout(function() {
+                // 从全局配置中读取搜索配置
+                const config = window.universalCrudConfig || {};
+                const searchConfig = {
+                    search_fields: config.search_fields || @json($config['search_fields'] ?? []),
+                    search_fields_config: config.search_fields_config || @json($config['search_fields_config'] ?? []),
+                };
+                
+                if (searchConfig.search_fields && searchConfig.search_fields.length > 0) {
+                    try {
+                        const renderer = new window.SearchFormRenderer({
+                            config: searchConfig,
+                            formId: 'searchForm_dataTable',
+                            panelId: 'searchPanel_dataTable',
+                            tableId: 'dataTable',
+                            model: '{{ $model }}'
+                        });
+                        
+                        // 保存渲染器实例，供重置函数使用
+                        window['_searchFormRenderer_dataTable'] = renderer;
+                        
+                        // 创建重置函数
+                        window['resetSearchForm_dataTable'] = function() {
+                            if (renderer && typeof renderer.reset === 'function') {
+                                renderer.reset();
+                            }
+                        };
+                        
+                        console.log('[UniversalCrud] 搜索表单渲染器已初始化', {
+                            searchFields: searchConfig.search_fields,
+                            fieldsConfigCount: searchConfig.search_fields_config?.length || 0
+                        });
+                    } catch (error) {
+                        console.error('[UniversalCrud] 搜索表单渲染器初始化失败', error);
+                    }
+                } else {
+                    console.log('[UniversalCrud] 未配置搜索字段，跳过搜索表单渲染');
+                }
+            }, 200); // 增加延迟时间，确保数据表格组件完全初始化
+        });
     }
 
     document.addEventListener('click', function (event) {
@@ -95,9 +161,65 @@
         window.Admin.iframeShell.open({
             src: targetUrl,
             title: '{{ ($config['title'] ?? '数据') }}编辑',
-            channel: '{{ $shellChannel }}'
+            channel: '{{ $shellChannel }}',
+            hideActions: true  // 隐藏"新标签"和"新窗口"按钮
         });
     }, true);
+
+    // 监听来自 iframe 的消息，当收到 refreshParent: true 时刷新数据表
+    window.addEventListener('message', function(event) {
+        // 安全检查：只处理同源消息
+        if (event.origin !== window.location.origin) {
+            return;
+        }
+
+        const data = event.data;
+        if (!data || typeof data !== 'object') {
+            return;
+        }
+
+        // 检查频道是否匹配（可选，如果设置了频道则必须匹配）
+        const channel = '{{ $shellChannel }}';
+        if (data.channel && data.channel !== channel) {
+            return;
+        }
+
+        // 检查 payload 中是否包含 refreshParent: true
+        // 支持两种消息格式：
+        // 1. { action: 'success', payload: { refreshParent: true, ... } }
+        // 2. { action: 'refresh-parent', payload: { refreshParent: true, ... } }
+        const payload = data.payload;
+        if (payload && typeof payload === 'object' && payload.refreshParent === true) {
+            console.log('[UniversalCrud] 收到 refreshParent 消息，刷新数据表', {
+                action: data.action,
+                source: data.source,
+                payload: payload
+            });
+            
+            // 检查 loadData_dataTable 函数是否存在
+            if (typeof window.loadData_dataTable === 'function') {
+                window.loadData_dataTable();
+                console.log('[UniversalCrud] 已触发 loadData_dataTable() 刷新数据表');
+            } else {
+                console.warn('[UniversalCrud] loadData_dataTable 函数不存在，无法刷新数据表');
+            }
+        }
+    });
+
+    // 同时监听自定义事件（用于 iframe-shell 在顶层窗口时触发）
+    window.addEventListener('refreshParent', function(event) {
+        const payload = event.detail;
+        if (payload && typeof payload === 'object' && payload.refreshParent === true) {
+            console.log('[UniversalCrud] 收到 refreshParent 自定义事件，刷新数据表');
+            
+            if (typeof window.loadData_dataTable === 'function') {
+                window.loadData_dataTable();
+                console.log('[UniversalCrud] 已触发 loadData_dataTable() 刷新数据表');
+            } else {
+                console.warn('[UniversalCrud] loadData_dataTable 函数不存在，无法刷新数据表');
+            }
+        }
+    });
 })();
 </script>
 @endpush
@@ -121,7 +243,7 @@
                     'ajaxUrl' => $indexRoute,  // 启用 AJAX 模式
                     'searchFormId' => 'searchForm_dataTable',
                     'searchPanelId' => 'searchPanel_dataTable',
-                    'searchConfig' => $config,  // 传递搜索配置，组件会自动渲染搜索表单
+                    // 不传递 searchConfig，改为使用 JavaScript 渲染搜索表单
                     'model' => $model,  // 传递模型名称，用于关联模式字段的异步加载
                     'batchDestroyRoute' => $batchDestroyRoute,  // 批量删除路由
                     'defaultPageSize' => $config['default_page_size'] ?? 15,  // 默认分页尺寸
@@ -147,6 +269,7 @@
                                 'data-iframe-shell-title' => '新建' . ($config['title'] ?? '数据'),
                                 'data-iframe-shell-channel' => $shellChannel,
                                 'data-iframe-shell-auto-close' => 'true',
+                                'data-iframe-shell-hide-actions' => 'true',  // 隐藏"新标签"和"新窗口"按钮
                             ],
                         ] : null,
                         // 批量删除按钮：需要有路由且受 delete 功能开关控制
@@ -168,6 +291,22 @@
                             'icon' => 'bi-download',
                             'title' => '导出',
                             'onclick' => 'exportData_dataTable()'
+                        ] : null,
+                        // 回收站按钮：受 soft_delete 功能开关控制
+                        ($features['soft_delete'] ?? false) ? [
+                            'type' => 'link',
+                            'href' => $trashRoute,
+                            'icon' => 'bi-trash',
+                            'text' => '回收站',
+                            'title' => '查看已删除的数据',
+                            'variant' => 'outline-secondary',
+                            'attributes' => [
+                                'data-iframe-shell-trigger' => 'universal-trash-' . $model,
+                                'data-iframe-shell-src' => $trashRoute,
+                                'data-iframe-shell-title' => ($config['title'] ?? '数据') . '回收站',
+                                'data-iframe-shell-channel' => $shellChannel,
+                                'data-iframe-shell-hide-actions' => 'true',
+                            ],
                         ] : null,
                         // 刷新按钮始终保留
                         [

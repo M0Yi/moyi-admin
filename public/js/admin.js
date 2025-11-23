@@ -185,6 +185,12 @@ async function executeDelete(apiUrl, modalId = 'deleteModal', confirmBtnId = 'co
             // 删除成功
             showToast('success', result.message || result.msg || '删除成功');
 
+            // 重置按钮状态（在关闭模态框之前）
+            if (confirmBtn) {
+                confirmBtn.disabled = false;
+                confirmBtn.innerHTML = originalHtml;
+            }
+
             // 关闭模态框
             const modal = bootstrap.Modal.getInstance(document.getElementById(modalId));
             if (modal) {
@@ -327,17 +333,20 @@ async function toggleStatus(id, checkbox, apiUrlTemplate, field = 'status') {
         }
     });
 
-    const originalChecked = checkbox.checked;
+    // 注意：onchange 事件在状态改变后触发，所以 checkbox.checked 已经是新状态
+    // 切换前的状态应该是 !checkbox.checked
+    const originalChecked = !checkbox.checked;
+    const currentChecked = checkbox.checked;
+    
     // 如果 checkbox 有 data-on-value 和 data-off-value，使用它们
     const onValue = checkbox.dataset.onValue !== undefined ? parseInt(checkbox.dataset.onValue) : 1;
     const offValue = checkbox.dataset.offValue !== undefined ? parseInt(checkbox.dataset.offValue) : 0;
-    const newValue = originalChecked ? onValue : offValue;
 
     console.log(`[ToggleStatus] 状态切换准备:`, {
         recordId: id,
         field: actualField,
         originalChecked: originalChecked,
-        newValue: newValue,
+        currentChecked: currentChecked,
         onValue: onValue,
         offValue: offValue,
         apiUrlTemplate: apiUrlTemplate
@@ -350,24 +359,23 @@ async function toggleStatus(id, checkbox, apiUrlTemplate, field = 'status') {
     try {
         const url = apiUrlTemplate.replace('{id}', id);
 
-        console.log(`[ToggleStatus] 发送 PUT 请求:`, {
+        console.log(`[ToggleStatus] 发送 POST 请求:`, {
             url: url,
-            method: 'PUT',
+            method: 'POST',
             field: actualField,
-            value: newValue,
             requestBody: {
-                [actualField]: newValue
+                field: actualField
             }
         });
 
         const response = await fetch(url, {
-            method: 'PUT',
+            method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 'X-Requested-With': 'XMLHttpRequest',
             },
             body: JSON.stringify({
-                [actualField]: newValue
+                field: actualField
             })
         });
 
@@ -386,16 +394,16 @@ async function toggleStatus(id, checkbox, apiUrlTemplate, field = 'status') {
             console.log(`[ToggleStatus] 状态更新成功:`, {
                 recordId: id,
                 field: actualField,
-                newValue: newValue,
+                originalChecked: originalChecked,
                 message: result.message || result.msg
             });
 
             // 更新成功
             showToast('success', result.message || result.msg || '状态更新成功', 1500);
-            // 根据 onValue 和 offValue 更新 checkbox 状态
-            checkbox.checked = newValue === onValue;
+            // 后端自动切换值，所以前端应该保持当前 checkbox 状态（因为用户已经点击切换了）
+            // checkbox.checked 已经是切换后的状态，不需要再修改
 
-            // 更新开关样式
+            // 更新开关样式（根据当前 checked 状态）
             if (checkbox.checked) {
                 checkbox.classList.remove('bg-secondary');
                 checkbox.classList.add('bg-success');
@@ -404,7 +412,7 @@ async function toggleStatus(id, checkbox, apiUrlTemplate, field = 'status') {
                 checkbox.classList.add('bg-secondary');
             }
 
-            console.log(`[ToggleStatus] 开关状态已更新为:`, checkbox.checked, `(值: ${newValue})`);
+            console.log(`[ToggleStatus] 开关状态已更新为:`, checkbox.checked);
         } else {
             console.warn(`[ToggleStatus] 状态更新失败:`, {
                 recordId: id,
@@ -415,9 +423,18 @@ async function toggleStatus(id, checkbox, apiUrlTemplate, field = 'status') {
 
             // 更新失败，恢复原状态
             showToast('danger', result.message || result.msg || '状态更新失败');
-            checkbox.checked = !originalChecked;
+            checkbox.checked = originalChecked;
+            
+            // 更新开关样式
+            if (checkbox.checked) {
+                checkbox.classList.remove('bg-secondary');
+                checkbox.classList.add('bg-success');
+            } else {
+                checkbox.classList.remove('bg-success');
+                checkbox.classList.add('bg-secondary');
+            }
 
-            console.log(`[ToggleStatus] 已恢复开关原状态:`, !originalChecked);
+            console.log(`[ToggleStatus] 已恢复开关原状态:`, originalChecked);
         }
     } catch (error) {
         console.error(`[ToggleStatus] 请求异常:`, {
@@ -431,9 +448,18 @@ async function toggleStatus(id, checkbox, apiUrlTemplate, field = 'status') {
 
         showToast('danger', '状态更新失败，请稍后重试');
         // 恢复原状态
-        checkbox.checked = !originalChecked;
+        checkbox.checked = originalChecked;
+        
+        // 更新开关样式
+        if (checkbox.checked) {
+            checkbox.classList.remove('bg-secondary');
+            checkbox.classList.add('bg-success');
+        } else {
+            checkbox.classList.remove('bg-success');
+            checkbox.classList.add('bg-secondary');
+        }
 
-        console.log(`[ToggleStatus] 异常后已恢复开关原状态:`, !originalChecked);
+        console.log(`[ToggleStatus] 异常后已恢复开关原状态:`, originalChecked);
     } finally {
         // 重新启用开关
         checkbox.disabled = false;
@@ -760,8 +786,13 @@ window.Admin.utils.showToast = showToast;
 window.showToast = showToast;
 window.Admin.utils.showDeleteModal = showDeleteModal;
 window.Admin.utils.executeDelete = executeDelete;
+// 保持向后兼容：挂载为全局函数
+window.showDeleteModal = showDeleteModal;
+window.executeDelete = executeDelete;
 window.Admin.utils.submitForm = submitForm;
 window.Admin.utils.toggleStatus = toggleStatus;
+// 保持向后兼容：挂载为全局函数
+window.toggleStatus = toggleStatus;
 window.Admin.utils.preventAutofill = preventAutofill;
 window.Admin.utils.initIconPreview = initIconPreview;
 window.Admin.utils.confirmAction = confirmAction;

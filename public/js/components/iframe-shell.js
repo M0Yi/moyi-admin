@@ -19,7 +19,8 @@
 
     const defaultOptions = {
         channel: 'admin-iframe-shell',
-        autoCloseOnSuccess: true
+        autoCloseOnSuccess: true,
+        hideActions: false  // 是否隐藏"新标签"和"新窗口"按钮
     };
 
     function getTabManager() {
@@ -289,6 +290,23 @@
             state.loadingEl.style.display = 'flex';
         }
 
+        // 根据配置显示/隐藏"新标签"和"新窗口"按钮
+        if (options.hideActions === true) {
+            if (state.newTabBtn) {
+                state.newTabBtn.style.display = 'none';
+            }
+            if (state.newWindowBtn) {
+                state.newWindowBtn.style.display = 'none';
+            }
+        } else {
+            if (state.newTabBtn) {
+                state.newTabBtn.style.display = '';
+            }
+            if (state.newWindowBtn) {
+                state.newWindowBtn.style.display = '';
+            }
+        }
+
         state.overlay.hidden = false;
         body.classList.add('iframe-shell-open');
 
@@ -308,6 +326,14 @@
 
         if (state.iframe) {
             state.iframe.src = 'about:blank';
+        }
+
+        // 重置按钮显示状态（确保下次打开时状态正确）
+        if (state.newTabBtn) {
+            state.newTabBtn.style.display = '';
+        }
+        if (state.newWindowBtn) {
+            state.newWindowBtn.style.display = '';
         }
 
         state.handlers.forEach(handler => {
@@ -337,6 +363,7 @@
         const title = dataset.iframeShellTitle || trigger.textContent.trim();
         const behavior = dataset.iframeShellBehavior || 'modal';
         const fallbackToWindow = dataset.iframeShellFallbackWindow !== 'false';
+        const hideActions = dataset.iframeShellHideActions === 'true' || dataset.iframeShellHideActions === '1';
 
         if (!src) {
             console.warn('[IframeShell] missing src for trigger:', trigger);
@@ -353,7 +380,8 @@
             src: src,
             title: title,
             channel: dataset.iframeShellChannel || defaultOptions.channel,
-            autoCloseOnSuccess: dataset.iframeShellAutoClose !== 'false'
+            autoCloseOnSuccess: dataset.iframeShellAutoClose !== 'false',
+            hideActions: hideActions
         });
     }
 
@@ -380,6 +408,55 @@
             return;
         }
 
+        // 详细日志输出：接收到的消息信息
+        const timestamp = new Date().toLocaleTimeString();
+        const actionName = data.action || '(无 action)';
+        let logMessage = `[${timestamp}] [IframeShell] ← 收到 iframe 消息 [${actionName}]`;
+        
+        // 输出消息详情
+        const messageDetails = {
+            action: data.action,
+            channel: data.channel || channel,
+            source: data.source || '(未知来源)',
+            payload: data.payload || null,
+            fullData: data
+        };
+        
+        console.group(`%c[IframeShell] 收到消息: ${actionName}`, 'color: #0d6efd; font-weight: bold;');
+        console.log('%c时间:', 'color: #6c757d;', timestamp);
+        console.log('%c频道:', 'color: #6c757d;', messageDetails.channel);
+        console.log('%c来源:', 'color: #6c757d;', messageDetails.source);
+        console.log('%cAction:', 'color: #198754; font-weight: bold;', actionName);
+        
+        if (data.payload) {
+            if (typeof data.payload === 'object') {
+                console.log('%cPayload:', 'color: #0dcaf0; font-weight: bold;', data.payload);
+                console.log('%cPayload (JSON):', 'color: #0dcaf0;', JSON.stringify(data.payload, null, 2));
+            } else {
+                console.log('%cPayload:', 'color: #0dcaf0; font-weight: bold;', data.payload);
+            }
+        } else {
+            console.log('%cPayload:', 'color: #6c757d;', '(无)');
+        }
+        
+        console.log('%c完整消息数据:', 'color: #6c757d;', data);
+        console.groupEnd();
+        
+        // 同时输出一行简洁的日志（兼容原有格式）
+        if (data.payload) {
+            if (typeof data.payload === 'object') {
+                logMessage += ': ' + JSON.stringify(data.payload, null, 2);
+            } else {
+                logMessage += ': ' + data.payload;
+            }
+        }
+        console.log(logMessage);
+
+        // 显示消息提示（如果 payload 中包含 message）
+        if (data.payload && typeof data.payload === 'object' && data.payload.message) {
+            showMessageToast(data.action, data.payload.message, data.payload.toastType);
+        }
+
         state.handlers.forEach(handler => {
             try {
                 handler(data, state.config);
@@ -389,15 +466,61 @@
         });
 
         if (data.action === 'close') {
+            console.log(`[IframeShell] 处理 action: close, 关闭 iframe shell`);
             close({ reason: 'message-close', data });
         }
 
         if (data.action === 'success' && state.config?.autoCloseOnSuccess !== false) {
+            console.log(`[IframeShell] 处理 action: success, 自动关闭 iframe shell`);
             close({ reason: 'message-success', data });
         }
 
         if (data.action === 'refresh-main') {
+            console.log(`[IframeShell] 处理 action: refresh-main, 触发主框架刷新`);
             triggerMainFrameRefresh(data.payload || {});
+        }
+
+        // 处理 refreshParent: true 消息
+        // 智能查找最近的父级列表页面并刷新，而不是一直传递到最顶层
+        if (data.payload && typeof data.payload === 'object' && data.payload.refreshParent === true) {
+            console.log(`[IframeShell] 收到 refreshParent: true 消息，查找最近的父级列表页面`);
+            
+            // 先检查当前页面是否有 loadData_dataTable 函数（说明这是列表页面）
+            if (typeof window.loadData_dataTable === 'function') {
+                console.log(`[IframeShell] 当前页面是列表页面，在当前页面刷新数据表`);
+                try {
+                    window.loadData_dataTable();
+                    console.log(`[IframeShell] 已触发当前页面的 loadData_dataTable() 刷新数据表`);
+                    return; // 在当前页面处理完成，不再向上传递
+                } catch (error) {
+                    console.warn('[IframeShell] 调用 loadData_dataTable() 失败:', error);
+                    // 如果调用失败，继续向上传递
+                }
+            }
+            
+            // 如果当前页面不是列表页面，或者处理失败，则向上传递到父窗口
+            try {
+                const channel = state.config?.channel || defaultOptions.channel;
+                // 如果当前窗口不是顶层窗口，将消息转发到父窗口
+                if (window.self !== window.top) {
+                    window.parent.postMessage({
+                        channel: channel,
+                        action: data.action || 'refresh-parent',
+                        payload: data.payload,
+                        source: 'iframe-shell',
+                        originalAction: data.action
+                    }, window.location.origin);
+                    console.log(`[IframeShell] 当前页面不是列表页面，已将 refreshParent 消息转发到父窗口`);
+                } else {
+                    // 如果当前窗口就是顶层窗口，直接触发自定义事件
+                    console.log(`[IframeShell] 当前窗口是顶层窗口，触发 refreshParent 事件`);
+                    window.dispatchEvent(new CustomEvent('refreshParent', {
+                        detail: data.payload
+                    }));
+                }
+            } catch (error) {
+                console.warn('[IframeShell] 转发 refreshParent 消息失败:', error);
+            }
         }
     }
 
@@ -633,6 +756,58 @@
         }
 
         return false;
+    }
+
+    /**
+     * 显示消息提示
+     * @param {string} action - 消息 action
+     * @param {string} message - 提示消息
+     * @param {string} toastType - 提示类型 (success, danger, warning, info)
+     */
+    function showMessageToast(action, message, toastType) {
+        if (!message || typeof message !== 'string') {
+            return;
+        }
+
+        // 根据 action 确定默认的提示类型
+        let type = toastType || 'info';
+        if (!toastType) {
+            switch (action) {
+                case 'success':
+                    type = 'success';
+                    break;
+                case 'error':
+                case 'danger':
+                    type = 'danger';
+                    break;
+                case 'warning':
+                    type = 'warning';
+                    break;
+                default:
+                    type = 'info';
+            }
+        }
+
+        // 尝试使用全局的 showToast 函数
+        try {
+            if (window.Admin && typeof window.Admin.utils?.showToast === 'function') {
+                window.Admin.utils.showToast(type, message);
+                console.log(`[IframeShell] 显示提示: [${type}] ${message}`);
+                return;
+            }
+            
+            if (window.showToast && typeof window.showToast === 'function') {
+                window.showToast(type, message);
+                console.log(`[IframeShell] 显示提示: [${type}] ${message}`);
+                return;
+            }
+        } catch (e) {
+            console.warn('[IframeShell] 显示提示失败:', e);
+        }
+
+        // 降级方案：使用 alert
+        console.log(`[IframeShell] 提示消息: [${type}] ${message}`);
+        alert(message);
     }
 
     function triggerMainFrameRefresh(payload) {

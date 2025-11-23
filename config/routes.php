@@ -103,6 +103,18 @@ Router::addGroup('/admin/{adminPath:[a-zA-Z0-9\-_]+}', function () {
             Router::get('/export', 'App\Controller\Admin\System\UniversalCrudController@export');
             // 搜索关联选项（支持搜索和分页）
             Router::get('/search-relation-options', 'App\Controller\Admin\System\UniversalCrudController@searchRelationOptions');
+            // 回收站页面
+            Router::get('/trash', 'App\Controller\Admin\System\UniversalCrudController@trash');
+            // 恢复记录
+            Router::post('/{id:\d+}/restore', 'App\Controller\Admin\System\UniversalCrudController@restore');
+            // 永久删除记录（使用 DELETE 方法，但路由中需要匹配已删除的记录）
+            Router::delete('/{id:\d+}/force-delete', 'App\Controller\Admin\System\UniversalCrudController@forceDelete');
+            // 批量恢复
+            Router::post('/batch-restore', 'App\Controller\Admin\System\UniversalCrudController@batchRestore');
+            // 批量永久删除
+            Router::post('/batch-force-delete', 'App\Controller\Admin\System\UniversalCrudController@batchForceDelete');
+            // 清空回收站
+            Router::post('/clear-trash', 'App\Controller\Admin\System\UniversalCrudController@clearTrash');
         });
 
     }, [

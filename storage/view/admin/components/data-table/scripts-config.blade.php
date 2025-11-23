@@ -44,11 +44,23 @@
         ajaxParams: @json($ajaxParams ?? []),
         defaultActions: @json($defaultActionsForJs ?? []),
         showActionsColumn: {{ ($showActionsColumn ?? true) ? 'true' : 'false' }},
-        showSearch: {{ ($showSearch ?? true) ? 'true' : 'false' }}
+        showSearch: {{ ($showSearch ?? true) ? 'true' : 'false' }},
+        emptyMessage: '{{ $emptyMessage ?? '暂无数据' }}',
+        // 工具栏配置
+        toolbarConfig: {
+            leftButtons: @json($leftButtons ?? []),
+            rightButtons: @json($rightButtons ?? []),
+            leftSlot: @json($leftSlot ?? null),
+            rightSlot: @json($rightSlot ?? null),
+            showColumnToggle: {{ ($showColumnToggle ?? true) ? 'true' : 'false' }},
+            showSearch: {{ ($showSearch ?? true) ? 'true' : 'false' }}
+        }
     };
     
     // 打印完整的搜索配置到控制台
     console.log('=== [DataTable {{ $tableId }}] 搜索配置 ===');
+    console.log('showSearch 参数值:', {{ ($showSearch ?? true) ? 'true' : 'false' }}, '(PHP 变量: {{ var_export($showSearch ?? null, true) }})');
+    console.log('showSearch 配置值:', window['tableConfig_{{ $tableId }}'].showSearch);
     console.log('完整搜索配置:', window['tableConfig_{{ $tableId }}'].searchConfig);
     console.log('可搜索字段列表:', window['tableConfig_{{ $tableId }}'].searchableFields);
     if (window['tableConfig_{{ $tableId }}'].searchConfig && window['tableConfig_{{ $tableId }}'].searchConfig.fields) {

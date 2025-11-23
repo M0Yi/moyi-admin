@@ -206,6 +206,13 @@ class CrudGeneratorController extends AbstractController
             // 优先从独立字段读取，如果没有则从 options 中读取（向后兼容）
             $pageSize = $config->page_size ?? $options['page_size'] ?? 15;
             $softDelete = $config->soft_delete ?? ($options['soft_delete'] ?? $this->databaseService->hasColumn($tableName, 'deleted_at', $dbConnection));
+            
+            // 确保 soft_delete 被包含在 features 中
+            if (isset($options['features']['soft_delete'])) {
+                $features['soft_delete'] = filter_var($options['features']['soft_delete'], FILTER_VALIDATE_BOOLEAN);
+            } else {
+                $features['soft_delete'] = (bool)$softDelete;
+            }
 
             return [
                 'id' => $config->id,
@@ -512,14 +519,6 @@ class CrudGeneratorController extends AbstractController
             $pageSize = 100;
         }
 
-        $softDelete = isset($data['soft_delete']) ? filter_var($data['soft_delete'], FILTER_VALIDATE_BOOLEAN) : ($config?->soft_delete ?? false);
-        // 如果没有提供，检测表是否有 deleted_at 字段
-        if (!isset($data['soft_delete']) && $config === null) {
-            print_r(['500']);
-
-            $softDelete = $this->databaseService->hasColumn($tableName, 'deleted_at', $data['db_connection'] ?? 'default');
-        }
-
         // 获取 options（不再包含 page_size 和 soft_delete）
         $options = $data['options'] ?? [];
         // 从 options 中移除 page_size 和 soft_delete（如果存在），因为它们是独立字段
@@ -528,8 +527,26 @@ class CrudGeneratorController extends AbstractController
             $options = [];
         }
 
+        // 获取功能配置：优先从 features[soft_delete] 读取，其次从独立的 soft_delete 字段读取
         $featureInput = isset($data['features']) && is_array($data['features']) ? $data['features'] : [];
         $featureToggles = $this->normalizeFeatureToggles($featureInput);
+        
+        // 处理 soft_delete：优先从 features[soft_delete] 读取，其次从独立的 soft_delete 字段读取
+        if (isset($featureInput['soft_delete'])) {
+            $softDelete = filter_var($featureInput['soft_delete'], FILTER_VALIDATE_BOOLEAN);
+            $featureToggles['soft_delete'] = $softDelete;
+        } elseif (isset($data['soft_delete'])) {
+            $softDelete = filter_var($data['soft_delete'], FILTER_VALIDATE_BOOLEAN);
+            $featureToggles['soft_delete'] = $softDelete;
+        } else {
+            // 如果没有提供，使用配置中的值或检测表是否有 deleted_at 字段
+            $softDelete = $config?->soft_delete ?? false;
+            if ($config === null) {
+                $softDelete = $this->databaseService->hasColumn($tableName, 'deleted_at', $data['db_connection'] ?? 'default');
+            }
+            $featureToggles['soft_delete'] = $softDelete;
+        }
+        
         $options['features'] = $featureToggles;
 
         // 获取数据库连接名称（默认为 'default'）
@@ -699,6 +716,7 @@ class CrudGeneratorController extends AbstractController
             'edit' => true,
             'delete' => true,
             'export' => true,
+            'soft_delete' => false, // 回收站功能默认关闭
         ];
     }
 

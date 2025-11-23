@@ -211,6 +211,174 @@ if (window.AdminIframeShell) {
 CODE,
         ])
 
+        {{-- Iframe Shell 使用方式介绍 --}}
+        <div class="col-md-12 mb-4">
+            <div class="card border-0 shadow-sm">
+                <div class="card-body">
+                    <div class="d-flex align-items-center gap-2 mb-3">
+                        <div class="bg-info bg-opacity-10 text-info rounded-circle d-flex align-items-center justify-content-center" style="width: 36px; height: 36px;">
+                            <i class="bi bi-book"></i>
+                        </div>
+                        <h6 class="mb-0">Iframe Shell 使用方式</h6>
+                    </div>
+                    
+                    <div class="row g-3">
+                        {{-- HTML 属性方式 --}}
+                        <div class="col-md-6">
+                            <div class="d-flex align-items-center gap-2 mb-2">
+                                <span class="badge bg-primary-subtle text-primary">方式 1</span>
+                                <span class="small fw-semibold">HTML 属性方式（推荐）</span>
+                            </div>
+                            <div class="bg-dark rounded-3 p-3">
+                                <pre class="text-white small mb-0" style="font-family: SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace; font-size: 0.75rem; line-height: 1.5; white-space: pre-wrap; word-wrap: break-word;"><code>&lt;!-- 基础用法 --&gt;
+&lt;button
+    data-iframe-shell-trigger="my-trigger"
+    data-iframe-shell-src="/admin/users/create"
+    data-iframe-shell-title="新建用户"
+    data-iframe-shell-channel="users"&gt;
+    添加用户
+&lt;/button&gt;
+
+&lt;!-- 隐藏"新标签"和"新窗口"按钮（适用于表单页面） --&gt;
+&lt;button
+    data-iframe-shell-trigger="create-user"
+    data-iframe-shell-src="/admin/users/create"
+    data-iframe-shell-title="新建用户"
+    data-iframe-shell-channel="users"
+    data-iframe-shell-hide-actions="true"&gt;
+    添加用户
+&lt;/button&gt;</code></pre>
+                            </div>
+                        </div>
+                        
+                        {{-- JavaScript API 方式 --}}
+                        <div class="col-md-6">
+                            <div class="d-flex align-items-center gap-2 mb-2">
+                                <span class="badge bg-success-subtle text-success">方式 2</span>
+                                <span class="small fw-semibold">JavaScript API 方式</span>
+                            </div>
+                            <div class="bg-dark rounded-3 p-3">
+                                <pre class="text-white small mb-0" style="font-family: SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace; font-size: 0.75rem; line-height: 1.5; white-space: pre-wrap; word-wrap: break-word;"><code>// 基础用法
+if (window.Admin?.iframeShell) {
+    window.Admin.iframeShell.open({
+        src: '/admin/users/create',
+        title: '新建用户',
+        channel: 'users'
+    });
+}
+
+// 隐藏"新标签"和"新窗口"按钮
+window.Admin.iframeShell.open({
+    src: '/admin/users/create',
+    title: '新建用户',
+    channel: 'users',
+    hideActions: true
+});
+
+// 监听关闭事件
+window.Admin.iframeShell.on('after-close', function(event) {
+    console.log('已关闭', event.payload);
+    // 可以在这里刷新列表等操作
+});</code></pre>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    {{-- 常用属性说明 --}}
+                    <div class="mt-3 pt-3 border-top">
+                        <h6 class="small fw-semibold mb-2">常用属性说明</h6>
+                        <div class="table-responsive">
+                            <table class="table table-sm table-borderless align-middle mb-0 small">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th class="fw-semibold" style="width: 200px;">属性</th>
+                                        <th class="fw-semibold">说明</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr>
+                                        <td><code>data-iframe-shell-trigger</code></td>
+                                        <td>触发标识，用于区分不同的触发源（可选，建议设置唯一值）</td>
+                                    </tr>
+                                    <tr>
+                                        <td><code>data-iframe-shell-src</code></td>
+                                        <td>要打开的页面 URL（必填）</td>
+                                    </tr>
+                                    <tr>
+                                        <td><code>data-iframe-shell-title</code></td>
+                                        <td>弹窗标题（必填）</td>
+                                    </tr>
+                                    <tr>
+                                        <td><code>data-iframe-shell-channel</code></td>
+                                        <td>通信频道，用于区分不同的 iframe shell 实例（必填）</td>
+                                    </tr>
+                                    <tr>
+                                        <td><code>data-iframe-shell-hide-actions</code></td>
+                                        <td>设置为 <code>true</code> 时隐藏"新标签"和"新窗口"按钮（适用于表单页面）</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        {{-- 自定义 Iframe Shell 示例：隐藏操作按钮 --}}
+        @include('components.iframe-demo.code-card', [
+            'iconWrapperClass' => 'bg-warning bg-opacity-10 text-warning',
+            'iconClass' => 'bi bi-gear',
+            'title' => '自定义 Iframe Shell（隐藏操作按钮）',
+            'description' => '适用于表单页面，隐藏"新标签"和"新窗口"按钮，提供更简洁的界面。',
+            'buttonHtml' => <<<HTML
+<button class="btn btn-warning btn-sm w-100"
+        type="button"
+        data-iframe-shell-trigger="custom-demo"
+        data-iframe-shell-src="{$iframeDemoUrl}"
+        data-iframe-shell-title="自定义 Iframe Shell 示例"
+        data-iframe-shell-channel="custom-demo"
+        data-iframe-shell-hide-actions="true">
+    <i class="bi bi-gear me-1"></i>
+    自定义 Iframe Shell（隐藏操作按钮）
+</button>
+HTML,
+            'code' => <<<'CODE'
+<!-- HTML 方式：隐藏操作按钮 -->
+<button
+    data-iframe-shell-trigger="create-user"
+    data-iframe-shell-src="/admin/users/create"
+    data-iframe-shell-title="新建用户"
+    data-iframe-shell-channel="users"
+    data-iframe-shell-hide-actions="true">
+    添加用户
+</button>
+
+<!-- JavaScript 方式：隐藏操作按钮 -->
+<script>
+if (window.Admin?.iframeShell) {
+    window.Admin.iframeShell.open({
+        src: '/admin/users/create',
+        title: '新建用户',
+        channel: 'users',
+        hideActions: true  // 隐藏"新标签"和"新窗口"按钮
+    });
+}
+</script>
+
+<!-- 在表单提交成功后关闭弹窗 -->
+<script>
+// 在表单页面中，提交成功后调用
+if (window.AdminIframeClient) {
+    window.AdminIframeClient.success({
+        message: '保存成功',
+        refreshParent: true,   // 请求父页刷新当前标签（列表页）
+        closeCurrent: true      // 关闭当前弹窗
+    });
+}
+</script>
+CODE,
+        ])
+
         {{-- 示例 1: 在当前 iframe 载入 --}}
         @include('components.iframe-demo.code-card', [
             'iconWrapperClass' => 'bg-primary bg-opacity-10 text-primary',

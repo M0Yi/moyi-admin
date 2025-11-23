@@ -1,11 +1,8 @@
-{{-- 搜索表单（如果提供了搜索配置，则自动渲染） --}}
-@if($renderSearchForm)
-    @include('admin.components.search-form', [
-        'config' => $finalSearchConfig,
-        'columns' => $columns,
-        'model' => $model ?? '',
-        'formId' => $searchFormId,
-        'panelId' => $searchPanelId
-    ])
+{{-- 搜索面板容器（始终创建，即使没有搜索配置，以便JavaScript可以动态渲染） --}}
+@if($showSearch ?? true)
+    <div id="{{ $searchPanelId }}" style="display: none;">
+        {{-- 创建空容器供JavaScript动态渲染搜索表单 --}}
+        <div id="{{ $searchFormId }}"></div>
+    </div>
 @endif
 

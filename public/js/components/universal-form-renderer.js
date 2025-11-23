@@ -73,8 +73,12 @@
             const payload = this.buildPayload();
             this.toggleSubmitState(true);
 
+            // 从 schema 中获取 HTTP 方法，默认为 POST
+            const method = this.schema.method || 'POST';
+            const successMessage = method === 'PUT' ? '更新成功' : '创建成功';
+
             fetch(this.schema.submitUrl, {
-                method: 'POST',
+                method: method,
                 headers: {
                     'Content-Type': 'application/json',
                 },
@@ -83,11 +87,40 @@
                 .then((response) => response.json())
                 .then((result) => {
                     if (result.code === 200) {
-                        this.notify('success', result.msg || '创建成功');
-                        const redirectUrl = this.schema.redirectUrl || this.schema.submitUrl;
+                        const message = result.msg || successMessage;
+                        
+                        // 优先使用 AdminIframeClient.success（如果在 iframe 中）
+                        if (window.AdminIframeClient && typeof window.AdminIframeClient.success === 'function') {
+                            // 对于 PUT 请求（更新操作），刷新父页
+                            if (method === 'PUT') {
+                                window.AdminIframeClient.success({
+                                    message: message,
+                                    refreshParent: true,   // 请求父页刷新当前标签
+                                    closeCurrent: false    // 不关闭当前标签/弹窗
+                                });
+                            } 
+                            // 对于 POST 请求（创建操作），也刷新父页
+                            else {
+                                window.AdminIframeClient.success({
+                                    message: message,
+                                    refreshParent: true,   // 请求父页刷新当前标签
+                                    closeCurrent: false    // 不关闭当前标签/弹窗
+                                });
+                            }
+                        } 
+                        // 回退为页面跳转（不在 iframe 中时）
+                        else {
+                            this.notify('success', message);
+                            // 对于 PUT 请求，redirectUrl 可能需要去掉 ID 部分
+                            let redirectUrl = this.schema.redirectUrl || this.schema.submitUrl;
+                            if (method === 'PUT' && !this.schema.redirectUrl) {
+                                // 如果 redirectUrl 包含 ID，去掉它
+                                redirectUrl = redirectUrl.replace(/\/\d+$/, '');
+                            }
                         setTimeout(() => {
                             window.location.href = redirectUrl;
                         }, 800);
+                        }
                         return;
                     }
 
@@ -279,21 +312,25 @@
             const currentValue = this.getFieldValue(field);
             const selectedValues = multiple
                 ? this.normalizeArrayValue(currentValue)
-                : [currentValue];
+                : (currentValue !== null && currentValue !== '' ? [String(currentValue)] : []);
             const hasOptions = options.length > 0;
             const isAsync = isRelation && !hasOptions;
             const placeholder = field.placeholder || `请选择${field.label ?? ''}`;
 
+            // 渲染选项
             const optionsHtml = hasOptions
                 ? options
                       .map((option) => {
-                          const selected = selectedValues.includes(option.value) ? 'selected' : '';
-                          return `<option value="${this.escapeAttr(option.value)}" ${selected}>
+                          const optionValue = String(option.value ?? '');
+                          const selected = selectedValues.includes(optionValue) ? 'selected' : '';
+                          return `<option value="${this.escapeAttr(optionValue)}" ${selected}>
                                     ${this.escape(option.label)}
                                   </option>`;
                       })
                       .join('')
-                : this.renderSelectedPlaceholders(selectedValues);
+                : (isAsync && selectedValues.length > 0
+                      ? this.renderSelectedPlaceholders(selectedValues)
+                      : '');
 
             return `
                 <select
@@ -307,7 +344,6 @@
                     data-placeholder="${this.escapeAttr(placeholder)}"
                     data-async="${isAsync ? '1' : '0'}"
                 >
-                    ${!multiple ? '<option value="">请选择</option>' : ''}
                     ${optionsHtml}
                 </select>
             `;
@@ -420,7 +456,9 @@
             const currentValue = this.getFieldValue(field);
             const onValue = field.onValue ?? '1';
             const offValue = field.offValue ?? '0';
-            const checked = currentValue === '' ? field.default === onValue : currentValue === onValue;
+            // 统一转换为字符串比较，确保编辑模式下的默认值正确显示
+            // 如果 currentValue 为空字符串，说明没有值，默认关闭（不选中）
+            const checked = currentValue !== '' && String(currentValue) === String(onValue);
             const label = field.label || '';
 
             return `
@@ -593,6 +631,40 @@
                             .then((results) => callback(results))
                             .catch(() => callback());
                     };
+
+                    // 对于异步加载的选项，如果有选中的值但不在选项中，需要先加载这些值
+                    const selectedOptions = Array.from(select.selectedOptions);
+                    const selectedValues = selectedOptions.map(opt => opt.value).filter(v => v !== '');
+                    
+                    if (selectedValues.length > 0) {
+                        // 检查选中的值是否已经在选项中
+                        const existingOptions = Array.from(select.options).map(opt => opt.value);
+                        const missingValues = selectedValues.filter(v => !existingOptions.includes(v));
+
+                        if (missingValues.length > 0) {
+                            // 对于缺失的值，尝试加载它们
+                            Promise.all(
+                                missingValues.map(value => 
+                                    this.loadRelationOptions(fieldName, value)
+                                        .then(results => {
+                                            // 找到匹配的选项并添加到 select 中
+                                            const matched = results.find(r => String(r.value) === String(value));
+                                            if (matched) {
+                                                const option = document.createElement('option');
+                                                option.value = String(matched.value);
+                                                option.textContent = matched.text || matched.label || String(matched.value);
+                                                option.selected = true;
+                                                select.appendChild(option);
+                                            }
+                                        })
+                                )
+                            ).then(() => {
+                                // 所有值加载完成后，初始化 TomSelect
+                                select._tsInstance = new window.TomSelect(select, config);
+                            });
+                            return; // 提前返回，等待异步加载完成
+                        }
+                    }
                 }
 
                 select._tsInstance = new window.TomSelect(select, config);

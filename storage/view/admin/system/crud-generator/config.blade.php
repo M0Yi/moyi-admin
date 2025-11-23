@@ -311,17 +311,7 @@
                         </div>
                     </div>
                     <div class="col-md-6">
-                        <label class="form-label">启用软删除</label>
-                        <div class="form-check form-switch">
-                            <input class="form-check-input" type="checkbox" name="soft_delete" value="1"
-                                   id="useSoftDelete">
-                            <label class="form-check-label" for="useSoftDelete">
-                                使用软删除功能（检测到 deleted_at 字段时自动开启）
-                            </label>
-                        </div>
-                    </div>
-                    <div class="col-md-6">
-                        <label class="form-label">状态</label>
+                        <label class="form-label">配置状态</label>
                         <div class="form-check form-switch">
                             <input class="form-check-input" type="checkbox" name="status" value="1"
                                    id="status">
@@ -329,6 +319,9 @@
                                 启用此配置（默认开启）
                             </label>
                         </div>
+                        <small class="text-muted">
+                            控制整个 CRUD 配置是否生效。关闭后，即使功能开关都开启，该配置也不会生效。
+                        </small>
                     </div>
                     <div class="col-12">
                         <div class="border rounded p-3 bg-light h-100">
@@ -391,6 +384,17 @@
                                         </label>
                                     </div>
                                     <small class="text-muted">控制是否生成导出相关功能。</small>
+                                </div>
+                                <div class="col-md-3 col-sm-6">
+                                    <div class="form-check form-switch">
+                                        <input type="hidden" name="features[soft_delete]" value="0">
+                                        <input class="form-check-input" type="checkbox" name="features[soft_delete]" value="1"
+                                               id="featureSoftDeleteToggle">
+                                        <label class="form-check-label" for="featureSoftDeleteToggle">
+                                            启用回收站
+                                        </label>
+                                    </div>
+                                    <small class="text-muted">使用回收站功能（检测到 deleted_at 字段时自动开启）。</small>
                                 </div>
                             </div>
                         </div>
@@ -505,11 +509,12 @@ function refreshMainFrame(payload = {}) {
 // CRUD 功能开关默认配置（无配置时使用）
 // 在这里统一配置每个功能默认是打开(true)还是关闭(false)
 const DEFAULT_FEATURE_CONFIG = {
-    search: false,   // 启用搜索
-    add: false,      // 启用新增
-    edit: false,     // 启用编辑
-    delete: false,   // 启用删除
-    export: false,   // 启用导出
+    search: true,       // 启用搜索（默认开启）
+    add: true,          // 启用新增（默认开启）
+    edit: true,         // 启用编辑（默认开启）
+    delete: true,       // 启用删除（默认开启）
+    export: true,       // 启用导出（默认开启）
+    soft_delete: false  // 启用回收站（通过检测 deleted_at 字段自动处理，不在此处设置默认值）
 };
 
 // 方便直接使用的默认开关对象（仅包含 features）
@@ -804,15 +809,6 @@ function hydrateBasicConfig(baseConfig = {}, meta = {}) {
     const statusCheckbox = document.getElementById('status');
     setCheckboxValueIfAllowed(statusCheckbox, configData.status, true);
 
-    const softDeleteCheckbox = document.getElementById('useSoftDelete');
-    // 优先从独立字段读取，如果没有则从 options 中读取（向后兼容）
-    const softDeleteValue = configData.soft_delete !== undefined
-        ? configData.soft_delete
-        : (configData.options && configData.options.soft_delete !== undefined
-            ? configData.options.soft_delete
-            : false);
-    setCheckboxValueIfAllowed(softDeleteCheckbox, softDeleteValue, false);
-
     // 功能开关：
     // - 如果已有配置（configData.id 存在），优先使用 configData.features
     // - 如果没有任何配置，则使用 DEFAULT_FEATURE_CONFIG 作为默认值
@@ -820,6 +816,16 @@ function hydrateBasicConfig(baseConfig = {}, meta = {}) {
     const featureSource = hasConfig
         ? (configData.features || {})
         : DEFAULT_FEATURE_CONFIG;
+
+    // 向后兼容：如果存在独立的 soft_delete 字段，优先使用它
+    // 如果 features.soft_delete（回收站功能）不存在，尝试从独立字段或 options 中读取
+    if (featureSource.soft_delete === undefined) {
+        if (configData.soft_delete !== undefined) {
+            featureSource.soft_delete = configData.soft_delete;
+        } else if (configData.options && configData.options.soft_delete !== undefined) {
+            featureSource.soft_delete = configData.options.soft_delete;
+        }
+    }
 
     const featureToggles = {
         ...DEFAULT_FEATURE_TOGGLES,
@@ -830,6 +836,7 @@ function hydrateBasicConfig(baseConfig = {}, meta = {}) {
     setCheckboxValueIfAllowed(document.getElementById('featureEditToggle'), featureToggles.edit, true);
     setCheckboxValueIfAllowed(document.getElementById('featureDeleteToggle'), featureToggles.delete, true);
     setCheckboxValueIfAllowed(document.getElementById('featureExportToggle'), featureToggles.export, true);
+    setCheckboxValueIfAllowed(document.getElementById('featureSoftDeleteToggle'), featureToggles.soft_delete, false);
 
     const tableCommentEl = document.getElementById('tableCommentText');
     const commentText = tableMeta.comment || configData.table_comment || '';
@@ -1393,7 +1400,7 @@ function guessShowInList(column, allColumns = []) {
         return false;
     }
     
-    // 软删除字段：默认不显示
+    // 回收站字段（deleted_at）：默认不显示
     if (fieldName === 'deleted_at') {
         return false;
     }
@@ -1462,7 +1469,7 @@ function guessSearchable(column) {
         return false;
     }
     
-    // 软删除字段：不可搜索
+    // 回收站字段（deleted_at）：不可搜索
     if (fieldName === 'deleted_at') {
         return false;
     }
@@ -1539,7 +1546,7 @@ function guessSortable(column) {
         return true;
     }
     
-    // 软删除字段：不可排序
+    // 回收站字段（deleted_at）：不可排序
     if (fieldName === 'deleted_at') {
         return false;
     }
@@ -1603,7 +1610,7 @@ function guessEditable(column) {
         return false;
     }
     
-    // 软删除字段：不可编辑（通常由系统自动管理）
+    // 回收站字段（deleted_at）：不可编辑（通常由系统自动管理）
     if (fieldName === 'deleted_at') {
         return false;
     }
@@ -2359,13 +2366,23 @@ function renderFieldsConfig(columns) {
     // 已禁用：拖动功能BUG太多，暂时禁用，待后续优化
     // initFieldSortable();
     
-    // 检测是否有 deleted_at 字段，如果有则自动开启软删除开关
+    // 检测是否有 deleted_at 字段，如果有则自动开启回收站开关
     const hasDeletedAt = columns.some(column => column.name === 'deleted_at');
     if (hasDeletedAt) {
-        const softDeleteCheckbox = document.getElementById('useSoftDelete');
-        if (softDeleteCheckbox) {
-            // 检测到 deleted_at 字段时，自动开启软删除开关
+        const softDeleteCheckbox = document.getElementById('featureSoftDeleteToggle');
+        if (softDeleteCheckbox && softDeleteCheckbox.dataset.userModified !== 'true') {
+            // 检测到 deleted_at 字段时，自动开启回收站开关
             softDeleteCheckbox.checked = true;
+            // 触发 change 事件，确保表单状态正确更新
+            softDeleteCheckbox.dispatchEvent(new Event('change', { bubbles: true }));
+            console.log('[字段配置] 检测到 deleted_at 字段，已自动开启回收站功能');
+        }
+    } else {
+        // 如果没有 deleted_at 字段，确保回收站开关关闭（除非用户已手动修改）
+        const softDeleteCheckbox = document.getElementById('featureSoftDeleteToggle');
+        if (softDeleteCheckbox && softDeleteCheckbox.dataset.userModified !== 'true') {
+            softDeleteCheckbox.checked = false;
+            softDeleteCheckbox.dispatchEvent(new Event('change', { bubbles: true }));
         }
     }
     

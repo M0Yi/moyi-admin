@@ -146,6 +146,7 @@ class UniversalCrudService
             'edit'   => true,
             'delete' => true,
             'export' => true,
+            'soft_delete' => false, // 回收站功能默认关闭
         ];
         if (is_array($featuresSource) && !empty($featuresSource)) {
             foreach ($featureDefaults as $key => $defaultValue) {
@@ -154,6 +155,17 @@ class UniversalCrudService
                 }
             }
         }
+        
+        // 处理 soft_delete：优先从 features 配置读取，其次使用检测到的值
+        if (isset($options['features']['soft_delete'])) {
+            $featureDefaults['soft_delete'] = filter_var($options['features']['soft_delete'], FILTER_VALIDATE_BOOLEAN);
+        } elseif (isset($featuresSource['soft_delete'])) {
+            $featureDefaults['soft_delete'] = filter_var($featuresSource['soft_delete'], FILTER_VALIDATE_BOOLEAN);
+        } else {
+            // 如果没有在 features 中配置，使用检测到的值
+            $featureDefaults['soft_delete'] = $hasSoftDelete;
+        }
+        
         $features = $featureDefaults;
 
         return [
@@ -182,6 +194,10 @@ class UniversalCrudService
 
     /**
      * 提取搜索字段（仅返回字段名列表）
+     * 
+     * 注意：此方法完全依赖前端传递的搜索配置，不再做任何自动判断
+     * 前端在 config.blade.php 中已经实现了 guessSearchable() 函数
+     * 搜索配置使用 search[enabled] 或 searchable 字段
      */
     protected function extractSearchFields(array $fieldsConfig): array
     {
@@ -192,18 +208,21 @@ class UniversalCrudService
                 continue;
             }
 
-            // 优先使用 searchable 配置
-            $searchable = $field['searchable'] ?? false;
-            $searchable = filter_var($searchable, FILTER_VALIDATE_BOOLEAN);
+            // 完全依赖前端配置：检查 search[enabled] 或 searchable（向后兼容）
+            $searchConfig = $field['search'] ?? [];
+            $searchEnabled = false;
             
-            if ($searchable) {
-                $searchFields[] = $field['name'];
-                continue;
+            // 优先使用新的 search[enabled] 配置
+            if (isset($searchConfig['enabled'])) {
+                $searchEnabled = filter_var($searchConfig['enabled'], FILTER_VALIDATE_BOOLEAN);
             }
-
-            // 如果没有 searchable 配置，则根据数据库类型自动判断（向后兼容）
-            $searchableTypes = ['string', 'text', 'varchar', 'char'];
-            if (isset($field['db_type']) && in_array($field['db_type'], $searchableTypes)) {
+            // 向后兼容：如果没有 search[enabled]，检查旧的 searchable 字段
+            elseif (isset($field['searchable'])) {
+                $searchEnabled = filter_var($field['searchable'], FILTER_VALIDATE_BOOLEAN);
+            }
+            
+            // 如果前端没有明确标记为可搜索，则跳过（不再做自动判断）
+            if ($searchEnabled) {
                 $searchFields[] = $field['name'];
             }
         }
@@ -213,6 +232,10 @@ class UniversalCrudService
 
     /**
      * 提取搜索字段配置（返回完整的搜索配置，包括字段类型、选项、占位符等）
+     * 
+     * 注意：此方法完全依赖前端传递的搜索配置，不再做任何自动判断
+     * 前端在 config.blade.php 中已经实现了 guessSearchable() 和 inferDefaultSearchType() 等函数
+     * 搜索配置使用 search[enabled] 和 search[type] 等字段
      */
     protected function extractSearchFieldsConfig(array $fieldsConfig): array
     {
@@ -224,107 +247,80 @@ class UniversalCrudService
                 continue;
             }
 
-            // 判断是否可搜索
-            $searchable = $field['searchable'] ?? false;
-            $searchable = filter_var($searchable, FILTER_VALIDATE_BOOLEAN);
+            // 完全依赖前端配置：检查 search[enabled] 或 searchable（向后兼容）
+            $searchConfig = $field['search'] ?? [];
+            $searchEnabled = false;
             
-            // 如果没有 searchable 配置，则根据数据库类型自动判断（向后兼容）
-            if (!$searchable) {
-                $searchableTypes = ['string', 'text', 'varchar', 'char'];
-                if (isset($field['db_type']) && in_array($field['db_type'], $searchableTypes)) {
-                    $searchable = true;
+            // 优先使用新的 search[enabled] 配置
+            if (isset($searchConfig['enabled'])) {
+                $searchEnabled = filter_var($searchConfig['enabled'], FILTER_VALIDATE_BOOLEAN);
+            }
+            // 向后兼容：如果没有 search[enabled]，检查旧的 searchable 字段
+            elseif (isset($field['searchable'])) {
+                $searchEnabled = filter_var($field['searchable'], FILTER_VALIDATE_BOOLEAN);
+            }
+            
+            // 如果前端没有明确标记为可搜索，则跳过（不再做自动判断）
+            if (!$searchEnabled) {
+                continue;
+            }
+
+            // 字段已明确标记为可搜索，提取搜索配置
+            $fieldName = $field['name'];
+            $fieldLabel = $field['search_label'] ?? $field['field_name'] ?? $field['label'] ?? $fieldName;
+            
+            // 完全依赖前端配置的搜索类型：使用 search[type] 或 search_type
+            $searchType = $searchConfig['type'] ?? $field['search_type'] ?? 'like';
+            
+            // 如果前端没有配置搜索类型，使用默认值 'like'（不再做自动推断）
+            if (empty($searchType)) {
+                $searchType = 'like';
+            }
+
+            // 构建搜索字段配置
+            $searchFieldConfig = [
+                'name' => $fieldName,
+                'label' => $fieldLabel,
+                'type' => $searchType,
+            ];
+
+            // 添加占位符（从 search[placeholder] 或 search_placeholder 读取）
+            $placeholder = $searchConfig['placeholder'] ?? $field['search_placeholder'] ?? null;
+            if ($placeholder) {
+                $searchFieldConfig['placeholder'] = $placeholder;
+            } elseif ($searchType === 'like' || $searchType === 'exact') {
+                // 文本类型默认占位符
+                $searchFieldConfig['placeholder'] = '搜索' . $fieldLabel;
+            }
+
+            // 添加选项（用于 select 类型，从 search[options] 或 options 读取）
+            if ($searchType === 'select') {
+                $searchOptions = $searchConfig['options'] ?? $field['search_options'] ?? $field['options'] ?? null;
+                if ($searchOptions !== null) {
+                    // 确保第一个选项是"全部"
+                    if (is_array($searchOptions) && !isset($searchOptions[''])) {
+                        $searchFieldConfig['options'] = array_merge(['' => '全部'], $searchOptions);
+                    } else {
+                        $searchFieldConfig['options'] = $searchOptions;
+                    }
                 }
             }
 
-            if ($searchable) {
-                $searchFields[] = $field['name'];
-
-                // 提取搜索字段配置
-                $fieldName = $field['name'];
-                $fieldLabel = $field['search_label'] ?? $field['field_name'] ?? $field['label'] ?? $fieldName;
-                
-                // 确定搜索类型
-                $searchType = $field['search_type'] ?? null;
-                if (empty($searchType)) {
-                    // 根据 form_type、db_type 或字段名自动推断
-                    $formType = $field['form_type'] ?? null;
-                    $dbType = $field['db_type'] ?? null;
-                    $fieldNameLower = strtolower($fieldName);
-                    
-                    // 1. 优先检查表单类型
-                    if ($formType === 'select' || $formType === 'radio') {
-                        $searchType = 'select';
-                    } elseif (in_array($formType, ['date', 'datetime', 'datetime-local', 'time', 'month', 'week'])) {
-                        // 时间相关的表单类型，统一使用区间搜索
-                        $searchType = 'date_range';
-                    } elseif (in_array($formType, ['number', 'integer', 'number_range'])) {
-                        $searchType = 'number_range';
-                    }
-                    // 2. 如果没有表单类型，检查数据库类型
-                    elseif ($dbType !== null) {
-                        $dbTypeLower = strtolower($dbType);
-                        if (in_array($dbTypeLower, ['date', 'datetime', 'timestamp', 'time', 'year'])) {
-                            // 时间相关的数据库类型，统一使用区间搜索
-                            $searchType = 'date_range';
-                        } elseif (in_array($dbTypeLower, ['int', 'integer', 'tinyint', 'smallint', 'mediumint', 'bigint', 'decimal', 'float', 'double', 'numeric'])) {
-                            $searchType = 'number_range';
-                        }
-                    }
-                    // 3. 如果都没有，根据字段名推断（常见的时间字段名模式）
-                    if (empty($searchType)) {
-                        // 检查字段名是否包含时间相关的关键词
-                        $timeKeywords = ['_at', '_time', '_date', 'created', 'updated', 'deleted', 'start', 'end', 'begin', 'finish'];
-                        $isTimeField = false;
-                        foreach ($timeKeywords as $keyword) {
-                            if (str_contains($fieldNameLower, $keyword)) {
-                                $isTimeField = true;
-                                break;
-                            }
-                        }
-                        
-                        if ($isTimeField) {
-                            $searchType = 'date_range';
-                        } else {
-                            $searchType = 'text';
-                        }
-                    }
+            // 关联搜索配置（从 search[relation] 或 relation 读取）
+            if ($searchType === 'relation') {
+                $relationConfig = $searchConfig['relation'] ?? $field['relation'] ?? null;
+                if ($relationConfig) {
+                    $searchFieldConfig['relation'] = $relationConfig;
                 }
-
-                // 构建搜索字段配置
-                $searchFieldConfig = [
-                    'name' => $fieldName,
-                    'label' => $fieldLabel,
-                    'type' => $searchType,
-                ];
-
-                // 添加占位符（仅用于 text 类型）
-                if ($searchType === 'text' && isset($field['search_placeholder'])) {
-                    $searchFieldConfig['placeholder'] = $field['search_placeholder'];
-                } elseif ($searchType === 'text' && empty($field['search_placeholder'])) {
-                    // 默认占位符
-                    $searchFieldConfig['placeholder'] = '搜索' . $fieldLabel;
-                }
-
-                // 添加选项（用于 select 类型）
-                if ($searchType === 'select') {
-                    $searchOptions = $field['search_options'] ?? $field['options'] ?? null;
-                    if ($searchOptions !== null) {
-                        // 确保第一个选项是"全部"
-                        if (is_array($searchOptions) && !isset($searchOptions[''])) {
-                            $searchFieldConfig['options'] = array_merge(['' => '全部'], $searchOptions);
-                        } else {
-                            $searchFieldConfig['options'] = $searchOptions;
-                        }
-                    }
-                }
-
-                // 标记虚拟字段
-                if (isset($field['is_virtual']) && $field['is_virtual']) {
-                    $searchFieldConfig['is_virtual'] = true;
-                }
-
-                $searchFieldsConfig[] = $searchFieldConfig;
             }
+
+            // 标记虚拟字段
+            if (isset($field['is_virtual']) && $field['is_virtual']) {
+                $searchFieldConfig['is_virtual'] = true;
+            }
+
+            $searchFields[] = $fieldName;
+            $searchFieldsConfig[] = $searchFieldConfig;
         }
 
         return [
@@ -904,6 +900,15 @@ class UniversalCrudService
 //            $query->where('main.site_id', site_id());
 //        }
 
+        // 回收站过滤：只查询已删除的记录
+        $onlyTrashed = $params['only_trashed'] ?? false;
+        if ($onlyTrashed) {
+            $query->whereNotNull('main.deleted_at');
+        } else {
+            // 正常列表：只查询未删除的记录
+            $query->whereNull('main.deleted_at');
+        }
+
         // 搜索条件
         $keyword = $params['keyword'] ?? '';
         // 确保 keyword 是字符串
@@ -1030,7 +1035,7 @@ class UniversalCrudService
                         
                         // 如果有 site_id，添加站点过滤
                         if ($hasSiteId) {
-                            $multipleQuery->where('site_id', $siteId);
+                            $multipleQuery->where('site_id', site_id());
                         }
                         
                         $labels = $multipleQuery->pluck($labelField, $valueField)->toArray();
@@ -2745,12 +2750,39 @@ class UniversalCrudService
 
     /**
      * 删除记录
+     * 
+     * 支持软删除和硬删除：
+     * - 优先尝试使用模型类（如果存在），可以自动检测 SoftDeletes trait
+     * - 如果模型类不存在，使用表名进行删除
+     * - 根据配置和模型 trait 自动判断使用软删除还是硬删除
      */
     public function delete(string $model, int $id): bool
     {
-        $tableName = $this->getTableName($model);
         $config = $this->getModelConfig($model);
+        
+        // 优先尝试使用模型类（如果存在）
+        // 这样可以自动检测 SoftDeletes trait，无需依赖配置
+        $modelClass = null;
+        try {
+            $modelClass = $this->getModelClass($model);
+            if (!empty($modelClass) && class_exists($modelClass)) {
+                // 使用模型类进行删除，CrudService 会自动检测 SoftDeletes trait
+                return $this->crudService->delete($modelClass, $id, [
+                    'has_site_id' => !empty($config['has_site_id']),
+                    'soft_delete' => !empty($config['soft_delete']),
+                ]);
+            }
+        } catch (\Throwable $e) {
+            // 如果获取模型类失败，记录日志但继续使用表名方式
+            logger()->debug('[UniversalCrudService] 无法使用模型类删除，回退到表名方式', [
+                'model' => $model,
+                'model_class' => $modelClass ?? 'unknown',
+                'error' => $e->getMessage(),
+            ]);
+        }
 
+        // 回退到使用表名方式
+        $tableName = $this->getTableName($model);
         return $this->crudService->delete($tableName, $id, [
             'has_site_id' => !empty($config['has_site_id']),
             'soft_delete' => !empty($config['soft_delete']),
@@ -3137,6 +3169,168 @@ class UniversalCrudService
     protected function convertRouteParamToModelName(string $routeParam): string
     {
         return $this->crudService->convertRouteParamToModelName($routeParam);
+    }
+
+    /**
+     * 恢复记录（将 deleted_at 设置为 null）
+     */
+    public function restore(string $model, int $id): bool
+    {
+        $tableName = $this->getTableName($model);
+        $config = $this->getModelConfig($model);
+
+        // 检查是否启用软删除
+        if (empty($config['soft_delete'])) {
+            throw new \RuntimeException('该模型未启用软删除功能');
+        }
+
+        // 使用 DB 恢复
+        $query = Db::table($tableName)->where('id', $id)->whereNotNull('deleted_at');
+
+        // 添加站点过滤（超级管理员跳过）
+        $hasSiteId = !empty($config['has_site_id']);
+        $siteId = site_id();
+        if ($hasSiteId && $siteId && !is_super_admin()) {
+            $query->where('site_id', $siteId);
+        }
+
+        return $query->update(['deleted_at' => null]) > 0;
+    }
+
+    /**
+     * 永久删除记录
+     */
+    public function forceDelete(string $model, int $id): bool
+    {
+        $tableName = $this->getTableName($model);
+        $config = $this->getModelConfig($model);
+
+        // 使用 DB 永久删除
+        $query = Db::table($tableName)->where('id', $id)->whereNotNull('deleted_at');
+
+        // 添加站点过滤（超级管理员跳过）
+        $hasSiteId = !empty($config['has_site_id']);
+        $siteId = site_id();
+        if ($hasSiteId && $siteId && !is_super_admin()) {
+            $query->where('site_id', $siteId);
+        }
+
+        return $query->delete() > 0;
+    }
+
+    /**
+     * 批量恢复
+     */
+    public function batchRestore(string $model, array $ids): int
+    {
+        $tableName = $this->getTableName($model);
+        $config = $this->getModelConfig($model);
+
+        // 检查是否启用软删除
+        if (empty($config['soft_delete'])) {
+            throw new \RuntimeException('该模型未启用软删除功能');
+        }
+
+        if (empty($ids)) {
+            return 0;
+        }
+
+        // 验证 ID 数组
+        $maxCount = 100;
+        $this->validateIds($ids, $maxCount);
+        
+        // 去重
+        $ids = array_values(array_unique($ids));
+
+        // 使用 DB 批量恢复
+        $query = Db::table($tableName)->whereIn('id', $ids)->whereNotNull('deleted_at');
+
+        // 添加站点过滤（超级管理员跳过）
+        $hasSiteId = !empty($config['has_site_id']);
+        $siteId = site_id();
+        if ($hasSiteId && $siteId && !is_super_admin()) {
+            $query->where('site_id', $siteId);
+        }
+
+        return $query->update(['deleted_at' => null]);
+    }
+
+    /**
+     * 批量永久删除
+     */
+    public function batchForceDelete(string $model, array $ids): int
+    {
+        $tableName = $this->getTableName($model);
+        $config = $this->getModelConfig($model);
+
+        if (empty($ids)) {
+            return 0;
+        }
+
+        // 验证 ID 数组
+        $maxCount = 100;
+        $this->validateIds($ids, $maxCount);
+        
+        // 去重
+        $ids = array_values(array_unique($ids));
+
+        // 使用 DB 批量永久删除
+        $query = Db::table($tableName)->whereIn('id', $ids)->whereNotNull('deleted_at');
+
+        // 添加站点过滤（超级管理员跳过）
+        $hasSiteId = !empty($config['has_site_id']);
+        $siteId = site_id();
+        if ($hasSiteId && $siteId && !is_super_admin()) {
+            $query->where('site_id', $siteId);
+        }
+
+        return $query->delete();
+    }
+
+    /**
+     * 清空回收站（永久删除所有已删除的记录）
+     */
+    public function clearTrash(string $model): int
+    {
+        $tableName = $this->getTableName($model);
+        $config = $this->getModelConfig($model);
+
+        // 检查是否启用软删除
+        if (empty($config['soft_delete'])) {
+            throw new \RuntimeException('该模型未启用软删除功能');
+        }
+
+        // 使用 DB 永久删除所有已删除的记录
+        $query = Db::table($tableName)->whereNotNull('deleted_at');
+
+        // 添加站点过滤（超级管理员跳过）
+        $hasSiteId = !empty($config['has_site_id']);
+        $siteId = site_id();
+        if ($hasSiteId && $siteId && !is_super_admin()) {
+            $query->where('site_id', $siteId);
+        }
+
+        return $query->delete();
+    }
+
+    /**
+     * 验证 ID 数组
+     */
+    protected function validateIds(array $ids, int $maxCount = 100): void
+    {
+        if (empty($ids)) {
+            throw new \InvalidArgumentException('ID 数组不能为空');
+        }
+
+        if (count($ids) > $maxCount) {
+            throw new \InvalidArgumentException("批量操作最多支持 {$maxCount} 条记录");
+        }
+
+        foreach ($ids as $id) {
+            if (!is_numeric($id) || (int)$id <= 0) {
+                throw new \InvalidArgumentException('ID 必须为正整数');
+            }
+        }
     }
 }
 
