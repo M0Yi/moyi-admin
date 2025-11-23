@@ -105,7 +105,7 @@ Moyi Admin 是一个基于 Hyperf 3.1 框架开发的后台管理系统，采用
 #### 1. 克隆项目
 
 ```bash
-git clone https://github.com/your-username/moyi-admin.git
+git clone https://github.com/M0Yi/moyi-admin.git
 cd moyi-admin
 ```
 
