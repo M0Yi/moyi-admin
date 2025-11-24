@@ -18,3 +18,4 @@ vendor/
 .env.prod
 .env.dev
 .cursor/
+public/uploads/

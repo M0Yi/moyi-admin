@@ -10,6 +10,11 @@
     $normalizedUrl = $normalizedUrl ?? admin_route('');
     
     $initialTabTitle = trim($__env->yieldContent('title', '管理后台'));
+
+    $faviconUrl = site()?->favicon ?: '/favicon.ico';
+    if (! empty($faviconUrl) && ! preg_match('/^(https?:)?\/\//i', $faviconUrl) && ! str_starts_with($faviconUrl, 'data:')) {
+        $faviconUrl = '/' . ltrim($faviconUrl, '/');
+    }
 @endphp
 
 <!DOCTYPE html>
@@ -19,6 +24,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="{{ site()?->description ?? '管理后台系统' }}">
     <title>@yield('title', '管理后台') - {{ site()?->name ?? '管理后台' }}</title>
+    @if(!empty($faviconUrl))
+        <link rel="icon" href="{{ $faviconUrl }}" type="image/x-icon">
+    @endif
 
     {{-- 外部 CSS 资源（按需引入） --}}
     @include('components.plugin.bootstrap-css')

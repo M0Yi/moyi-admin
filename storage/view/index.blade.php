@@ -1,9 +1,18 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
+@php
+    $siteFavicon = site()?->favicon ?: '/favicon.ico';
+    if (! empty($siteFavicon) && ! preg_match('/^(https?:)?\/\//i', $siteFavicon) && ! str_starts_with($siteFavicon, 'data:')) {
+        $siteFavicon = '/' . ltrim($siteFavicon, '/');
+    }
+@endphp
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{{ site()?->name ?? 'Moyi Admin' }}</title>
+    @if(!empty($siteFavicon))
+        <link rel="icon" href="{{ $siteFavicon }}" type="image/x-icon">
+    @endif
     @include('components.plugin.bootstrap-css')
     @include('components.plugin.bootstrap-icons')
     <style>

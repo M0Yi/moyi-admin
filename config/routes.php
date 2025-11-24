@@ -9,7 +9,10 @@ declare(strict_types=1);
  * @contact  group@hyperf.io
  * @license  https://github.com/hyperf/hyperf/blob/master/LICENSE
  */
+use Hyperf\HttpMessage\Stream\SwooleStream;
+use Hyperf\HttpServer\Contract\ResponseInterface;
 use Hyperf\HttpServer\Router\Router;
+use function Hyperf\Support\make;
 
 
 // 站点初始化安装
@@ -153,5 +156,8 @@ Router::addGroup('/admin/{adminPath:[a-zA-Z0-9\-_]+}', function () {
 ]);
 
 Router::get('/favicon.ico', function () {
-    return '';
+    /** @var ResponseInterface $response */
+    $response = make(ResponseInterface::class);
+
+    return $response->withStatus(204);
 });
