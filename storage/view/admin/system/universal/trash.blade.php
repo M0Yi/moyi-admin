@@ -65,7 +65,9 @@
 <script type="application/json" id="universalCrudTrashConfigPayload">
 {!! $configJson ?? '{}' !!}
 </script>
-<script src="/js/components/search-form-renderer.js"></script>
+@include('components.admin-script', ['path' => '/js/components/search-form-renderer.js'])
+{{-- 引入通用刷新父页面监听器 --}}
+@include('components.admin-script', ['path' => '/js/components/refresh-parent-listener.js'])
 <script>
 (function () {
     window.CODE_VIEWER_FILES = @json($codeViewerFiles);
@@ -142,56 +144,11 @@
         });
     }
 
-    // 监听来自 iframe 的消息，当收到 refreshParent: true 时刷新数据表
-    window.addEventListener('message', function(event) {
-        // 安全检查：只处理同源消息
-        if (event.origin !== window.location.origin) {
-            return;
-        }
-
-        const data = event.data;
-        if (!data || typeof data !== 'object') {
-            return;
-        }
-
-        // 检查频道是否匹配（可选，如果设置了频道则必须匹配）
-        const channel = '{{ $shellChannel }}';
-        if (data.channel && data.channel !== channel) {
-            return;
-        }
-
-        // 检查 payload 中是否包含 refreshParent: true
-        const payload = data.payload;
-        if (payload && typeof payload === 'object' && payload.refreshParent === true) {
-            console.log('[UniversalCrudTrash] 收到 refreshParent 消息，刷新数据表', {
-                action: data.action,
-                source: data.source,
-                payload: payload
-            });
-            
-            // 检查 loadData_dataTable 函数是否存在
-            if (typeof window.loadData_dataTable === 'function') {
-                window.loadData_dataTable();
-                console.log('[UniversalCrudTrash] 已触发 loadData_dataTable() 刷新数据表');
-            } else {
-                console.warn('[UniversalCrudTrash] loadData_dataTable 函数不存在，无法刷新数据表');
-            }
-        }
-    });
-
-    // 同时监听自定义事件（用于 iframe-shell 在顶层窗口时触发）
-    window.addEventListener('refreshParent', function(event) {
-        const payload = event.detail;
-        if (payload && typeof payload === 'object' && payload.refreshParent === true) {
-            console.log('[UniversalCrudTrash] 收到 refreshParent 自定义事件，刷新数据表');
-            
-            if (typeof window.loadData_dataTable === 'function') {
-                window.loadData_dataTable();
-                console.log('[UniversalCrudTrash] 已触发 loadData_dataTable() 刷新数据表');
-            } else {
-                console.warn('[UniversalCrudTrash] loadData_dataTable 函数不存在，无法刷新数据表');
-            }
-        }
+    // 初始化刷新父页面监听器（使用通用组件）
+    // 自动监听来自 iframe 的 refreshParent 消息并刷新数据表
+    initRefreshParentListener('dataTable', {
+        channel: '{{ $shellChannel }}',  // 使用配置的频道
+        logPrefix: '[UniversalCrudTrash]'  // 日志前缀
     });
 
     // 恢复单个记录

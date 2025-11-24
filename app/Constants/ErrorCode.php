@@ -22,4 +22,8 @@ class ErrorCode extends AbstractConstants
      * @Message("Server Error！")
      */
     public const SERVER_ERROR = 500;
+    // BAD_REQUEST
+    public const BAD_REQUEST = 400;
+    // VALIDATION_ERROR
+    public const VALIDATION_ERROR = 422;
 }

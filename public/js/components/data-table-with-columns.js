@@ -80,6 +80,7 @@
         const defaultPageSize = config.defaultPageSize;
         const pageSizeStorageKey = storageKey + '_pageSize';
         const enablePageSizeStorage = config.enablePageSizeStorage;
+        const showPagination = config.showPagination !== false; // 默认为 true，如果设置为 false 则关闭分页
         
         // 从 localStorage 读取保存的分页尺寸（如果启用）
         let pageSize = defaultPageSize;
@@ -317,8 +318,14 @@
             
             // 添加/覆盖系统参数
             params.set('_ajax', '1');
+            // 只有在启用分页时才传递分页参数
+            if (showPagination) {
             params.set('page', String(currentPage));
             params.set('page_size', String(pageSize));
+            } else {
+                // 关闭分页时，传递 page_size=0 表示返回所有数据
+                params.set('page_size', '0');
+            }
             params.set('keyword', ''); // 保留 keyword 参数（向后兼容），但不再使用
             params.set('sort_field', sortField);
             params.set('sort_order', sortOrder);
@@ -387,9 +394,15 @@
                         
                         // 确保 data.data 存在（兼容不同的响应格式）
                         if (!result.data.data) {
-                            console.warn(`[DataTable ${tableId}] 响应数据格式异常: result.data.data 不存在，尝试使用 result.data`, result.data);
+                            // 兼容 list 字段（向后兼容）
+                            if (result.data.list && Array.isArray(result.data.list)) {
+                                console.warn(`[DataTable ${tableId}] 检测到使用 list 字段，已自动转换为 data 字段`, result.data);
+                                result.data.data = result.data.list;
+                                // 删除 list 字段，统一使用 data
+                                delete result.data.list;
+                            } else if (Array.isArray(result.data)) {
                             // 如果 result.data 本身就是数组，包装一下
-                            if (Array.isArray(result.data)) {
+                                console.warn(`[DataTable ${tableId}] 响应数据格式异常: result.data 是数组，已自动包装`, result.data);
                                 result.data = {
                                     data: result.data,
                                     total: result.data.length,
@@ -398,6 +411,7 @@
                                 };
                             } else {
                                 // 否则设置为空数据
+                                console.warn(`[DataTable ${tableId}] 响应数据格式异常: result.data.data 不存在，使用空数据`, result.data);
                                 result.data = {
                                     data: [],
                                     total: 0,
@@ -408,7 +422,16 @@
                         }
                         
                         renderTable(result.data);
+                        // 只有在启用分页时才渲染分页组件
+                        if (showPagination) {
                         renderPagination(result.data);
+                        } else {
+                            // 如果关闭分页，隐藏分页相关的 DOM 元素
+                            const pagination = document.getElementById(`${tableId}_pagination`);
+                            if (pagination) {
+                                pagination.style.display = 'none';
+                            }
+                        }
                         updateSortIcons();
                         
                         // 同步排序状态
@@ -880,10 +903,19 @@
                                 const title = action.title || '';
                                 const btnClass = action.class || '';
                                 
+                                // 处理 attributes 属性
+                                let attributesHtml = '';
+                                if (action.attributes && typeof action.attributes === 'object') {
+                                    for (const [key, value] of Object.entries(action.attributes)) {
+                                        const attrValue = replacePlaceholders(value);
+                                        attributesHtml += ` ${key}="${attrValue}"`;
+                                    }
+                                }
+                                
                                 actionsHtml += `
                                     <a href="${href}"
                                        class="btn btn-sm btn-${variant} btn-action ${btnClass}"
-                                       ${title ? `title="${title}"` : ''}>
+                                       ${title ? `title="${title}"` : ''}${attributesHtml}>
                                         ${icon}${text ? ' ' + text : ''}
                                     </a>
                                 `;
@@ -898,10 +930,19 @@
                                 const title = action.title || '';
                                 const btnClass = action.class || '';
                                 
+                                // 处理 attributes 属性
+                                let attributesHtml = '';
+                                if (action.attributes && typeof action.attributes === 'object') {
+                                    for (const [key, value] of Object.entries(action.attributes)) {
+                                        const attrValue = replacePlaceholders(value);
+                                        attributesHtml += ` ${key}="${attrValue}"`;
+                                    }
+                                }
+                                
                                 actionsHtml += `
                                     <button class="btn btn-sm btn-${variant} btn-action ${btnClass}"
                                             ${title ? `title="${title}"` : ''}
-                                            onclick="${onclick}">
+                                            onclick="${onclick}"${attributesHtml}>
                                         ${icon}${text ? ' ' + text : ''}
                                     </button>
                                 `;
@@ -991,6 +1032,15 @@
                     nestedTableHtml += '</div>';
                     
                     return nestedTableHtml;
+                
+                case 'custom':
+                    // 自定义类型：支持 renderFunction 或 partial
+                    if (column.renderFunction && typeof window[column.renderFunction] === 'function') {
+                        // 使用自定义渲染函数
+                        return window[column.renderFunction](value, column, row);
+                    }
+                    // 如果没有自定义渲染函数，fallthrough 到 default 处理
+                    // 注意：不能在这里声明 textValue，因为 default 分支也会声明
                 
                 default: // text
                     let textValue = value || '';

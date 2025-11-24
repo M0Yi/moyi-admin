@@ -471,6 +471,7 @@ class UniversalCrudService
                 'help' => $field['help'] ?? null,
                 'disabled' => $field['disabled'] ?? false,
                 'readonly' => $field['readonly'] ?? false,
+                'col' => $field['col'] ?? null, // 列宽配置，用于前端表单布局
             ];
             
             // 类型特定属性

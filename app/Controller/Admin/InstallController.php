@@ -456,28 +456,28 @@ class InstallController extends AbstractController
 //            ]
 //        );
 //
-//        AdminMenu::query()->firstOrCreate(
-//            ['site_id' => $siteId, 'path' => '/system/menus'],
-//            [
-//                'parent_id' => $system->id,
-//                'name' => 'system.menus',
-//                'title' => '菜单管理',
-//                'icon' => 'bi bi-menu-button-wide',
-//                'component' => null,
-//                'redirect' => null,
-//                'type' => AdminMenu::TYPE_MENU,
-//                'target' => AdminMenu::TARGET_SELF,
-//                'badge' => null,
-//                'badge_type' => null,
-//                'permission' => 'system.menus.view',
-//                'visible' => 1,
-//                'status' => 1,
-//                'sort' => 4,
-//                'cache' => 1,
-//                'config' => null,
-//                'remark' => null,
-//            ]
-//        );
+       AdminMenu::query()->firstOrCreate(
+           ['site_id' => $siteId, 'path' => '/system/menus'],
+           [
+               'parent_id' => $system->id,
+               'name' => 'system.menus',
+               'title' => '菜单管理',
+               'icon' => 'bi bi-menu-button-wide',
+               'component' => null,
+               'redirect' => null,
+               'type' => AdminMenu::TYPE_MENU,
+               'target' => AdminMenu::TARGET_SELF,
+               'badge' => null,
+               'badge_type' => null,
+               'permission' => 'system.menus.view',
+               'visible' => 1,
+               'status' => 1,
+               'sort' => 4,
+               'cache' => 1,
+               'config' => null,
+               'remark' => null,
+           ]
+       );
 //
 //        AdminMenu::query()->firstOrCreate(
 //            ['site_id' => $siteId, 'path' => '/system/sites'],
@@ -568,6 +568,30 @@ class InstallController extends AbstractController
                 'cache' => 1,
                 'config' => null,
                 'remark' => '系统菜单',
+            ]
+        );
+
+        // 开源地址（外部链接）
+        AdminMenu::query()->firstOrCreate(
+            ['site_id' => $siteId, 'name' => 'moyi.github.link'],
+            [
+                'parent_id' => 0,
+                'title' => '开源地址',
+                'icon' => 'bi bi-code-square',
+                'path' => 'https://github.com/M0Yi/moyi-admin',
+                'component' => null,
+                'redirect' => null,
+                'type' => AdminMenu::TYPE_LINK,
+                'target' => AdminMenu::TARGET_BLANK,
+                'badge' => 'github',
+                'badge_type' => AdminMenu::BADGE_PRIMARY,
+                'permission' => null,
+                'visible' => 1,
+                'status' => 1,
+                'sort' => 10000,
+                'cache' => 1,
+                'config' => null,
+                'remark' => '项目来源 Hyperf交流 6 群',
             ]
         );
     }

@@ -678,64 +678,13 @@ CODE,
 
     <div class="row g-4">
         <div class="col-xl-7">
-            <div class="card border-0 shadow-sm">
-                <div class="card-body">
-                    <div class="d-flex align-items-center justify-content-between gap-3 mb-3">
-                        <div>
-                            <h6 class="mb-1">嵌入态诊断</h6>
-                            <small class="text-muted">renderAdmin() 自动注入的上下文信息</small>
-                        </div>
-                        <span class="badge {{ $isEmbedded ? 'bg-success-subtle text-success' : 'bg-secondary-subtle text-secondary' }}">
-                            {{ $isEmbedded ? 'Iframe / 内嵌模式' : 'Shell / 主框架模式' }}
-                        </span>
-                    </div>
-                    <dl class="row mb-0 small">
-                        <dt class="col-sm-4 text-muted">标准化地址</dt>
-                        <dd class="col-sm-8 mb-2">
-                            <code class="d-inline-block text-truncate" style="max-width: 100%;">{{ $normalizedUrl }}</code>
-                        </dd>
-
-                        <dt class="col-sm-4 text-muted">嵌套层级</dt>
-                        <dd class="col-sm-8 mb-2">
-                            <span id="iframe-nesting-level" class="badge bg-secondary-subtle text-secondary">计算中...</span>
-                            <small class="text-muted d-block mt-1" id="iframe-nesting-hint"></small>
-                        </dd>
-
-                        <dt class="col-sm-4 text-muted">Iframe Channel</dt>
-                        <dd class="col-sm-8 mb-2">
-                            {{ $diagnostics['channel'] ?? '未携带（主框架模式）' }}
-                        </dd>
-
-                        <dt class="col-sm-4 text-muted">Sec-Fetch-Dest</dt>
-                        <dd class="col-sm-8 mb-2">
-                            {{ $diagnostics['sec_fetch_dest'] ?? '无' }}
-                        </dd>
-
-                        <dt class="col-sm-4 text-muted">Query 参数</dt>
-                        <dd class="col-sm-8 mb-0">
-                            @if(!empty($diagnostics['query']))
-                                <ul class="list-unstyled mb-0">
-                                    @foreach($diagnostics['query'] as $key => $value)
-                                    <li class="text-break">
-                                        <span class="text-muted">{{ $key }}</span> =
-                                        <code>
-                                            @if(is_scalar($value))
-                                                {{ $value }}
-                                            @else
-                                                {{ json_encode($value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) }}
-                                            @endif
-                                        </code>
-                                    </li>
-                                    @endforeach
-                                </ul>
-                            @else
-                                <span class="text-muted">无</span>
-                            @endif
-                        </dd>
-                    </dl>
-                </div>
-            </div>
-
+            {{-- 嵌入态诊断组件 --}}
+            @include('components.embedding-diagnostics', [
+                'isEmbedded' => $isEmbedded,
+                'normalizedUrl' => $normalizedUrl,
+                'diagnostics' => $diagnostics ?? [],
+                'id' => 'iframe-demo-diagnostics'
+            ])
         </div>
 
         <div class="col-xl-5">
@@ -1043,6 +992,8 @@ CODE,
 <script>
 /**
  * 计算 iframe 嵌套层级（套娃深度）
+ * 注意：嵌套层级的显示已移至 embedding-diagnostics 组件
+ * 这里保留此函数仅用于 iframe-demo 页面特定的逻辑（套娃挑战卡片）
  * @returns {number} 嵌套层级，0 表示在主框架中
  */
 function calculateNestingLevel() {
@@ -1075,59 +1026,8 @@ function calculateNestingLevel() {
     return level;
 }
 
-/**
- * 显示嵌套层级信息
- */
-function displayNestingLevel() {
-    const levelEl = document.getElementById('iframe-nesting-level');
-    const hintEl = document.getElementById('iframe-nesting-hint');
-    
-    if (!levelEl || !hintEl) {
-        return;
-    }
-    
-    const level = calculateNestingLevel();
-    
-    // 根据层级设置不同的样式和提示
-    let badgeClass = 'bg-secondary-subtle text-secondary';
-    let icon = '';
-    let hint = '';
-    
-    if (level === 0) {
-        badgeClass = 'bg-primary-subtle text-primary';
-        icon = '🏠';
-        hint = '当前在主框架中，不是 iframe';
-    } else if (level === 1) {
-        badgeClass = 'bg-info-subtle text-info';
-        icon = '📦';
-        hint = '第 1 层嵌套，正常的 iframe 模式';
-    } else if (level === 2) {
-        badgeClass = 'bg-warning-subtle text-warning';
-        icon = '📦📦';
-        hint = '第 2 层嵌套，开始套娃了！';
-    } else if (level === 3) {
-        badgeClass = 'bg-warning-subtle text-warning';
-        icon = '📦📦📦';
-        hint = '第 3 层嵌套，套娃进行中...';
-    } else if (level >= 4 && level < 10) {
-        badgeClass = 'bg-danger-subtle text-danger';
-        icon = '📦'.repeat(Math.min(level, 5));
-        hint = `第 ${level} 层嵌套，深度套娃！${level >= 5 ? '注意性能影响' : ''}`;
-    } else {
-        badgeClass = 'bg-dark text-white';
-        icon = '📦'.repeat(5) + '...';
-        hint = `第 ${level} 层嵌套，无限套娃模式！建议适可而止 😄`;
-    }
-    
-    levelEl.className = `badge ${badgeClass}`;
-    levelEl.textContent = `${icon} L${level}`;
-    hintEl.textContent = hint;
-}
-
-// 页面加载时显示嵌套层级
+// 页面加载时处理套娃挑战卡片（iframe-demo 页面特定逻辑）
 document.addEventListener('DOMContentLoaded', () => {
-    displayNestingLevel();
-    
     // 如果嵌套层级 >= 1，显示套娃挑战卡片
     const level = calculateNestingLevel();
     const challengeCard = document.getElementById('nesting-challenge-card');

@@ -37,6 +37,36 @@
             const fragment = document.createDocumentFragment();
 
             fields.forEach((field) => {
+                const fieldType = (field.type || '').toLowerCase();
+                
+                // 处理卡片分组
+                if (fieldType === 'card') {
+                    const cardContainer = document.createElement('div');
+                    cardContainer.className = 'col-12';
+                    cardContainer.innerHTML = this.buildCardMarkup(field);
+                    fragment.appendChild(cardContainer);
+                    return;
+                }
+                
+                // 处理分组标题
+                if (fieldType === 'group') {
+                    const groupContainer = document.createElement('div');
+                    groupContainer.className = 'col-12';
+                    groupContainer.innerHTML = this.buildGroupMarkup(field);
+                    fragment.appendChild(groupContainer);
+                    return;
+                }
+                
+                // 处理分隔线
+                if (fieldType === 'divider') {
+                    const dividerContainer = document.createElement('div');
+                    dividerContainer.className = 'col-12';
+                    dividerContainer.innerHTML = this.buildDividerMarkup(field);
+                    fragment.appendChild(dividerContainer);
+                    return;
+                }
+                
+                // 普通字段
                 const column = document.createElement('div');
                 column.className = this.getColumnClass(field);
                 column.innerHTML = this.buildFieldMarkup(field);
@@ -55,6 +85,7 @@
 
             this.form.classList.remove('d-none');
             this.initializeEnhancements();
+            this.initializeGroups();
         }
 
         attachFormSubmit() {
@@ -89,38 +120,32 @@
                     if (result.code === 200) {
                         const message = result.msg || successMessage;
                         
-                        // 优先使用 AdminIframeClient.success（如果在 iframe 中）
-                        if (window.AdminIframeClient && typeof window.AdminIframeClient.success === 'function') {
-                            // 对于 PUT 请求（更新操作），刷新父页
-                            if (method === 'PUT') {
-                                window.AdminIframeClient.success({
-                                    message: message,
-                                    refreshParent: true,   // 请求父页刷新当前标签
-                                    closeCurrent: false    // 不关闭当前标签/弹窗
-                                });
-                            } 
-                            // 对于 POST 请求（创建操作），也刷新父页
-                            else {
-                                window.AdminIframeClient.success({
-                                    message: message,
-                                    refreshParent: true,   // 请求父页刷新当前标签
-                                    closeCurrent: false    // 不关闭当前标签/弹窗
-                                });
-                            }
-                        } 
-                        // 回退为页面跳转（不在 iframe 中时）
-                        else {
-                            this.notify('success', message);
-                            // 对于 PUT 请求，redirectUrl 可能需要去掉 ID 部分
+                        // 计算重定向 URL
                             let redirectUrl = this.schema.redirectUrl || this.schema.submitUrl;
                             if (method === 'PUT' && !this.schema.redirectUrl) {
-                                // 如果 redirectUrl 包含 ID，去掉它
+                            // 对于 PUT 请求，redirectUrl 可能需要去掉 ID 部分
                                 redirectUrl = redirectUrl.replace(/\/\d+$/, '');
                             }
-                        setTimeout(() => {
-                            window.location.href = redirectUrl;
-                        }, 800);
+                        
+                        // 触发表单提交成功事件（由 fixed-bottom-actions 组件处理）
+                        if (this.form && window.FixedBottomActions && typeof window.FixedBottomActions.triggerSuccess === 'function') {
+                            window.FixedBottomActions.triggerSuccess(this.form, {
+                                message: message,
+                                redirect: redirectUrl
+                            });
+                        } else {
+                            // 降级处理：直接触发自定义事件
+                            const successEvent = new CustomEvent('submit-success', {
+                                bubbles: true,
+                                cancelable: true,
+                                detail: {
+                                    message: message,
+                                    redirect: redirectUrl
+                                }
+                            });
+                            this.form.dispatchEvent(successEvent);
                         }
+                        
                         return;
                     }
 
@@ -181,6 +206,153 @@
                 : '<i class="bi bi-check-lg me-1"></i> 保存';
         }
 
+        buildGroupMarkup(field = {}) {
+            const title = field.title || field.label || '分组';
+            const collapsible = field.collapsible !== false; // 默认可折叠
+            const collapsed = field.collapsed === true; // 默认展开
+            const groupId = `group_${Math.random().toString(16).slice(2)}`;
+            
+            // 构建自定义属性（支持 data-* 属性）
+            const customAttrs = [];
+            Object.keys(field).forEach(key => {
+                if (key.startsWith('data-')) {
+                    customAttrs.push(`${key}="${this.escapeAttr(field[key])}"`);
+                }
+            });
+            const customAttrsStr = customAttrs.length > 0 ? ' ' + customAttrs.join(' ') : '';
+            
+            if (collapsible) {
+                return `
+                    <div class="universal-form-group mb-4" data-group-id="${groupId}"${customAttrsStr}>
+                        <div class="d-flex align-items-center justify-content-between mb-3">
+                            <h5 class="mb-0 fw-bold text-primary">${this.escape(title)}</h5>
+                            <button 
+                                type="button" 
+                                class="btn btn-sm btn-link p-0 text-decoration-none"
+                                data-group-toggle="${groupId}"
+                                aria-expanded="${!collapsed}"
+                            >
+                                <i class="bi bi-chevron-${collapsed ? 'down' : 'up'}"></i>
+                            </button>
+                        </div>
+                        <div class="universal-form-group-content" data-group-content="${groupId}" style="display: ${collapsed ? 'none' : 'block'};">
+                            <div class="row">
+                                <!-- 分组内容将在这里动态插入 -->
+                            </div>
+                        </div>
+                    </div>
+                `;
+            } else {
+                return `
+                    <div class="universal-form-group mb-4" data-group-id="${groupId}"${customAttrsStr}>
+                        <h5 class="mb-3 fw-bold text-primary">${this.escape(title)}</h5>
+                        <div class="universal-form-group-content" data-group-content="${groupId}">
+                            <div class="row">
+                                <!-- 分组内容将在这里动态插入 -->
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+        }
+        
+        buildDividerMarkup(field = {}) {
+            const text = field.text || field.label || '';
+            const margin = field.margin || 'my-4'; // 默认上下边距
+            
+            if (text) {
+                return `
+                    <div class="universal-form-divider ${margin}">
+                        <hr class="my-0">
+                        <div class="text-center">
+                            <span class="bg-white px-3 text-muted small">${this.escape(text)}</span>
+                        </div>
+                    </div>
+                `;
+            } else {
+                return `
+                    <div class="universal-form-divider ${margin}">
+                        <hr>
+                    </div>
+                `;
+            }
+        }
+        
+        buildCardMarkup(field = {}) {
+            const title = field.title || field.label || '';
+            const collapsible = field.collapsible !== false; // 默认可折叠
+            const collapsed = field.collapsible === false ? false : (field.collapsed === true); // 如果不可折叠，则默认展开；否则根据 collapsed 属性
+            const cardId = `card_${Math.random().toString(16).slice(2)}`;
+            const cardClass = field.cardClass || 'mb-4'; // 卡片外层样式类
+            const cardBodyClass = field.cardBodyClass || ''; // 卡片 body 样式类
+            
+            // 构建自定义属性（支持 data-* 属性）
+            const customAttrs = [];
+            Object.keys(field).forEach(key => {
+                if (key.startsWith('data-')) {
+                    customAttrs.push(`${key}="${this.escapeAttr(field[key])}"`);
+                }
+            });
+            const customAttrsStr = customAttrs.length > 0 ? ' ' + customAttrs.join(' ') : '';
+            
+            // 渲染卡片内的字段
+            const cardFields = Array.isArray(field.fields) ? field.fields : [];
+            const fieldsHtml = this.renderFieldsToHtml(cardFields);
+            
+            if (collapsible) {
+                const isExpanded = !collapsed;
+                return `
+                    <div class="card ${cardClass}" data-card-id="${cardId}"${customAttrsStr}>
+                        <div class="card-header d-flex align-items-center justify-content-between" style="cursor: pointer;" data-card-toggle="${cardId}" aria-expanded="${isExpanded}">
+                            <h6 class="mb-0 fw-bold">${this.escape(title)}</h6>
+                            <button 
+                                type="button" 
+                                class="btn btn-sm btn-link p-1 text-decoration-none border-0"
+                                data-card-toggle="${cardId}"
+                                aria-expanded="${isExpanded}"
+                                style="min-width: 24px; min-height: 24px; display: flex; align-items: center; justify-content: center;"
+                            >
+                                <i class="bi bi-chevron-${collapsed ? 'down' : 'up'}"></i>
+                            </button>
+                        </div>
+                        <div class="card-body ${cardBodyClass}" data-card-content="${cardId}" style="display: ${collapsed ? 'none' : 'block'};">
+                            <div class="row">
+                                ${fieldsHtml}
+                            </div>
+                        </div>
+                    </div>
+                `;
+            } else {
+                return `
+                    <div class="card ${cardClass}" data-card-id="${cardId}"${customAttrsStr}>
+                        ${title ? `<div class="card-header"><h6 class="mb-0 fw-bold">${this.escape(title)}</h6></div>` : ''}
+                        <div class="card-body ${cardBodyClass}" data-card-content="${cardId}">
+                            <div class="row">
+                                ${fieldsHtml}
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+        }
+        
+        renderFieldsToHtml(fields = []) {
+            return fields.map((field) => {
+                const fieldType = (field.type || '').toLowerCase();
+                
+                // 卡片内不支持嵌套卡片、分组和分隔线（避免过度嵌套）
+                if (fieldType === 'card' || fieldType === 'group' || fieldType === 'divider') {
+                    console.warn('[UniversalFormRenderer] 卡片内不支持嵌套卡片、分组或分隔线');
+                    return '';
+                }
+                
+                const columnClass = this.getColumnClass(field);
+                const fieldMarkup = this.buildFieldMarkup(field);
+                
+                return `<div class="${columnClass}">${fieldMarkup}</div>`;
+            }).join('');
+        }
+
         buildFieldMarkup(field = {}) {
             const name = field.name || `field_${Math.random().toString(16).slice(2)}`;
             const label = field.label || name;
@@ -188,15 +360,23 @@
             const helpText = field.help ? `<div class="form-text">${this.escape(field.help)}</div>` : '';
             const controlHtml = this.renderFieldControl(field);
 
-            const showLabel = field.type !== 'switch';
-            const labelHtml = showLabel
-                ? `<label class="form-label" for="${this.escapeAttr(this.getFieldId(field))}">
+            // 所有字段都显示外层 label，保持结构统一
+            const labelHtml = `<label class="form-label" for="${this.escapeAttr(this.getFieldId(field))}">
                         ${this.escape(label)}${requiredMark}
-                   </label>`
-                : '';
+                   </label>`;
+
+            // 构建自定义属性（支持 data-* 属性）
+            const customAttrs = [];
+            Object.keys(field).forEach(key => {
+                // 支持 data-* 格式的属性
+                if (key.startsWith('data-')) {
+                    customAttrs.push(`${key}="${this.escapeAttr(field[key])}"`);
+                }
+            });
+            const customAttrsStr = customAttrs.length > 0 ? ' ' + customAttrs.join(' ') : '';
 
             return `
-                <div class="universal-form-field mb-3" data-field-name="${this.escapeAttr(name)}">
+                <div class="universal-form-field mb-3" data-field-name="${this.escapeAttr(name)}"${customAttrsStr}>
                     ${labelHtml}
                     ${controlHtml}
                     ${helpText}
@@ -437,29 +617,32 @@
         renderDateInput(field, subtype) {
             const id = this.getFieldId(field);
             const value = this.getFieldValue(field);
-            const supportedType = subtype === 'datetime' ? 'datetime-local' : subtype;
+            // 使用 text 类型，Flatpickr 会接管输入框
+            const isDatetime = subtype === 'datetime' || subtype === 'datetime-local';
+            const isTime = subtype === 'time';
+            const dataType = isDatetime ? 'datetime' : (isTime ? 'time' : 'date');
 
             return `
                 <input
-                    type="${this.escapeAttr(supportedType)}"
+                    type="text"
                     class="form-control"
                     id="${id}"
                     name="${this.escapeAttr(field.name)}"
                     value="${this.escapeAttr(value)}"
+                    data-flatpickr-type="${this.escapeAttr(dataType)}"
                     ${this.buildCommonAttributes(field)}
                 >
             `;
         }
 
         renderSwitch(field) {
-            const id = `${this.getFieldId(field)}_switch`;
+            const id = this.getFieldId(field);
             const currentValue = this.getFieldValue(field);
             const onValue = field.onValue ?? '1';
             const offValue = field.offValue ?? '0';
             // 统一转换为字符串比较，确保编辑模式下的默认值正确显示
             // 如果 currentValue 为空字符串，说明没有值，默认关闭（不选中）
             const checked = currentValue !== '' && String(currentValue) === String(onValue);
-            const label = field.label || '';
 
             return `
                 <div class="form-check form-switch">
@@ -472,9 +655,6 @@
                         ${field.disabled ? 'disabled' : ''}
                         ${field.readonly ? 'readonly' : ''}
                     >
-                    <label class="form-check-label" for="${id}">
-                        ${this.escape(label)}
-                    </label>
                     <input
                         type="hidden"
                         name="${this.escapeAttr(field.name)}"
@@ -589,6 +769,62 @@
             this.initializeNumberRangeFields();
             this.initializeImageFields();
             this.initializeMultiImageFields();
+            this.initializeDateInputs();
+        }
+        
+        initializeGroups() {
+            // 初始化分组折叠功能
+            const toggleButtons = this.form.querySelectorAll('[data-group-toggle]');
+            toggleButtons.forEach(button => {
+                button.addEventListener('click', () => {
+                    const groupId = button.dataset.groupToggle;
+                    const content = this.form.querySelector(`[data-group-content="${groupId}"]`);
+                    const icon = button.querySelector('i');
+                    
+                    if (!content) {
+                        return;
+                    }
+                    
+                    const isExpanded = content.style.display !== 'none';
+                    content.style.display = isExpanded ? 'none' : 'block';
+                    button.setAttribute('aria-expanded', !isExpanded);
+                    
+                    if (icon) {
+                        icon.className = isExpanded ? 'bi bi-chevron-down' : 'bi bi-chevron-up';
+                    }
+                });
+            });
+            
+            // 初始化卡片折叠功能
+            // 使用事件委托，只绑定一次事件监听器
+            const cardHeaders = this.form.querySelectorAll('.card-header[data-card-toggle]');
+            cardHeaders.forEach(header => {
+                header.addEventListener('click', (e) => {
+                    // 如果点击的是按钮，让按钮的事件处理（但按钮没有单独的事件，所以这里统一处理）
+                    const cardId = header.dataset.cardToggle;
+                    const content = this.form.querySelector(`[data-card-content="${cardId}"]`);
+                    
+                    if (!content) {
+                        return;
+                    }
+                    
+                    const isExpanded = content.style.display !== 'none';
+                    content.style.display = isExpanded ? 'none' : 'block';
+                    
+                    // 更新 header 的 aria-expanded
+                    header.setAttribute('aria-expanded', !isExpanded);
+                    
+                    // 更新按钮的 aria-expanded 和图标
+                    const button = header.querySelector('button[data-card-toggle]');
+                    if (button) {
+                        button.setAttribute('aria-expanded', !isExpanded);
+                        const icon = button.querySelector('i');
+                        if (icon) {
+                            icon.className = isExpanded ? 'bi bi-chevron-down' : 'bi bi-chevron-up';
+                        }
+                    }
+                });
+            });
         }
 
         initializeSelects() {
@@ -880,6 +1116,83 @@
             });
         }
 
+        initializeDateInputs() {
+            if (typeof window.flatpickr !== 'function') {
+                console.warn('[UniversalFormRenderer] Flatpickr 未加载，跳过日期选择器初始化');
+                return;
+            }
+
+            const dateInputs = this.form.querySelectorAll('input[data-flatpickr-type]');
+
+            dateInputs.forEach((input) => {
+                // 如果已经初始化过，跳过
+                if (input._flatpickr) {
+                    return;
+                }
+
+                const dataType = input.dataset.flatpickrType || 'date';
+                const isRequired = input.hasAttribute('required');
+                const isDisabled = input.hasAttribute('disabled');
+                const isReadonly = input.hasAttribute('readonly');
+
+                // 根据类型配置 Flatpickr
+                // 检查中文语言包是否已加载
+                const hasZhLocale = window.flatpickr && window.flatpickr.l10ns && window.flatpickr.l10ns.zh;
+                
+                let config = {
+                    locale: hasZhLocale ? 'zh' : 'default',
+                    allowInput: true,
+                    clickOpens: !isReadonly,
+                    disableMobile: false, // 在移动设备上也使用 Flatpickr
+                };
+
+                switch (dataType) {
+                    case 'datetime':
+                        config = {
+                            ...config,
+                            enableTime: true,
+                            time_24hr: true,
+                            dateFormat: 'Y-m-d H:i',
+                            altInput: false,
+                        };
+                        break;
+                    case 'time':
+                        config = {
+                            ...config,
+                            enableTime: true,
+                            noCalendar: true,
+                            time_24hr: true,
+                            dateFormat: 'H:i',
+                            altInput: false,
+                        };
+                        break;
+                    case 'date':
+                    default:
+                        config = {
+                            ...config,
+                            dateFormat: 'Y-m-d',
+                            altInput: false,
+                        };
+                        break;
+                }
+
+                // 如果字段是必填的，添加验证
+                if (isRequired) {
+                    config.onChange = function(selectedDates, dateStr, instance) {
+                        // 移除之前的验证样式
+                        input.classList.remove('is-invalid');
+                    };
+                }
+
+                // 初始化 Flatpickr
+                try {
+                    input._flatpickr = window.flatpickr(input, config);
+                } catch (error) {
+                    console.error('[UniversalFormRenderer] Flatpickr 初始化失败', error, input);
+                }
+            });
+        }
+
         updateSingleImagePreview(container, url, isLoading) {
             if (!container) {
                 return;
@@ -982,12 +1295,31 @@
         }
 
         getColumnClass(field) {
-            const fullWidthTypes = ['textarea', 'rich_text', 'number_range', 'images'];
-            if (fullWidthTypes.includes((field.type || '').toLowerCase())) {
+            // 如果字段配置了自定义列宽，优先使用
+            if (field.col) {
+                return field.col;
+            }
+
+            const fieldType = (field.type || '').toLowerCase();
+
+            // 图片类型（单图和多图）默认使用 col-12 col-md-6（每行2个字段）
+            if (fieldType === 'image' || fieldType === 'images') {
+                return 'col-12 col-md-6';
+            }
+
+            // 全宽字段类型
+            const fullWidthTypes = ['textarea', 'rich_text', 'number_range'];
+            if (fullWidthTypes.includes(fieldType)) {
                 return 'col-12';
             }
 
-            return 'col-12 col-md-6';
+            // switch 类型默认使用 col-12 col-md-3（每行4个字段）
+            if (fieldType === 'switch') {
+                return 'col-12 col-md-3';
+            }
+
+            // 默认布局：移动端全宽，中等屏幕及以上占 1/4（每行4个字段）
+            return 'col-12 col-md-3';
         }
 
         getFieldId(field) {

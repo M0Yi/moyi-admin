@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Controller\Admin\System;
 
 use App\Controller\AbstractController;
+use App\Exception\BusinessException;
 use App\Exception\ValidationException;
 use App\Service\Admin\UniversalCrudService;
 use Hyperf\Di\Annotation\Inject;
@@ -493,6 +494,8 @@ class UniversalCrudController extends AbstractController
             return $this->error($e->getMessage(), [
                 'errors' => $e->getErrors(),
             ], 422);
+        } catch (BusinessException $e) {
+            return $this->error($e->getMessage(), [], $e->getCode());
         } catch (\Throwable $e) {
             return $this->error($e->getMessage());
         }
@@ -589,6 +592,8 @@ class UniversalCrudController extends AbstractController
             return $this->error($e->getMessage(), [
                 'errors' => $e->getErrors(),
             ], 422);
+        } catch (BusinessException $e) {
+            return $this->error($e->getMessage(), [], $e->getCode());
         } catch (\Throwable $e) {
             return $this->error($e->getMessage());
         }

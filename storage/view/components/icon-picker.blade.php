@@ -138,5 +138,5 @@
 </style>
 
 {{-- 引入图标选择器 JavaScript --}}
-<script src="/js/components/icon-picker.js"></script>
+@include('components.admin-script', ['path' => '/js/components/icon-picker.js'])
 

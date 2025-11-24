@@ -2,6 +2,14 @@
 
 @section('title', '添加' . ($config['title'] ?? '数据'))
 
+@push('admin_sidebar')
+    @include('admin.components.sidebar')
+@endpush
+
+@push('admin_navbar')
+    @include('admin.components.navbar')
+@endpush
+
 @section('content')
 @include('admin.common.styles')
 <div class="container-fluid py-4" id="universal-create-app">
@@ -23,11 +31,10 @@
 </div>
 
 @include('admin.components.fixed-bottom-actions', [
-    'infoText' => '填写完成后点击保存按钮提交',
+    'formId' => 'createForm',
     'cancelUrl' => admin_route("universal/{$model}"),
     'submitText' => '保存',
-    'formId' => 'createForm',
-    'submitBtnId' => 'submitBtn'
+    'infoText' => '填写完成后点击保存按钮提交'
 ])
 @endsection
 
@@ -49,7 +56,7 @@
         ? filemtime(BASE_PATH . '/public/js/components/universal-form-renderer.js')
         : time();
 @endphp
-<script src="/js/components/universal-form-renderer.js?v={{ $universalFormJsVersion }}"></script>
+@include('components.admin-script', ['path' => '/js/components/universal-form-renderer.js', 'version' => $universalFormJsVersion])
 <script>
 window.UniversalCreatePage = {
     model: '{{ $model }}',

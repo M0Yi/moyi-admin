@@ -1017,7 +1017,7 @@
 @include('admin.components.data-table.modals')
 
 {{-- 引入工具栏渲染器脚本 --}}
-<script src="/js/components/toolbar-renderer.js"></script>
+@include('components.admin-script', ['path' => '/js/components/toolbar-renderer.js'])
 
 @include('admin.components.data-table.scripts-config')
 

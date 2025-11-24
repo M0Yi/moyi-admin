@@ -2,22 +2,17 @@
 
 @section('title', '编辑' . ($config['title'] ?? '数据'))
 
+@push('admin_sidebar')
+    @include('admin.components.sidebar')
+@endpush
+
+@push('admin_navbar')
+    @include('admin.components.navbar')
+@endpush
+
 @section('content')
 @include('admin.common.styles')
 <div class="container-fluid py-4" id="universal-edit-app">
-    <!-- 页面标题 -->
-    <div class="mb-3">
-        <h6 class="mb-1 fw-bold">编辑{{ $config['title'] ?? '数据' }}</h6>
-        <nav aria-label="breadcrumb">
-            <ol class="breadcrumb mb-0">
-                <li class="breadcrumb-item"><a href="{{ admin_route('dashboard') }}">首页</a></li>
-                <li class="breadcrumb-item"><a href="#">系统管理</a></li>
-                <li class="breadcrumb-item"><a href="{{ admin_route("u/{$model}") }}">{{ $config['title'] ?? '数据' }}列表</a></li>
-                <li class="breadcrumb-item active">编辑</li>
-            </ol>
-        </nav>
-    </div>
-
     <!-- 表单卡片 -->
     <div class="row">
         <div class="col-12">
@@ -40,11 +35,10 @@
 
 <!-- 固定在底部的操作栏 -->
 @include('admin.components.fixed-bottom-actions', [
-    'infoText' => '修改完成后点击保存按钮提交',
+    'formId' => 'editForm',
     'cancelUrl' => admin_route("u/{$model}"),
     'submitText' => '保存',
-    'formId' => 'editForm',
-    'submitBtnId' => 'submitBtn'
+    'infoText' => '修改完成后点击保存按钮提交'
 ])
 @push('admin-styles')
 <style>
@@ -64,7 +58,7 @@
         ? filemtime(BASE_PATH . '/public/js/components/universal-form-renderer.js')
         : time();
 @endphp
-<script src="/js/components/universal-form-renderer.js?v={{ $universalFormJsVersion }}"></script>
+@include('components.admin-script', ['path' => '/js/components/universal-form-renderer.js', 'version' => $universalFormJsVersion])
 <script>
 window.UniversalEditPage = {
     model: '{{ $model }}',
@@ -77,7 +71,7 @@ document.addEventListener('DOMContentLoaded', function () {
         console.error('[UniversalEdit] UniversalFormRenderer 未正确加载');
             return;
         }
-        
+
     new UniversalFormRenderer({
         schema: window.UniversalEditPage.formSchema,
         config: window.UniversalEditPage.config,

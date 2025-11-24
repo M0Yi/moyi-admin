@@ -413,6 +413,14 @@ async function toggleStatus(id, checkbox, apiUrlTemplate, field = 'status') {
             }
 
             console.log(`[ToggleStatus] 开关状态已更新为:`, checkbox.checked);
+
+            // 注意：切换状态后不刷新表格
+            // 原因：
+            // 1. 状态切换是局部操作，只影响当前行的状态字段，不影响其他数据
+            // 2. 开关状态已经通过 UI 更新（checkbox.checked 和样式），用户可以看到即时反馈
+            // 3. 刷新整个表格会重新加载所有数据，造成不必要的网络请求和页面闪烁
+            // 4. 如果用户需要查看最新数据，可以手动刷新页面或使用表格的刷新按钮
+            // refreshTable(checkbox); // 已禁用：不需要刷新表格
         } else {
             console.warn(`[ToggleStatus] 状态更新失败:`, {
                 recordId: id,
@@ -465,6 +473,79 @@ async function toggleStatus(id, checkbox, apiUrlTemplate, field = 'status') {
         checkbox.disabled = false;
         console.log(`[ToggleStatus] 开关已重新启用`);
     }
+}
+
+/**
+ * 刷新表格（自动检测并调用对应的刷新函数）
+ * 
+ * 注意：此函数当前未被使用
+ * 原因：状态切换是局部操作，开关状态已通过 UI 更新，不需要刷新整个表格
+ * 如果将来需要刷新功能，可以取消注释 toggleStatus 函数中的 refreshTable 调用
+ * 
+ * @param {HTMLInputElement} checkbox - 复选框元素
+ * @deprecated 当前未使用，保留以备将来需要
+ */
+function refreshTable(checkbox) {
+    // 方式1：从 checkbox 的 data-table-id 属性获取
+    const tableId = checkbox.dataset.tableId;
+    if (tableId) {
+        const refreshFn = window['loadData_' + tableId];
+        if (typeof refreshFn === 'function') {
+            console.log(`[ToggleStatus] 调用表格刷新函数: loadData_${tableId}`);
+            refreshFn();
+            return;
+        }
+    }
+
+    // 方式2：向上查找表格容器，尝试从容器ID获取 tableId
+    // 查找最近的表格容器（可能是 table 元素或包含表格的 div）
+    let element = checkbox;
+    let container = null;
+    
+    // 向上查找，最多查找10层
+    for (let i = 0; i < 10 && element; i++) {
+        element = element.parentElement;
+        if (!element) break;
+        
+        // 检查是否是表格容器（有 id 且包含 Table 关键字，或者是 table 元素）
+        if (element.id && (element.id.includes('Table') || element.tagName === 'TABLE')) {
+            container = element;
+            break;
+        }
+        
+        // 检查父元素是否有 data-table-id 属性
+        if (element.dataset && element.dataset.tableId) {
+            const tableIdFromData = element.dataset.tableId;
+            const refreshFn = window['loadData_' + tableIdFromData];
+            if (typeof refreshFn === 'function') {
+                console.log(`[ToggleStatus] 从父元素 data-table-id 找到表格刷新函数: loadData_${tableIdFromData}`);
+                refreshFn();
+                return;
+            }
+        }
+    }
+    
+    if (container && container.id) {
+        const containerId = container.id;
+        // 直接使用容器ID作为 tableId
+        const refreshFn = window['loadData_' + containerId];
+        if (typeof refreshFn === 'function') {
+            console.log(`[ToggleStatus] 从容器ID找到表格刷新函数: loadData_${containerId}`);
+            refreshFn();
+            return;
+        }
+    }
+
+    // 方式3：查找所有 loadData_* 函数，调用第一个找到的（作为后备方案）
+    for (const key in window) {
+        if (key.startsWith('loadData_') && typeof window[key] === 'function') {
+            console.log(`[ToggleStatus] 调用找到的表格刷新函数: ${key}`);
+            window[key]();
+            return;
+        }
+    }
+
+    console.log(`[ToggleStatus] 未找到表格刷新函数，跳过刷新`);
 }
 
 /* ==================== 防止自动填充函数 ==================== */

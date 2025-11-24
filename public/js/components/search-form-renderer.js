@@ -128,7 +128,8 @@
                         fieldHtml = this.renderNumberRange(field, fieldName, fieldLabel);
                         break;
                     case 'date_range':
-                        fieldHtml = this.renderDateRange(field, fieldName, fieldLabel);
+                    case 'datetime_range':
+                        fieldHtml = this.renderDateRange(field, fieldName, fieldLabel, fieldType);
                         break;
                     default:
                         fieldHtml = this.renderTextInput(field, fieldName, fieldLabel);
@@ -264,8 +265,8 @@
 
         renderDateInput(field, fieldName, fieldLabel, fieldType) {
             const isDatetime = fieldType === 'datetime';
-            const inputType = isDatetime ? 'datetime-local' : 'date';
-            return `<input type="${inputType}" name="filters[${fieldName}]" class="form-control">`;
+            const dataType = isDatetime ? 'datetime' : 'date';
+            return `<input type="text" name="filters[${fieldName}]" class="form-control" data-flatpickr-type="${dataType}" placeholder="请选择${fieldLabel}">`;
         }
 
         renderNumberRange(field, fieldName, fieldLabel) {
@@ -278,12 +279,20 @@
             `;
         }
 
-        renderDateRange(field, fieldName, fieldLabel) {
+        renderDateRange(field, fieldName, fieldLabel, searchType) {
+            // 检查搜索类型，如果是 datetime_range，则支持分钟级精度
+            // searchType 参数优先，如果没有则从 field.type 获取
+            const type = searchType || field.type || 'date_range';
+            const isDatetime = type === 'datetime_range';
+            const dataType = isDatetime ? 'datetime' : 'date';
+            const placeholder = isDatetime ? '开始日期时间' : '开始日期';
+            const placeholderEnd = isDatetime ? '结束日期时间' : '结束日期';
+            
             return `
                 <div class="input-group">
-                    <input type="date" name="filters[${fieldName}_min]" class="form-control" placeholder="开始日期">
+                    <input type="text" name="filters[${fieldName}_min]" class="form-control" data-flatpickr-type="${dataType}" placeholder="${placeholder}">
                     <span class="input-group-text">-</span>
-                    <input type="date" name="filters[${fieldName}_max]" class="form-control" placeholder="结束日期">
+                    <input type="text" name="filters[${fieldName}_max]" class="form-control" data-flatpickr-type="${dataType}" placeholder="${placeholderEnd}">
                 </div>
             `;
         }
@@ -316,16 +325,8 @@
         initializeEnhancements() {
             if (!this.form) return;
 
-            // 初始化日期选择器（如果使用了 flatpickr）
-            if (window.flatpickr) {
-                const dateInputs = this.form.querySelectorAll('input[type="date"], input[type="datetime-local"]');
-                dateInputs.forEach(input => {
-                    flatpickr(input, {
-                        dateFormat: input.type === 'datetime-local' ? 'Y-m-d H:i' : 'Y-m-d',
-                        locale: 'zh'
-                    });
-                });
-            }
+            // 初始化日期选择器（使用 Flatpickr）
+            this.initializeDateInputs();
 
             // 初始化关联字段的下拉框（如果使用了 Tom Select）
             if (window.TomSelect) {
@@ -354,6 +355,74 @@
                     });
                 });
             }
+        }
+
+        initializeDateInputs() {
+            if (typeof window.flatpickr !== 'function') {
+                console.warn('[SearchFormRenderer] Flatpickr 未加载，跳过日期选择器初始化');
+                return;
+            }
+
+            const dateInputs = this.form.querySelectorAll('input[data-flatpickr-type]');
+
+            dateInputs.forEach((input) => {
+                // 如果已经初始化过，跳过
+                if (input._flatpickr) {
+                    return;
+                }
+
+                const dataType = input.dataset.flatpickrType || 'date';
+                const isDisabled = input.hasAttribute('disabled');
+                const isReadonly = input.hasAttribute('readonly');
+
+                // 根据类型配置 Flatpickr
+                // 检查中文语言包是否已加载
+                const hasZhLocale = window.flatpickr && window.flatpickr.l10ns && window.flatpickr.l10ns.zh;
+                
+                let config = {
+                    locale: hasZhLocale ? 'zh' : 'default',
+                    allowInput: true,
+                    clickOpens: !isReadonly,
+                    disableMobile: false, // 在移动设备上也使用 Flatpickr
+                };
+
+                switch (dataType) {
+                    case 'datetime':
+                        config = {
+                            ...config,
+                            enableTime: true,
+                            time_24hr: true,
+                            dateFormat: 'Y-m-d H:i',
+                            altInput: false,
+                        };
+                        break;
+                    case 'time':
+                        config = {
+                            ...config,
+                            enableTime: true,
+                            noCalendar: true,
+                            time_24hr: true,
+                            dateFormat: 'H:i',
+                            altInput: false,
+                        };
+                        break;
+                    case 'date':
+                    default:
+                        config = {
+                            ...config,
+                            dateFormat: 'Y-m-d',
+                            altInput: false,
+                        };
+                        break;
+                }
+
+                // 初始化 Flatpickr
+                try {
+                    input._flatpickr = window.flatpickr(input, config);
+                } catch (error) {
+                    console.error('[SearchFormRenderer] Flatpickr 初始化失败', error, input);
+                }
+            });
         }
 
         attachFormSubmit() {

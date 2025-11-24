@@ -120,26 +120,50 @@ window.ADMIN_SITE_TITLE = @json(site()?->name ?? '管理后台');
     window.AdminIframeClient = {
         channel: channel,
         notify(action, payload) {
+            console.log('[AdminIframeClient] ========== notify 方法被调用 ==========');
+            console.log('[AdminIframeClient] action:', action);
+            console.log('[AdminIframeClient] payload:', payload);
+            console.log('[AdminIframeClient] channel:', channel);
+            console.log('[AdminIframeClient] window.parent === window:', window.parent === window);
+            
             if (window.parent === window) {
+                console.warn('[AdminIframeClient] 当前窗口就是顶层窗口，不发送消息');
                 return;
             }
 
             try {
-                window.parent.postMessage({
+                const message = {
                     channel: channel,
                     action: action,
                     payload: payload || {},
                     source: window.location.href
-                }, window.location.origin);
+                };
+                
+                console.log('[AdminIframeClient] 准备发送 postMessage:');
+                console.log('[AdminIframeClient] 消息内容:', JSON.stringify(message, null, 2));
+                console.log('[AdminIframeClient] 目标 origin:', window.location.origin);
+                
+                window.parent.postMessage(message, window.location.origin);
+                
+                console.log('[AdminIframeClient] postMessage 发送成功');
+                console.log('[AdminIframeClient] ========== notify 方法完成 ==========');
             } catch (error) {
                 console.error('[AdminIframeClient] notify error:', error);
+                console.error('[AdminIframeClient] 错误堆栈:', error.stack);
             }
         },
         close(payload) {
+            console.log('[AdminIframeClient] close() 被调用，payload:', payload);
             this.notify('close', payload);
         },
         success(payload) {
+            console.log('[AdminIframeClient] ========== success() 被调用 ==========');
+            console.log('[AdminIframeClient] payload:', payload);
+            console.log('[AdminIframeClient] payload.closeCurrent:', payload?.closeCurrent);
+            console.log('[AdminIframeClient] payload.refreshParent:', payload?.refreshParent);
+            console.log('[AdminIframeClient] payload.refreshUrl:', payload?.refreshUrl);
             this.notify('success', payload);
+            console.log('[AdminIframeClient] ========== success() 调用完成 ==========');
         },
         refreshMainFrame(payload) {
             const options = Object.assign({

@@ -318,6 +318,8 @@ thead .sticky-column {
 .fixed-bottom-actions-spacer {
     height: 80px; /* 按钮高度 + padding，根据实际调整 */
     width: 100%;
+    /* 确保占位区域始终存在，避免布局跳动 */
+    min-height: 80px;
 }
 
 .fixed-bottom-actions {
@@ -329,8 +331,16 @@ thead .sticky-column {
     box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.1);
     padding: 1rem 0;
     z-index: 1030;
-    animation: slideUp 0.3s ease-out;
-    transition: left 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    /* 初始状态：隐藏，等待 JavaScript 初始化完成后再显示 */
+    opacity: 0;
+    transform: translateY(100%);
+    transition: left 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease-out, transform 0.3s ease-out;
+}
+
+/* 初始化完成后显示动画 */
+.fixed-bottom-actions[data-initialized="1"] {
+    opacity: 1;
+    transform: translateY(0);
 }
 
 .sidebar.collapsed ~ main .fixed-bottom-actions,

@@ -14,7 +14,8 @@
         closeBtn: null,
         isOpen: false,
         config: null,
-        handlers: []
+        handlers: [],
+        listenersAttached: false  // 标记全局事件监听器是否已附加
     };
 
     const defaultOptions = {
@@ -173,12 +174,17 @@
             });
         }
 
+        // 只附加一次全局事件监听器（防止重复注册）
+        if (!state.listenersAttached) {
         window.addEventListener('message', handleMessage, false);
         doc.addEventListener('keydown', handleEscape, false);
         doc.addEventListener('click', handleTriggerClick, false);
+            state.listenersAttached = true;
+        }
     }
 
     function buildUrl(src, channel) {
+        try {
         const url = new URL(src, window.location.origin);
         url.searchParams.set('_embed', '1');
         if (channel) {
@@ -186,6 +192,11 @@
         }
         url.searchParams.set('_ts', Date.now().toString());
         return url.toString();
+        } catch (error) {
+            console.error('[IframeShell] buildUrl 失败:', error, 'src:', src);
+            // 降级处理：如果 URL 解析失败，返回原始 src（可能不安全，但至少不会完全失败）
+            return src;
+        }
     }
 
     function resolveTabUrl(sourceUrl) {
@@ -390,7 +401,9 @@
             return;
         }
 
-        if (event.source !== state.iframe.contentWindow) {
+        // 检查消息来源：确保来自当前打开的 iframe
+        // 注意：如果 iframe 已关闭（src 为 'about:blank'），contentWindow 可能为 null
+        if (state.iframe.contentWindow && event.source !== state.iframe.contentWindow) {
             return;
         }
 
@@ -482,18 +495,48 @@
 
         // 处理 refreshParent: true 消息
         // 智能查找最近的父级列表页面并刷新，而不是一直传递到最顶层
-        if (data.payload && typeof data.payload === 'object' && data.payload.refreshParent === true) {
+        // 支持多种类型：true, "true", 1
+        const refreshParent = data.payload && typeof data.payload === 'object' 
+            ? (data.payload.refreshParent === true || 
+               data.payload.refreshParent === 'true' || 
+               data.payload.refreshParent === 1)
+            : false;
+        
+        if (refreshParent) {
             console.log(`[IframeShell] 收到 refreshParent: true 消息，查找最近的父级列表页面`);
             
-            // 先检查当前页面是否有 loadData_dataTable 函数（说明这是列表页面）
+            // 智能检测：查找所有 loadData_* 函数（支持不同的 tableId）
+            // 优先检测 loadData_dataTable（兼容旧代码），然后检测其他 loadData_* 函数
+            let loadDataFunctions = [];
+            try {
+                loadDataFunctions = Object.keys(window).filter(key => 
+                    key.startsWith('loadData_') && typeof window[key] === 'function'
+                );
+            } catch (error) {
+                console.warn('[IframeShell] 检测 loadData_* 函数失败:', error);
+                // 降级：直接检查常见的函数名
             if (typeof window.loadData_dataTable === 'function') {
-                console.log(`[IframeShell] 当前页面是列表页面，在当前页面刷新数据表`);
+                    loadDataFunctions = ['loadData_dataTable'];
+                }
+            }
+            
+            if (loadDataFunctions.length > 0) {
+                // 优先使用 loadData_dataTable（如果存在）
+                const functionName = loadDataFunctions.includes('loadData_dataTable') 
+                    ? 'loadData_dataTable' 
+                    : loadDataFunctions[0];
+                
+                console.log(`[IframeShell] 当前页面是列表页面，检测到刷新函数: ${functionName}`, {
+                    allFunctions: loadDataFunctions,
+                    selectedFunction: functionName
+                });
+                
                 try {
-                    window.loadData_dataTable();
-                    console.log(`[IframeShell] 已触发当前页面的 loadData_dataTable() 刷新数据表`);
+                    window[functionName]();
+                    console.log(`[IframeShell] 已触发当前页面的 ${functionName}() 刷新数据表`);
                     return; // 在当前页面处理完成，不再向上传递
                 } catch (error) {
-                    console.warn('[IframeShell] 调用 loadData_dataTable() 失败:', error);
+                    console.warn(`[IframeShell] 调用 ${functionName}() 失败:`, error);
                     // 如果调用失败，继续向上传递
                 }
             }
