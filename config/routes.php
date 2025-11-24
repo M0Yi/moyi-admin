@@ -70,17 +70,25 @@ Router::addGroup('/admin/{adminPath:[a-zA-Z0-9\-_]+}', function () {
         // ========================================
             // 菜单管理
             // ========================================
-            Router::addGroup('/system/menus', function () {
-                Router::get('', 'App\Controller\Admin\System\MenuController@index');
-                Router::get('/create', 'App\Controller\Admin\System\MenuController@create');
-                Router::post('', 'App\Controller\Admin\System\MenuController@store');
-                Router::get('/{id:\d+}/edit', 'App\Controller\Admin\System\MenuController@edit');
-                Router::put('/{id:\d+}', 'App\Controller\Admin\System\MenuController@update');
-                Router::delete('/{id:\d+}', 'App\Controller\Admin\System\MenuController@destroy');
-                Router::post('/batch-destroy', 'App\Controller\Admin\System\MenuController@batchDestroy');
-                Router::post('/{id:\d+}/toggle-status', 'App\Controller\Admin\System\MenuController@toggleStatus');
-                Router::post('/update-sort', 'App\Controller\Admin\System\MenuController@updateSort');
-            });
+        Router::addGroup('/system/menus', function () {
+            Router::get('', 'App\Controller\Admin\System\MenuController@index');
+            Router::get('/create', 'App\Controller\Admin\System\MenuController@create');
+            Router::post('', 'App\Controller\Admin\System\MenuController@store');
+            Router::get('/{id:\d+}/edit', 'App\Controller\Admin\System\MenuController@edit');
+            Router::put('/{id:\d+}', 'App\Controller\Admin\System\MenuController@update');
+            Router::delete('/{id:\d+}', 'App\Controller\Admin\System\MenuController@destroy');
+            Router::post('/batch-destroy', 'App\Controller\Admin\System\MenuController@batchDestroy');
+            Router::post('/{id:\d+}/toggle-status', 'App\Controller\Admin\System\MenuController@toggleStatus');
+            Router::post('/update-sort', 'App\Controller\Admin\System\MenuController@updateSort');
+        });
+
+        // ========================================
+        // 站点设置
+        // ========================================
+        Router::addGroup('/system/sites', function () {
+            Router::get('', 'App\Controller\Admin\System\SiteController@edit');
+            Router::put('', 'App\Controller\Admin\System\SiteController@update');
+        });
 
         // ========================================
         // 图片上传 API（客户端直传PUT方案）

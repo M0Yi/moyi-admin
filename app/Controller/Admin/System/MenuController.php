@@ -187,7 +187,7 @@ class MenuController extends BaseModelCrudController
                 'last_page' => 1,
             ]);
         } catch (\Throwable $e) {
-            return $this->error($e->getMessage());
+            throw $e;
         }
     }
 
@@ -279,7 +279,7 @@ class MenuController extends BaseModelCrudController
         } catch (BusinessException $e) {
             return $this->error($e->getMessage(), [], $e->getCode());
         } catch (\Throwable $e) {
-            return $this->error($e->getMessage());
+            throw $e;
         }
     }
 
@@ -312,7 +312,7 @@ class MenuController extends BaseModelCrudController
         } catch (BusinessException $e) {
             return $this->error($e->getMessage(), [], $e->getCode());
         } catch (\Throwable $e) {
-            return $this->error($e->getMessage());
+            throw $e;
         }
     }
 
@@ -328,7 +328,7 @@ class MenuController extends BaseModelCrudController
         } catch (BusinessException $e) {
             return $this->error($e->getMessage(), [], $e->getCode());
         } catch (\Throwable $e) {
-            return $this->error($e->getMessage());
+            throw $e;
         }
     }
 
@@ -351,7 +351,7 @@ class MenuController extends BaseModelCrudController
         } catch (BusinessException $e) {
             return $this->error($e->getMessage(), [], $e->getCode());
         } catch (\Throwable $e) {
-            return $this->error($e->getMessage());
+            throw $e;
         }
     }
 
@@ -371,7 +371,7 @@ class MenuController extends BaseModelCrudController
 
             return $this->success([], '排序更新成功');
         } catch (\Throwable $e) {
-            return $this->error($e->getMessage());
+            throw $e;
         }
     }
 

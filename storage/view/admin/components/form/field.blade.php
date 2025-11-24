@@ -58,6 +58,9 @@
     @elseif($field['type'] === 'switch')
         @include('admin.components.form.switch', ['field' => $field, 'value' => $value ?? null])
 
+    @elseif($field['type'] === 'color')
+        @include('admin.components.form.color', ['field' => $field, 'value' => $value ?? null])
+
     @elseif($field['type'] === 'image')
         @include('admin.components.form.image', ['field' => $field, 'value' => $value ?? null])
 

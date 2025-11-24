@@ -608,7 +608,7 @@ abstract class BaseModelCrudController extends AbstractController
                 'field' => $field ?? 'status',
                 'error' => $e->getMessage(),
             ]);
-            return $this->error($e->getMessage());
+            throw $e;
         }
     }
 

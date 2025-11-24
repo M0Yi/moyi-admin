@@ -12,6 +12,9 @@
 - $showInfo: 是否显示提示信息（默认：true）
 - $autoDetectEmbed: 是否自动检测 iframe 环境（默认：true）
 - $onSuccess: 提交成功后的回调配置（默认：自动处理 iframe 关闭）
+    - close: 是否关闭当前 iframe（默认：true）
+    - refreshParent: 是否刷新父级标签页（默认：true）
+    - refreshMainFrame: bool|array 主框架整体刷新，array 可传 message/delay/toastType（默认：false）
 
 使用示例（最简）：
 @include('admin.components.fixed-bottom-actions', [
@@ -53,6 +56,10 @@
     $onSuccessMessage = $onSuccess['message'] ?? null; // 成功消息
     $onSuccessRedirect = $onSuccess['redirect'] ?? null; // 重定向 URL（非 iframe 环境）
     
+    $rawRefreshMainFrame = $onSuccess['refreshMainFrame'] ?? false;
+    $onSuccessRefreshMain = is_array($rawRefreshMainFrame) ? true : (bool) $rawRefreshMainFrame;
+    $onSuccessRefreshMainOptions = is_array($rawRefreshMainFrame) ? $rawRefreshMainFrame : [];
+    
     // 生成唯一 ID（如果未指定 formId，将在 JS 中自动查找）
     $componentId = 'fixed-bottom-actions-' . uniqid();
 @endphp
@@ -75,11 +82,15 @@
     data-auto-detect-embed="{{ $autoDetectEmbed ? '1' : '0' }}"
     data-on-success-close="{{ $onSuccessClose ? '1' : '0' }}"
     data-on-success-refresh="{{ $onSuccessRefresh ? '1' : '0' }}"
+    data-on-success-refresh-main="{{ $onSuccessRefreshMain ? '1' : '0' }}"
     @if($onSuccessMessage)
     data-on-success-message="{{ $onSuccessMessage }}"
     @endif
     @if($onSuccessRedirect)
     data-on-success-redirect="{{ $onSuccessRedirect }}"
+    @endif
+    @if(!empty($onSuccessRefreshMainOptions))
+    data-on-success-refresh-main-options='@json($onSuccessRefreshMainOptions)'
     @endif
 >
     <div class="container-fluid">
@@ -163,6 +174,16 @@
                     
                     component.dataset.initialized = '1';
                     
+                    const shouldRefreshMainFrame = component.dataset.onSuccessRefreshMain === '1';
+                    let refreshMainFrameOptions = null;
+                    if (component.dataset.onSuccessRefreshMainOptions) {
+                        try {
+                            refreshMainFrameOptions = JSON.parse(component.dataset.onSuccessRefreshMainOptions);
+                        } catch (error) {
+                            console.warn('[FixedBottomActions] 解析 refreshMainFrameOptions 失败:', error);
+                        }
+                    }
+
                     const config = {
                         formId: component.dataset.formId || null,
                         submitBtnId: component.dataset.submitBtnId || 'submitBtn',
@@ -177,7 +198,9 @@
                             close: component.dataset.onSuccessClose !== '0',
                             refreshParent: component.dataset.onSuccessRefresh !== '0',
                             message: component.dataset.onSuccessMessage || null,
-                            redirect: component.dataset.onSuccessRedirect || null
+                            redirect: component.dataset.onSuccessRedirect || null,
+                            refreshMainFrame: shouldRefreshMainFrame,
+                            refreshMainFrameOptions: refreshMainFrameOptions
                         }
                     };
                     
@@ -191,6 +214,7 @@
                     console.log('[FixedBottomActions] onSuccess 配置:', config.onSuccess);
                     console.log('[FixedBottomActions] onSuccess.close:', config.onSuccess.close);
                     console.log('[FixedBottomActions] onSuccess.refreshParent:', config.onSuccess.refreshParent);
+                    console.log('[FixedBottomActions] onSuccess.refreshMainFrame:', config.onSuccess.refreshMainFrame);
                     
                     // 更新组件标记
                     component.setAttribute('data-embed', isEmbeddedPage ? '1' : '0');
@@ -350,6 +374,31 @@
                                 try {
                                     window.AdminIframeClient.success(payload);
                                     console.log('[FixedBottomActions] AdminIframeClient.success() 调用成功');
+
+                                    if (config.onSuccess.refreshMainFrame) {
+                                        if (typeof window.AdminIframeClient.refreshMainFrame === 'function') {
+                                            const refreshOptions = Object.assign(
+                                                {},
+                                                config.onSuccess.refreshMainFrameOptions || {}
+                                            );
+
+                                            if (detail.refreshMainFrameOptions && typeof detail.refreshMainFrameOptions === 'object') {
+                                                Object.assign(refreshOptions, detail.refreshMainFrameOptions);
+                                            }
+
+                                            const messageSource = detail.refreshMainFrameMessage
+                                                || refreshOptions.message
+                                                || payload.message
+                                                || '主框架即将刷新以载入最新配置';
+
+                                            refreshOptions.message = messageSource;
+
+                                            console.log('[FixedBottomActions] 调用 AdminIframeClient.refreshMainFrame，参数:', refreshOptions);
+                                            window.AdminIframeClient.refreshMainFrame(refreshOptions);
+                                        } else {
+                                            console.warn('[FixedBottomActions] 已启用 refreshMainFrame 但 AdminIframeClient.refreshMainFrame 不可用');
+                                        }
+                                    }
                                 } catch (error) {
                                     console.error('[FixedBottomActions] AdminIframeClient.success() 调用失败:', error);
                                     console.error('[FixedBottomActions] 错误堆栈:', error.stack);

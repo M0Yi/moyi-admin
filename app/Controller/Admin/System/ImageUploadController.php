@@ -79,7 +79,7 @@ class ImageUploadController extends AbstractController
 
             return $this->success($token, '获取上传凭证成功');
         } catch (\Throwable $e) {
-            return $this->error($e->getMessage(), null, 500);
+            throw $e;
         }
     }
 

@@ -616,14 +616,25 @@ body:has(.sidebar.collapsed) .fixed-bottom-actions {
     width: 48px;
     height: 48px;
     border-radius: 14px;
-    background: var(--primary-gradient);
-    color: #fff;
     display: inline-flex;
     align-items: center;
     justify-content: center;
+    flex-shrink: 0;
+}
+
+/* 文字 logo（首字母）样式 */
+.sidebar-brand__logo:not(img) {
+    background: var(--primary-gradient);
+    color: #fff;
     font-weight: 700;
     font-size: 1.1rem;
     letter-spacing: 0.05em;
+}
+
+/* 图片 logo 样式 */
+img.sidebar-brand__logo {
+    object-fit: cover;
+    background: transparent;
 }
 
 .sidebar-brand__text {

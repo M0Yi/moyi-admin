@@ -10,7 +10,8 @@
         ->toArray();
     $sidebarMenus = AdminMenu::buildTree($sidebarMenus);
     $siteName = site()?->name ?? '管理后台';
-    $siteDescription = site()?->description ?? '智能管理中心';
+    $siteSlogan = site()?->slogan ?? '';
+    $siteLogo = site()?->logo ?? null;
     $siteInitial = function_exists('mb_substr') ? mb_substr($siteName, 0, 1) : substr($siteName, 0, 1);
 @endphp
 
@@ -19,10 +20,16 @@
 <div class="sidebar" id="sidebar">
     <div class="sidebar-header">
         <a href="{{ admin_route('dashboard') }}" class="sidebar-brand">
-            <span class="sidebar-brand__logo">{{ $siteInitial }}</span>
+            @if($siteLogo)
+                <img src="{{ $siteLogo }}" alt="{{ $siteName }}" class="sidebar-brand__logo">
+            @else
+                <span class="sidebar-brand__logo">{{ $siteInitial }}</span>
+            @endif
             <span class="sidebar-brand__text">
                 <span class="sidebar-brand__title">{{ $siteName }}</span>
-                <span class="sidebar-brand__desc">{{ $siteDescription }}</span>
+                @if($siteSlogan)
+                    <span class="sidebar-brand__desc">{{ $siteSlogan }}</span>
+                @endif
             </span>
         </a>
     </div>

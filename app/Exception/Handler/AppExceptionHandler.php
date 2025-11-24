@@ -12,8 +12,11 @@ declare(strict_types=1);
 
 namespace App\Exception\Handler;
 
+use App\Exception\BusinessException;
+use App\Exception\ValidationException;
 use Hyperf\Context\Context;
 use Hyperf\Contract\StdoutLoggerInterface;
+use Hyperf\Database\Exception\QueryException;
 use Hyperf\ExceptionHandler\ExceptionHandler;
 use Hyperf\HttpMessage\Exception\MethodNotAllowedHttpException;
 use Hyperf\HttpMessage\Exception\NotFoundHttpException;
@@ -37,6 +40,41 @@ class AppExceptionHandler extends ExceptionHandler
 
         $request = Context::get(ServerRequestInterface::class);
         $isApiRequest = $this->isApiRequest($request);
+
+        if ($throwable instanceof BusinessException) {
+            $payload = [
+                'code' => $throwable->getCode() > 0 ? $throwable->getCode() : 500,
+                'msg' => $throwable->getMessage(),
+                'data' => null,
+            ];
+
+            return $this->jsonResponse($response, $payload, 200);
+        }
+
+        if ($throwable instanceof ValidationException) {
+            $payload = [
+                'code' => 422,
+                'msg' => $throwable->getMessage(),
+                'data' => null,
+                'errors' => $throwable->getErrors(),
+            ];
+
+            return $this->jsonResponse($response, $payload, 200);
+        }
+
+        if ($throwable instanceof QueryException) {
+            $message = str_contains($throwable->getMessage(), '1142')
+                ? '数据库权限不足，请联系管理员'
+                : '系统繁忙，请稍后再试';
+
+            $payload = [
+                'code' => 500,
+                'msg' => $message,
+                'data' => null,
+            ];
+
+            return $this->jsonResponse($response, $payload, 500);
+        }
 
         if (! $isApiRequest) {
             if ($throwable instanceof NotFoundHttpException) {
@@ -85,6 +123,15 @@ class AppExceptionHandler extends ExceptionHandler
     public function isValid(Throwable $throwable): bool
     {
         return true;
+    }
+
+    protected function jsonResponse(ResponseInterface $response, array $payload, int $status = 200): ResponseInterface
+    {
+        return $response
+            ->withHeader('Server', 'Hyperf')
+            ->withHeader('Content-Type', 'application/json; charset=utf-8')
+            ->withStatus($status)
+            ->withBody(new SwooleStream((string) json_encode($payload, JSON_UNESCAPED_UNICODE)));
     }
 
     /**

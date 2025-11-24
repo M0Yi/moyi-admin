@@ -489,10 +489,8 @@ class CrudGeneratorController extends AbstractController
         }
         $config = $query->first();
 
-        print_r(['467']);
         // 处理字段配置中的默认值
         $fieldsConfig = $this->processDefaultValues($data['fields_config'] ?? []);
-        print_r(['470']);
 
         // 记录用于创建菜单的字段的旧值（用于判断是否需要更新菜单）
         $oldMenuValues = [
@@ -551,23 +549,17 @@ class CrudGeneratorController extends AbstractController
 
         // 获取数据库连接名称（默认为 'default'）
         $dbConnection = $data['db_connection'] ?? 'default';
-        print_r(['512'=>$data['route_slug']]);
         $routeSlugInput = $this->normalizeRouteSlug($data['route_slug'] ?? null);
-        print_r(['512'=>$routeSlugInput]);
 
         if ($routeSlugInput === '') {
 
             $routeSlugInput = $this->guessRouteSlug($tableName);
         }
-        print_r(['520'=>$data['route_prefix']]);
 
         $routePrefixInput = $this->normalizeRoutePrefix($data['route_prefix'] ?? null);
         if ($routePrefixInput === '') {
-            print_r(['524']);
-
             $routePrefixInput = $this->guessRoutePrefix($tableName, $routeSlugInput);
         }
-        print_r(['526'=>$dbConnection,$config?'oo':'xxx']);
 
         if ($config) {
             $config->update([
@@ -621,16 +613,13 @@ class CrudGeneratorController extends AbstractController
                 'status' => $status,
             ]);
         }
-        print_r(['572'=>$syncToMenu?'oo':'xx']);
 
         // 自动管理菜单规则
         // 如果启用了菜单同步，检查用于创建菜单的字段是否有变化
         if ($syncToMenu) {
 
-            print_r(['578'=>$config]);
             // 获取新值（需要重新加载配置以获取更新后的值）
             $config->refresh();
-            print_r(['580'=>$config]);
             $newMenuValues = [
                 'model_name' => $config->model_name,
                 'module_name' => $config->module_name,
@@ -655,17 +644,10 @@ class CrudGeneratorController extends AbstractController
                     ];
                 }
             }
-            logger()->error('[CRUD配置保存V2] 菜单相关字段未变化，跳过菜单同步');
-            print_r(['$menuValuesChanged'=>$menuValuesChanged?'ooo':'xxx']);
-            print_r(['log'=>[
-                'config_id' => $config->id,
-                'menu_values' => $newMenuValues,
-            ]]);
             logger()->info('[CRUD配置保存V2] 菜单相关字段未变化，跳过菜单同步哈哈哈', [
                 'config_id' => $config->id,
                 'menu_values' => $newMenuValues,
             ]);
-            print_r(['$config->id'=>$config->id,'$newMenuValues'=>$newMenuValues]);
             if ($menuValuesChanged) {
                 logger()->info('[CRUD配置保存V2] 检测到菜单相关字段变化，准备同步菜单', [
                     'config_id' => $config->id,

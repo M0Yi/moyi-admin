@@ -465,8 +465,12 @@
         }
         console.log(logMessage);
 
-        // 显示消息提示（如果 payload 中包含 message）
-        if (data.payload && typeof data.payload === 'object' && data.payload.message) {
+        // 显示消息提示（如果 payload 中包含 message，且不是 refresh-main，避免重复提示）
+        const shouldShowToast = data.payload 
+            && typeof data.payload === 'object' 
+            && data.payload.message 
+            && data.action !== 'refresh-main';
+        if (shouldShowToast) {
             showMessageToast(data.action, data.payload.message, data.payload.toastType);
         }
 
@@ -862,6 +866,15 @@
         }, payload || {});
 
         if (bubbleRefreshToParent(options)) {
+            return;
+        }
+
+        // 如果当前窗口就是主框架且存在 TabManager，则交由 TabManager 统一处理，避免重复提示与多次刷新
+        const hasTabManager = window.self === window.top 
+            && window.Admin 
+            && window.Admin.tabManager;
+        if (hasTabManager) {
+            console.log('[IframeShell] 检测到 TabManager，refresh-main 交由其处理');
             return;
         }
 
