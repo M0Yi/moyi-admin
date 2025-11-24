@@ -1,10 +1,28 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
+    @php
+        $site = site();
+        $siteName = $site?->name ?? '管理系统';
+        $siteTitle = $site?->title ?? $siteName;
+        $siteSlogan = $site?->slogan ?? '欢迎登录';
+        $siteLogo = $site?->logo;
+        $primaryColor = $site?->primary_color ?: '#6366f1';
+        $primaryHover = $site?->secondary_color ?: '#575bf0';
+        $initialSource = $siteName !== '' ? $siteName : 'A';
+        if (function_exists('mb_substr')) {
+            $initialSource = mb_substr($initialSource, 0, 1);
+        } else {
+            $initialSource = substr($initialSource, 0, 1);
+        }
+        $siteInitial = function_exists('mb_strtoupper')
+            ? mb_strtoupper($initialSource)
+            : strtoupper($initialSource);
+    @endphp
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="theme-color" content="#667eea">
-    <title>登录 - 管理后台</title>
+    <meta name="theme-color" content="{{ $primaryColor }}">
+    <title>{{ $siteTitle }} - 登录</title>
     <style>
         * {
             margin: 0;
@@ -13,8 +31,8 @@
         }
 
         :root {
-            --primary: #6366f1;
-            --primary-hover: #575bf0;
+            --primary: {{ $primaryColor }};
+            --primary-hover: {{ $primaryHover }};
             --card-bg: #ffffff;
             --card-border: #e5e7eb;
             --text: #0f172a;
@@ -74,6 +92,12 @@
             font-size: 28px;
             font-weight: 700;
             box-shadow: 0 6px 18px rgba(99, 102, 241, 0.35);
+        }
+        .login-logo img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            border-radius: 14px;
         }
 
         .login-title {
@@ -278,9 +302,19 @@
     <div class="login-container">
         <div class="login-card">
             <div class="login-header">
-                <div class="login-logo">A</div>
-                <h1 class="login-title">管理后台</h1>
-                <p class="login-subtitle">{{ site()?->name ?? '欢迎登录' }}</p>
+                <div class="login-logo">
+                    @if ($siteLogo)
+                        <img src="{{ $siteLogo }}" alt="{{ $siteTitle }}">
+                    @else
+                        {{ $siteInitial }}
+                    @endif
+                </div>
+                <h1 class="login-title">{{ $siteTitle }}</h1>
+                <p class="login-subtitle">{{ $siteSlogan }}</p>
+            </div>
+
+            <div id="demoAlert" class="alert alert-success" style="display: none;">
+                体验账号：demo 密码：moyi123456
             </div>
 
             <div id="alert" style="display: none;"></div>
@@ -332,12 +366,19 @@
             </form>
 
             <div class="login-footer">
-                <p>&copy; 2024 管理系统. All rights reserved.</p>
+                <p>&copy; {{ date('Y') }} {{ $siteName }}. All rights reserved.</p>
             </div>
         </div>
     </div>
 
     <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const demoAlert = document.getElementById('demoAlert');
+            if (demoAlert && window.location.pathname === '/admin/demo/login') {
+                demoAlert.style.display = 'block';
+            }
+        });
+
         function showAlert(message, type = 'danger') {
             const alertDiv = document.getElementById('alert');
             alertDiv.className = `alert alert-${type}`;
@@ -376,7 +417,7 @@
 
                 const data = await response.json();
 
-                if (data.code === 200 || data.code === 0) {
+                if (data.code === 200) {
                     window.location.replace(data.data.redirect);
                     return;
                 } else {
