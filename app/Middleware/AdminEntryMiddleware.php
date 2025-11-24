@@ -51,14 +51,12 @@ class AdminEntryMiddleware implements MiddlewareInterface
         $adminPath = $this->request->route('adminPath');
 
         if (!$adminPath) {
-            print_r(['未找到路径参数']);
             // 未找到路径参数
             return $this->denyAccess();
         }
 
         // 验证 adminPath 是否与当前站点的 admin_entry_path 匹配
         $site = site();
-//        print_r(['$site'=>$site]);
         if (!$site || $site->admin_entry_path !== $adminPath) {
             // 记录非法访问
             $this->logIllegalAccess($request, $adminPath);
@@ -99,16 +97,15 @@ class AdminEntryMiddleware implements MiddlewareInterface
      */
     protected function denyAccess(): ResponseInterface
     {
-        print_r(['Error denyAccess']);
         // 返回 404 而不是 403，避免暴露后台存在
         if($this->request->getMethod() == 'GET'){
             return $this->render->render('errors.admin_illegal_access');
         }
 
         return $this->response->json([
-            'msg' => '404 Not Found',
-            'code' => 404,
-            'data' => []
+            'code' => 403,
+            'message' => '非法访问',
+            'data' => null
         ]);
     }
 

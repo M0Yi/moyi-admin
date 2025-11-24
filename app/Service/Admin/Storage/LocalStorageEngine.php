@@ -50,12 +50,17 @@ class LocalStorageEngine implements StorageEngineInterface
             throw new \RuntimeException("不支持的文件类型：{$contentType}");
         }
 
-        // 获取站点ID和管理员ID
+        // 获取站点信息
         $siteId = site_id();
+        $siteDirectory = $this->getSiteDirectorySegment();
         $adminId = $this->getAdminId();
         
         if (!$siteId) {
             throw new \RuntimeException('无法获取站点ID，请确保已登录且站点已配置');
+        }
+        
+        if (empty($siteDirectory)) {
+            throw new \RuntimeException('无法生成站点目录名称，请检查站点域名配置');
         }
         
         if (!$adminId) {
@@ -65,9 +70,9 @@ class LocalStorageEngine implements StorageEngineInterface
         // 生成安全的文件名
         $safeFilename = $this->generateSafeFilename($filename);
 
-        // 生成文件路径（站点ID/管理员ID/子路径/日期/文件名）
+        // 生成文件路径（站点域名/管理员ID/子路径/日期/文件名）
         $datePath = date('Y/m/d');
-        $relativePath = "{$siteId}/{$adminId}/{$subPath}/{$datePath}/{$safeFilename}";
+        $relativePath = "{$siteDirectory}/{$adminId}/{$subPath}/{$datePath}/{$safeFilename}";
         $fullPath = $this->getStoragePath() . '/' . $relativePath;
 
         // 确保目录存在
@@ -135,8 +140,8 @@ class LocalStorageEngine implements StorageEngineInterface
      */
     public function getFileUrl(string $path): string
     {
-        // 路径格式：{site_id}/{admin_id}/images/2024/01/01/xxx.jpg
-        // 访问URL：/uploads/{site_id}/{admin_id}/images/2024/01/01/xxx.jpg
+        // 路径格式：{site_domain}/{admin_id}/images/2024/01/01/xxx.jpg
+        // 访问URL：/uploads/{site_domain}/{admin_id}/images/2024/01/01/xxx.jpg
         
         // 优先从站点配置读取公共访问路径
         $publicPath = $this->getPublicPath();
@@ -322,6 +327,54 @@ class LocalStorageEngine implements StorageEngineInterface
         
         // 如果没有请求对象，返回相对路径（向后兼容）
         return $fullPath;
+    }
+
+    /**
+     * 获取站点目录名称（使用域名并替换特殊字符为下划线）
+     */
+    private function getSiteDirectorySegment(): string
+    {
+        $site = site();
+        $candidates = [];
+
+        if ($site) {
+            if (!empty($site->domain)) {
+                $candidates[] = $site->domain;
+            }
+
+            if (!empty($site->name)) {
+                $candidates[] = $site->name;
+            }
+        }
+
+        foreach ($candidates as $value) {
+            $sanitized = $this->sanitizeDirectorySegment((string) $value);
+            if ($sanitized !== '') {
+                return $sanitized;
+            }
+        }
+
+        $siteId = site_id();
+        if ($siteId !== null) {
+            return 'site_' . $siteId;
+        }
+
+        return '';
+    }
+
+    /**
+     * 将目录名称中的特殊字符格式化为下划线
+     */
+    private function sanitizeDirectorySegment(string $value): string
+    {
+        $value = strtolower($value);
+        $sanitized = preg_replace('/[^a-z0-9]+/i', '_', $value);
+        if ($sanitized === null) {
+            return '';
+        }
+
+        $sanitized = trim($sanitized, '_');
+        return $sanitized;
     }
 }
 

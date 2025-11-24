@@ -196,7 +196,6 @@ class UniversalCrudController extends AbstractController
 
             return $this->success($result);
         } catch (\Throwable $e) {
-            print_r($e);
             return $this->error($e->getMessage());
         }
     }

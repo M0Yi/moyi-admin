@@ -153,8 +153,8 @@ class ImageUploadController extends AbstractController
 
     /**
      * 保存文件到本地存储
-     * 文件路径格式：{site_id}/{admin_id}/images/2024/01/01/xxx.jpg
-     * 存储位置：public/uploads/{site_id}/{admin_id}/images/2024/01/01/xxx.jpg
+     * 文件路径格式：{site_domain}/{admin_id}/images/2024/01/01/xxx.jpg
+     * 存储位置：public/uploads/{site_domain}/{admin_id}/images/2024/01/01/xxx.jpg
      */
     private function saveLocalFile(string $relativePath, string $content): void
     {

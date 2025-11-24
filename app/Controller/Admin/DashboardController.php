@@ -18,7 +18,6 @@ class DashboardController extends AbstractController
      */
     public function index()
     {
-//        print_r(['admin_id'=>auth('admin')->id(),'admin'=>auth('admin')->user()['id'],auth('admin')->user()]);
         // 获取统计数据
         $stats = [
             'users' => [

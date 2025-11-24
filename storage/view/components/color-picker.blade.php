@@ -87,7 +87,9 @@ window.ColorPickerPresetColors = window.ColorPickerPresetColors || @json(array_v
 
 .color-swatch {
     width: 100%;
+    padding: 0;
     padding-top: 100%;
+    aspect-ratio: 1 / 1;
     position: relative;
     border-radius: 0.5rem;
     border: 2px solid transparent;
@@ -111,6 +113,12 @@ window.ColorPickerPresetColors = window.ColorPickerPresetColors || @json(array_v
 .color-swatch.selected {
     border-color: #0d6efd;
     box-shadow: 0 0 0 2px rgba(13, 110, 253, 0.35);
+}
+
+.color-swatch:focus-visible {
+    outline: 2px solid rgba(13, 110, 253, 0.9);
+    outline-offset: 2px;
+    box-shadow: 0 0 0 3px rgba(13, 110, 253, 0.35);
 }
 
 .color-preview-swatch {
