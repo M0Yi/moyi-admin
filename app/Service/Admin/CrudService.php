@@ -204,6 +204,28 @@ class CrudService
 
         return "App\\Model\\Admin\\{$className}";
     }
+
+    /**
+     * 获取数据库连接名称
+     */
+    protected function getConnectionName(array $options = []): string
+    {
+        $connection = $options['connection'] ?? 'default';
+        if (is_string($connection) && $connection !== '') {
+            return $connection;
+        }
+
+        return 'default';
+    }
+
+    /**
+     * 获取数据库连接实例
+     */
+    protected function getConnection(array $options = [])
+    {
+        $connectionName = $this->getConnectionName($options);
+        return Db::connection($connectionName);
+    }
     /**
      * 查找单条记录
      *
@@ -238,7 +260,8 @@ class CrudService
         }
 
         // 使用 DB 查询
-        $query = Db::table($resolved['table'])->where('id', $id);
+        $connection = $this->getConnection($options);
+        $query = $connection->table($resolved['table'])->where('id', $id);
 
         // 添加站点过滤（超级管理员跳过）
         if ($hasSiteId && $siteId && !is_super_admin()) {
@@ -320,7 +343,8 @@ class CrudService
         }
 
         // 使用 DB 插入
-        return (int) Db::table($resolved['table'])->insertGetId($data);
+        $connection = $this->getConnection($options);
+        return (int) $connection->table($resolved['table'])->insertGetId($data);
     }
 
     /**
@@ -403,7 +427,8 @@ class CrudService
         }
 
         // 使用 DB 更新
-        $query = Db::table($resolved['table'])->where('id', $id);
+        $connection = $this->getConnection($options);
+        $query = $connection->table($resolved['table'])->where('id', $id);
 
         // 添加站点过滤（超级管理员跳过）
         $hasSiteId = $options['has_site_id'] ?? false;
@@ -465,7 +490,8 @@ class CrudService
         }
 
         // 使用 DB 删除
-        $query = Db::table($resolved['table'])->where('id', $id);
+        $connection = $this->getConnection($options);
+        $query = $connection->table($resolved['table'])->where('id', $id);
 
         // 添加站点过滤（超级管理员跳过）
         $hasSiteId = $options['has_site_id'] ?? false;
@@ -549,7 +575,8 @@ class CrudService
         }
 
         // 使用 DB 批量删除
-        $query = Db::table($resolved['table'])->whereIn('id', $ids);
+        $connection = $this->getConnection($options);
+        $query = $connection->table($resolved['table'])->whereIn('id', $ids);
 
         // 添加站点过滤（超级管理员跳过）
         $hasSiteId = $options['has_site_id'] ?? false;
@@ -656,7 +683,7 @@ class CrudService
      * @param string $tableName 表名
      * @return array 列信息数组，每个元素包含：name, type, label, comment, nullable, default
      */
-    public function getTableColumnsFromDatabase(string $tableName): array
+    public function getTableColumnsFromDatabase(string $tableName, string $connection = 'default'): array
     {
         // 验证并转义表名，防止 SQL 注入
         $this->validateTableName($tableName);
@@ -664,7 +691,8 @@ class CrudService
 
         // 使用参数化查询（虽然表名不能参数化，但我们已经验证了格式）
         // 注意：SHOW 语句不支持参数绑定，所以必须验证表名格式
-        $columns = Db::select("SHOW FULL COLUMNS FROM {$safeTableName}");
+        $db = Db::connection($connection);
+        $columns = $db->select("SHOW FULL COLUMNS FROM {$safeTableName}");
 
         $result = [];
         foreach ($columns as $column) {

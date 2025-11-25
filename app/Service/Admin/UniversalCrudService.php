@@ -170,6 +170,7 @@ class UniversalCrudService
 
         return [
             'table' => $crudConfig->table_name,
+            'db_connection' => $crudConfig->db_connection ?? 'default',
             'model_class' => $crudConfig->model_name,
             'title' => $crudConfig->module_name,
             'route_slug' => $crudConfig->route_slug,
@@ -758,9 +759,10 @@ class UniversalCrudService
     {
         $tableName = $this->getTableName($model);
         $config = $this->getModelConfig($model);
+        $connection = $this->getConnection($config);
         $relations = $config['relations'] ?? [];
 
-        $query = Db::table($tableName . ' as main');
+        $query = $connection->table($tableName . ' as main');
 
         // 获取需要查询的字段（只查询可列出的字段）
         $selectFields = $this->getListableFields($config, $params);
@@ -901,13 +903,33 @@ class UniversalCrudService
 //            $query->where('main.site_id', site_id());
 //        }
 
-        // 回收站过滤：只查询已删除的记录
+        // 回收站过滤：根据配置决定是否启用 deleted_at 过滤
         $onlyTrashed = $params['only_trashed'] ?? false;
-        if ($onlyTrashed) {
-            $query->whereNotNull('main.deleted_at');
-        } else {
-            // 正常列表：只查询未删除的记录
-            $query->whereNull('main.deleted_at');
+        $softDeleteEnabled = !empty($config['soft_delete'])
+            || (!empty($config['features']['soft_delete']) && filter_var($config['features']['soft_delete'], FILTER_VALIDATE_BOOLEAN));
+        $hasDeletedAtColumn = $softDeleteEnabled;
+
+        if (!$hasDeletedAtColumn) {
+            $columns = $config['columns'] ?? [];
+            foreach ($columns as $column) {
+                if (($column['name'] ?? '') === 'deleted_at') {
+                    $hasDeletedAtColumn = true;
+                    break;
+                }
+            }
+        }
+
+        if ($hasDeletedAtColumn) {
+            if ($onlyTrashed) {
+                $query->whereNotNull('main.deleted_at');
+            } else {
+                // 正常列表：只查询未删除的记录
+                $query->whereNull('main.deleted_at');
+            }
+        } elseif ($onlyTrashed) {
+            logger()->warning('[UniversalCrudService] 请求了回收站数据但未启用软删除', [
+                'table' => $config['table'] ?? null,
+            ]);
         }
 
         // 搜索条件
@@ -1031,7 +1053,7 @@ class UniversalCrudService
                     
                     if ($relationTable && !empty($ids)) {
                         $multipleRelationQueries++;
-                        $multipleQuery = Db::table($relationTable)
+                        $multipleQuery = $connection->table($relationTable)
                             ->whereIn($valueField, $ids);
                         
                         // 如果有 site_id，添加站点过滤
@@ -1072,7 +1094,7 @@ class UniversalCrudService
                         
                         if ($relationTable) {
                             $multipleRelationQueries++;
-                            $multipleQuery = Db::table($relationTable)
+                            $multipleQuery = $connection->table($relationTable)
                                 ->whereIn($valueField, $ids);
                             
                             $labels = $multipleQuery->pluck($labelField, $valueField)->toArray();
@@ -1121,8 +1143,9 @@ class UniversalCrudService
         $tableName = $this->getTableName($model);
         $config = $this->getModelConfig($model);
         $relations = $config['relations'] ?? [];
+        $connection = $this->getConnection($config);
 
-        $query = Db::table($tableName . ' as main');
+        $query = $connection->table($tableName . ' as main');
 
         // 获取需要查询的字段（只查询可列出的字段）
         $selectFields = $this->getListableFields($config, $params);
@@ -1310,7 +1333,7 @@ class UniversalCrudService
                     $hasSiteId = $mapping['has_site_id'] ?? true;
                     
                     if ($relationTable && !empty($ids)) {
-                        $multipleQuery = Db::table($relationTable)
+                        $multipleQuery = $connection->table($relationTable)
                             ->whereIn($valueField, $ids);
                         
                         if ($hasSiteId && $siteId) {
@@ -1344,7 +1367,7 @@ class UniversalCrudService
                         $hasSiteId = $relation['has_site_id'] ?? true;
                         
                         if ($relationTable) {
-                            $multipleQuery = Db::table($relationTable)
+                            $multipleQuery = $connection->table($relationTable)
                                 ->whereIn($valueField, $ids);
                             
                             if ($hasSiteId && $siteId) {
@@ -1440,8 +1463,9 @@ class UniversalCrudService
         $tableName = $this->getTableName($model);
         $config = $this->getModelConfig($model);
         $relations = $config['relations'] ?? [];
+        $connection = $this->getConnection($config);
 
-        $query = Db::table($tableName . ' as main');
+        $query = $connection->table($tableName . ' as main');
 
         // 获取需要查询的字段（只查询可列出的字段）
         $selectFields = $this->getListableFields($config, $params);
@@ -1627,7 +1651,7 @@ class UniversalCrudService
                     $hasSiteId = $mapping['has_site_id'] ?? true;
                     
                     if ($relationTable && !empty($ids)) {
-                        $multipleQuery = Db::table($relationTable)
+                        $multipleQuery = $connection->table($relationTable)
                             ->whereIn($valueField, $ids);
                         
                         if ($hasSiteId && $siteId) {
@@ -1661,7 +1685,7 @@ class UniversalCrudService
                         $hasSiteId = $relation['has_site_id'] ?? true;
                         
                         if ($relationTable) {
-                            $multipleQuery = Db::table($relationTable)
+                            $multipleQuery = $connection->table($relationTable)
                                 ->whereIn($valueField, $ids);
                             
                             if ($hasSiteId && $siteId) {
@@ -2680,6 +2704,7 @@ class UniversalCrudService
 
         return $this->crudService->find($tableName, $id, [
             'has_site_id' => !empty($config['has_site_id']),
+            'connection' => $this->getConnectionName($config),
         ]);
     }
 
@@ -2698,6 +2723,7 @@ class UniversalCrudService
             'fillable' => $config['fillable'] ?? null,
             'has_site_id' => !empty($config['has_site_id']),
             'timestamps' => !empty($config['timestamps']),
+            'connection' => $this->getConnectionName($config),
         ]);
     }
 
@@ -2736,17 +2762,12 @@ class UniversalCrudService
             $data['updated_at'] = date('Y-m-d H:i:s');
         }
 
-        // 使用 DB 更新
-        $query = Db::table($tableName)->where('id', $id);
-
-        // 添加站点过滤（超级管理员跳过）
-        $hasSiteId = !empty($config['has_site_id']);
-        $siteId = site_id();
-        if ($hasSiteId && $siteId && !is_super_admin()) {
-            $query->where('site_id', $siteId);
-        }
-
-        return $query->update($data) > 0;
+        return $this->crudService->update($tableName, $id, $data, [
+            'fillable' => $config['fillable'] ?? null,
+            'has_site_id' => !empty($config['has_site_id']),
+            'timestamps' => !empty($config['timestamps']),
+            'connection' => $this->getConnectionName($config),
+        ]);
     }
 
     /**
@@ -2787,6 +2808,7 @@ class UniversalCrudService
         return $this->crudService->delete($tableName, $id, [
             'has_site_id' => !empty($config['has_site_id']),
             'soft_delete' => !empty($config['soft_delete']),
+            'connection' => $this->getConnectionName($config),
         ]);
     }
 
@@ -2801,6 +2823,7 @@ class UniversalCrudService
         return $this->crudService->batchDelete($tableName, $ids, [
             'has_site_id' => !empty($config['has_site_id']),
             'soft_delete' => !empty($config['soft_delete']),
+            'connection' => $this->getConnectionName($config),
         ]);
     }
 
@@ -2814,6 +2837,7 @@ class UniversalCrudService
 
         return $this->crudService->toggleField($tableName, $id, $field, [
             'has_site_id' => !empty($config['has_site_id']),
+            'connection' => $this->getConnectionName($config),
         ]);
     }
 
@@ -2833,7 +2857,7 @@ class UniversalCrudService
 
         // 否则从数据库读取
         $tableName = $this->getTableName($model);
-        return $this->getTableColumnsFromDatabase($tableName);
+        return $this->getTableColumnsFromDatabase($tableName, $config);
     }
 
     /**
@@ -2850,7 +2874,7 @@ class UniversalCrudService
 
         // 否则从数据库读取并自动生成
         $tableName = $this->getTableName($model);
-        $columns = $this->getTableColumnsFromDatabase($tableName);
+        $columns = $this->getTableColumnsFromDatabase($tableName, $config);
 
         return $this->generateFormFieldsFromColumns($columns, $scene);
     }
@@ -2862,6 +2886,7 @@ class UniversalCrudService
     {
         $config = $this->getModelConfig($model);
         $relations = $config['relations'] ?? [];
+        $connection = $this->getConnection($config);
 
         $options = [];
         foreach ($relations as $field => $relation) {
@@ -2870,7 +2895,7 @@ class UniversalCrudService
             $valueField = $relation['value_field'] ?? 'id';
 
             if ($relationTable) {
-                $query = Db::table($relationTable);
+                $query = $connection->table($relationTable);
 
                 // 如果关联表也有站点过滤（超级管理员跳过）
                 if (!empty($relation['has_site_id']) && site_id() && !is_super_admin()) {
@@ -2962,9 +2987,12 @@ class UniversalCrudService
     /**
      * 从数据库获取表列信息
      */
-    protected function getTableColumnsFromDatabase(string $tableName): array
+    protected function getTableColumnsFromDatabase(string $tableName, array $config): array
     {
-        return $this->crudService->getTableColumnsFromDatabase($tableName);
+        return $this->crudService->getTableColumnsFromDatabase(
+            $tableName,
+            $this->getConnectionName($config)
+        );
     }
 
     /**
@@ -3116,6 +3144,7 @@ class UniversalCrudService
 
         return [
             'table' => $tableName,
+            'db_connection' => 'default',
             'model_class' => $modelClass,
             'title' => $model,
             'timestamps' => true,
@@ -3125,6 +3154,28 @@ class UniversalCrudService
             'default_sort_field' => 'id',
             'default_sort_order' => 'desc',
         ];
+    }
+
+    /**
+     * 获取配置所使用的数据库连接名称
+     */
+    protected function getConnectionName(array $config): string
+    {
+        $connection = $config['db_connection'] ?? $config['connection'] ?? null;
+        if (is_string($connection) && $connection !== '') {
+            return $connection;
+        }
+
+        return 'default';
+    }
+
+    /**
+     * 根据配置获取数据库连接实例
+     */
+    protected function getConnection(array $config)
+    {
+        $connectionName = $this->getConnectionName($config);
+        return Db::connection($connectionName);
     }
 
     /**
@@ -3179,6 +3230,7 @@ class UniversalCrudService
     {
         $tableName = $this->getTableName($model);
         $config = $this->getModelConfig($model);
+        $connection = $this->getConnection($config);
 
         // 检查是否启用软删除
         if (empty($config['soft_delete'])) {
@@ -3186,7 +3238,7 @@ class UniversalCrudService
         }
 
         // 使用 DB 恢复
-        $query = Db::table($tableName)->where('id', $id)->whereNotNull('deleted_at');
+        $query = $connection->table($tableName)->where('id', $id)->whereNotNull('deleted_at');
 
         // 添加站点过滤（超级管理员跳过）
         $hasSiteId = !empty($config['has_site_id']);
@@ -3205,9 +3257,10 @@ class UniversalCrudService
     {
         $tableName = $this->getTableName($model);
         $config = $this->getModelConfig($model);
+        $connection = $this->getConnection($config);
 
         // 使用 DB 永久删除
-        $query = Db::table($tableName)->where('id', $id)->whereNotNull('deleted_at');
+        $query = $connection->table($tableName)->where('id', $id)->whereNotNull('deleted_at');
 
         // 添加站点过滤（超级管理员跳过）
         $hasSiteId = !empty($config['has_site_id']);
@@ -3226,6 +3279,7 @@ class UniversalCrudService
     {
         $tableName = $this->getTableName($model);
         $config = $this->getModelConfig($model);
+        $connection = $this->getConnection($config);
 
         // 检查是否启用软删除
         if (empty($config['soft_delete'])) {
@@ -3244,7 +3298,7 @@ class UniversalCrudService
         $ids = array_values(array_unique($ids));
 
         // 使用 DB 批量恢复
-        $query = Db::table($tableName)->whereIn('id', $ids)->whereNotNull('deleted_at');
+        $query = $connection->table($tableName)->whereIn('id', $ids)->whereNotNull('deleted_at');
 
         // 添加站点过滤（超级管理员跳过）
         $hasSiteId = !empty($config['has_site_id']);
@@ -3263,6 +3317,7 @@ class UniversalCrudService
     {
         $tableName = $this->getTableName($model);
         $config = $this->getModelConfig($model);
+        $connection = $this->getConnection($config);
 
         if (empty($ids)) {
             return 0;
@@ -3276,7 +3331,7 @@ class UniversalCrudService
         $ids = array_values(array_unique($ids));
 
         // 使用 DB 批量永久删除
-        $query = Db::table($tableName)->whereIn('id', $ids)->whereNotNull('deleted_at');
+        $query = $connection->table($tableName)->whereIn('id', $ids)->whereNotNull('deleted_at');
 
         // 添加站点过滤（超级管理员跳过）
         $hasSiteId = !empty($config['has_site_id']);
@@ -3295,6 +3350,7 @@ class UniversalCrudService
     {
         $tableName = $this->getTableName($model);
         $config = $this->getModelConfig($model);
+        $connection = $this->getConnection($config);
 
         // 检查是否启用软删除
         if (empty($config['soft_delete'])) {
@@ -3302,7 +3358,7 @@ class UniversalCrudService
         }
 
         // 使用 DB 永久删除所有已删除的记录
-        $query = Db::table($tableName)->whereNotNull('deleted_at');
+        $query = $connection->table($tableName)->whereNotNull('deleted_at');
 
         // 添加站点过滤（超级管理员跳过）
         $hasSiteId = !empty($config['has_site_id']);

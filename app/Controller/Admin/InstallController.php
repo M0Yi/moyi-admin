@@ -387,74 +387,74 @@ class InstallController extends AbstractController
             ]
         );
 
-//       AdminMenu::query()->firstOrCreate(
-//           ['site_id' => $siteId, 'path' => '/system/users'],
-//           [
-//               'parent_id' => $system->id,
-//               'name' => 'system.users',
-//               'title' => '用户管理',
-//               'icon' => 'bi bi-people',
-//               'component' => null,
-//               'redirect' => null,
-//               'type' => AdminMenu::TYPE_MENU,
-//               'target' => AdminMenu::TARGET_SELF,
-//               'badge' => null,
-//               'badge_type' => null,
-//               'permission' => 'system.users.view',
-//               'visible' => 1,
-//               'status' => 1,
-//               'sort' => 1,
-//               'cache' => 1,
-//               'config' => null,
-//               'remark' => null,
-//           ]
-//       );
-//
-//       AdminMenu::query()->firstOrCreate(
-//           ['site_id' => $siteId, 'path' => '/system/roles'],
-//           [
-//               'parent_id' => $system->id,
-//               'name' => 'system.roles',
-//               'title' => '角色管理',
-//               'icon' => 'bi bi-person-badge',
-//               'component' => null,
-//               'redirect' => null,
-//               'type' => AdminMenu::TYPE_MENU,
-//               'target' => AdminMenu::TARGET_SELF,
-//               'badge' => null,
-//               'badge_type' => null,
-//               'permission' => 'system.roles.view',
-//               'visible' => 1,
-//               'status' => 1,
-//               'sort' => 2,
-//               'cache' => 1,
-//               'config' => null,
-//               'remark' => null,
-//           ]
-//       );
-//
-//       AdminMenu::query()->firstOrCreate(
-//           ['site_id' => $siteId, 'path' => '/system/permissions'],
-//           [
-//               'parent_id' => $system->id,
-//               'name' => 'system.permissions',
-//               'title' => '权限管理',
-//               'icon' => 'bi bi-shield-check',
-//               'component' => null,
-//               'redirect' => null,
-//               'type' => AdminMenu::TYPE_MENU,
-//               'target' => AdminMenu::TARGET_SELF,
-//               'badge' => null,
-//               'badge_type' => null,
-//               'permission' => 'system.permissions.view',
-//               'visible' => 1,
-//               'status' => 1,
-//               'sort' => 3,
-//               'cache' => 1,
-//               'config' => null,
-//               'remark' => null,
-//           ]
-//       );
+      AdminMenu::query()->firstOrCreate(
+          ['site_id' => $siteId, 'path' => '/system/users'],
+          [
+              'parent_id' => $system->id,
+              'name' => 'system.users',
+              'title' => '用户管理',
+              'icon' => 'bi bi-people',
+              'component' => null,
+              'redirect' => null,
+              'type' => AdminMenu::TYPE_MENU,
+              'target' => AdminMenu::TARGET_SELF,
+              'badge' => null,
+              'badge_type' => null,
+              'permission' => 'system.users.view',
+              'visible' => 1,
+              'status' => 1,
+              'sort' => 1,
+              'cache' => 1,
+              'config' => null,
+              'remark' => null,
+          ]
+      );
+
+      AdminMenu::query()->firstOrCreate(
+          ['site_id' => $siteId, 'path' => '/system/roles'],
+          [
+              'parent_id' => $system->id,
+              'name' => 'system.roles',
+              'title' => '角色管理',
+              'icon' => 'bi bi-person-badge',
+              'component' => null,
+              'redirect' => null,
+              'type' => AdminMenu::TYPE_MENU,
+              'target' => AdminMenu::TARGET_SELF,
+              'badge' => null,
+              'badge_type' => null,
+              'permission' => 'system.roles.view',
+              'visible' => 1,
+              'status' => 1,
+              'sort' => 2,
+              'cache' => 1,
+              'config' => null,
+              'remark' => null,
+          ]
+      );
+
+      AdminMenu::query()->firstOrCreate(
+          ['site_id' => $siteId, 'path' => '/system/permissions'],
+          [
+              'parent_id' => $system->id,
+              'name' => 'system.permissions',
+              'title' => '权限管理',
+              'icon' => 'bi bi-shield-check',
+              'component' => null,
+              'redirect' => null,
+              'type' => AdminMenu::TYPE_MENU,
+              'target' => AdminMenu::TARGET_SELF,
+              'badge' => null,
+              'badge_type' => null,
+              'permission' => 'system.permissions.view',
+              'visible' => 1,
+              'status' => 1,
+              'sort' => 3,
+              'cache' => 1,
+              'config' => null,
+              'remark' => null,
+          ]
+      );
 
        AdminMenu::query()->firstOrCreate(
            ['site_id' => $siteId, 'path' => '/system/menus'],

@@ -98,6 +98,48 @@ Router::addGroup('/admin/{adminPath:[a-zA-Z0-9\-_]+}', function () {
         });
 
         // ========================================
+        // 用户管理
+        // ========================================
+        Router::addGroup('/system/users', function () {
+            Router::get('', 'App\Controller\Admin\System\UserController@index');
+            Router::get('/create', 'App\Controller\Admin\System\UserController@create');
+            Router::post('', 'App\Controller\Admin\System\UserController@store');
+            Router::get('/{id:\d+}/edit', 'App\Controller\Admin\System\UserController@edit');
+            Router::put('/{id:\d+}', 'App\Controller\Admin\System\UserController@update');
+            Router::delete('/{id:\d+}', 'App\Controller\Admin\System\UserController@destroy');
+            Router::post('/batch-destroy', 'App\Controller\Admin\System\UserController@batchDestroy');
+            Router::post('/{id:\d+}/toggle-status', 'App\Controller\Admin\System\UserController@toggleStatus');
+        });
+
+        // ========================================
+        // 角色管理
+        // ========================================
+        Router::addGroup('/system/roles', function () {
+            Router::get('', 'App\Controller\Admin\System\RoleController@index');
+            Router::get('/create', 'App\Controller\Admin\System\RoleController@create');
+            Router::post('', 'App\Controller\Admin\System\RoleController@store');
+            Router::get('/{id:\d+}/edit', 'App\Controller\Admin\System\RoleController@edit');
+            Router::put('/{id:\d+}', 'App\Controller\Admin\System\RoleController@update');
+            Router::delete('/{id:\d+}', 'App\Controller\Admin\System\RoleController@destroy');
+            Router::post('/batch-destroy', 'App\Controller\Admin\System\RoleController@batchDestroy');
+            Router::post('/{id:\d+}/toggle-status', 'App\Controller\Admin\System\RoleController@toggleStatus');
+        });
+
+        // ========================================
+        // 权限管理
+        // ========================================
+        Router::addGroup('/system/permissions', function () {
+            Router::get('', 'App\Controller\Admin\System\PermissionController@index');
+            Router::get('/create', 'App\Controller\Admin\System\PermissionController@create');
+            Router::post('', 'App\Controller\Admin\System\PermissionController@store');
+            Router::get('/{id:\d+}/edit', 'App\Controller\Admin\System\PermissionController@edit');
+            Router::put('/{id:\d+}', 'App\Controller\Admin\System\PermissionController@update');
+            Router::delete('/{id:\d+}', 'App\Controller\Admin\System\PermissionController@destroy');
+            Router::post('/batch-destroy', 'App\Controller\Admin\System\PermissionController@batchDestroy');
+            Router::post('/{id:\d+}/toggle-status', 'App\Controller\Admin\System\PermissionController@toggleStatus');
+        });
+
+        // ========================================
         // 站点设置
         // ========================================
         Router::addGroup('/system/sites', function () {
