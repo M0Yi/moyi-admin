@@ -1,5 +1,5 @@
 @php
-    $errorDetails = [];
+    use function Hyperf\Config\config;$errorDetails = [];
     $shouldShowDetails = config('app.env') === 'local' || config('app.debug');
     if ($shouldShowDetails && !empty($errorMessage)) {
         $errorDetails[] = ['label' => '错误信息', 'value' => $errorMessage];

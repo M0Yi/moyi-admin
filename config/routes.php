@@ -9,7 +9,6 @@ declare(strict_types=1);
  * @contact  group@hyperf.io
  * @license  https://github.com/hyperf/hyperf/blob/master/LICENSE
  */
-use Hyperf\HttpMessage\Stream\SwooleStream;
 use Hyperf\HttpServer\Contract\ResponseInterface;
 use Hyperf\HttpServer\Router\Router;
 use function Hyperf\Support\make;
@@ -43,7 +42,6 @@ Router::addGroup('/admin/{adminPath:[a-zA-Z0-9\-_]+}', function () {
     ]);
     
     Router::get('/logout', 'App\Controller\Admin\AuthController@logout');
-    Router::get('', 'App\Controller\Admin\DashboardController@index');
 
     // ========================================
     // CRUD 代码生成器（系统管理，仅超级管理员可访问）
@@ -212,6 +210,5 @@ Router::addGroup('/admin/{adminPath:[a-zA-Z0-9\-_]+}', function () {
 Router::get('/favicon.ico', function () {
     /** @var ResponseInterface $response */
     $response = make(ResponseInterface::class);
-
     return $response->withStatus(204);
 });
