@@ -28,11 +28,8 @@ class InstallController extends AbstractController
      */
     public function index(): \Psr\Http\Message\ResponseInterface
     {
-        // 检查是否已经初始化
         if ($this->isInstalled()) {
-            return $this->render->render('admin.install.installed', [
-                'message' => '系统已经初始化，如需重新初始化，清空数据库重试）',
-            ]);
+            return $this->render->render('errors.admin_illegal_access');
         }
 
         return $this->render->render('admin.install.index');
@@ -618,6 +615,10 @@ class InstallController extends AbstractController
      */
     public function checkEnvironment(HttpResponse $response): \Psr\Http\Message\ResponseInterface
     {
+        if ($this->isInstalled()) {
+            return $this->render->render('errors.admin_illegal_access');
+        }
+
         $checks = [
             'php_version' => [
                 'name' => 'PHP 版本',
