@@ -10,7 +10,6 @@ use App\Exception\ValidationException;
 use App\Model\Admin\AdminMenu;
 use App\Service\Admin\MenuService;
 use Hyperf\Di\Annotation\Inject;
-use Hyperf\HttpServer\Annotation\Controller;
 use Hyperf\HttpServer\Contract\RequestInterface;
 use Psr\Http\Message\ResponseInterface;
 
@@ -19,7 +18,6 @@ use Psr\Http\Message\ResponseInterface;
  * 
  * 基于 BaseModelCrudController 重构，减少重复代码
  */
-#[Controller]
 class MenuController extends BaseModelCrudController
 {
     #[Inject]

@@ -9,9 +9,6 @@ use App\Model\Admin\AdminCrudConfig;
 use App\Service\Admin\CrudGeneratorService;
 use App\Service\Admin\DatabaseService;
 use Hyperf\Di\Annotation\Inject;
-use Hyperf\HttpServer\Annotation\Controller;
-use Hyperf\HttpServer\Annotation\GetMapping;
-use Hyperf\HttpServer\Annotation\PostMapping;
 use Psr\Http\Message\ResponseInterface;
 
 class CrudGeneratorController extends AbstractController
@@ -60,7 +57,6 @@ class CrudGeneratorController extends AbstractController
     /**
      * 配置页面 - 选择字段和配置属性
      */
-    #[GetMapping('config/{tableName}')]
     public function config(string $tableName): ResponseInterface
     {
 

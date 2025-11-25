@@ -171,6 +171,64 @@
             color: #666;
         }
 
+        .captcha-group {
+            display: flex;
+            gap: 10px;
+            align-items: flex-start;
+        }
+
+        .captcha-input {
+            flex: 1;
+        }
+
+        .captcha-image-wrapper {
+            position: relative;
+            flex-shrink: 0;
+        }
+
+        .captcha-image {
+            width: 120px;
+            height: 40px;
+            border: 2px solid #e2e8f0;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            object-fit: cover;
+        }
+
+        .captcha-image:hover {
+            border-color: var(--primary);
+            box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.12);
+        }
+
+        .captcha-image:active {
+            transform: scale(0.98);
+        }
+
+        .captcha-refresh {
+            position: absolute;
+            top: -8px;
+            right: -8px;
+            width: 24px;
+            height: 24px;
+            background: var(--primary);
+            border: 2px solid white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            font-size: 12px;
+            color: white;
+            transition: all 0.3s ease;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+        }
+
+        .captcha-refresh:hover {
+            background: var(--primary-hover);
+            transform: rotate(90deg);
+        }
+
         .btn {
             width: 100%;
             padding: 12px;
@@ -350,6 +408,17 @@
                     >
                 </div>
 
+                {{-- 使用验证码组件 --}}
+                @include('components.captcha', [
+                    'name' => 'captcha',
+                    'id' => 'captcha',
+                    'label' => '验证码',
+                    'placeholder' => '请输入验证码',
+                    'required' => false,
+                    'captchaUrl' => $captchaUrl ?? '/captcha',
+                    'showFreeToken' => true,
+                ])
+
                 <div class="form-check">
                     <input
                         type="checkbox"
@@ -372,6 +441,7 @@
     </div>
 
     <script>
+        // 页面加载时
         document.addEventListener('DOMContentLoaded', () => {
             const demoAlert = document.getElementById('demoAlert');
             if (demoAlert && window.location.pathname === '/admin/demo/login') {
@@ -397,22 +467,37 @@
             const btn = document.getElementById('loginBtn');
             const form = document.getElementById('loginForm');
             const formData = new FormData(form);
+            const captchaGroup = document.getElementById('captchaGroup');
 
             // 禁用按钮并显示加载状态
             btn.disabled = true;
             btn.innerHTML = '<span class="loading"></span>登录中...';
 
             try {
+                // 构建请求数据
+                const requestData = {
+                    username: formData.get('username'),
+                    password: formData.get('password'),
+                    remember: formData.get('remember') ? 1 : 0,
+                };
+
+                // 如果有免验证码令牌，带上令牌（使用组件提供的函数）
+                const freeToken = window.getFreeToken_captcha ? window.getFreeToken_captcha() : null;
+                if (freeToken) {
+                    requestData.free_token = freeToken;
+                }
+
+                // 只有在显示验证码输入框时才发送验证码
+                if (captchaGroup && captchaGroup.style.display !== 'none') {
+                    requestData.captcha = formData.get('captcha') || '';
+                }
+
                 const response = await fetch(window.location.pathname, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                     },
-                    body: JSON.stringify({
-                        username: formData.get('username'),
-                        password: formData.get('password'),
-                        remember: formData.get('remember') ? 1 : 0,
-                    }),
+                    body: JSON.stringify(requestData),
                 });
 
                 const data = await response.json();
@@ -422,9 +507,16 @@
                     return;
                 } else {
                     // 登录失败
-                    showAlert(data.message || '登录失败');
+                    const errorMsg = data.msg || data.message || '登录失败';
+                    showAlert(errorMsg);
                     btn.disabled = false;
                     btn.innerHTML = '登录';
+                    
+                    // 登录失败后，刷新验证码（刷新时会自动从接口获取最新的 free_token 状态）
+                    // 如果之前不需要验证码（有 free_token），失败后 free_token 会被清除，需要验证码
+                    if (window.refreshCaptcha_captcha) {
+                        await window.refreshCaptcha_captcha();
+                    }
                 }
             } catch (error) {
                 console.error('登录错误:', error);

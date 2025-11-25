@@ -10,7 +10,6 @@ use App\Exception\ValidationException;
 use App\Model\Admin\AdminSite;
 use Hyperf\Database\Exception\QueryException;
 use Hyperf\Di\Annotation\Inject;
-use Hyperf\HttpServer\Annotation\Controller;
 use Hyperf\HttpServer\Contract\RequestInterface;
 use Hyperf\Validation\Contract\ValidatorFactoryInterface;
 use Psr\Http\Message\ResponseInterface;
@@ -18,7 +17,6 @@ use Psr\Http\Message\ResponseInterface;
 /**
  * 站点设置控制器
  */
-#[Controller]
 class SiteController extends AbstractController
 {
     #[Inject]
@@ -105,16 +103,8 @@ class SiteController extends AbstractController
         unset($data['existing_s3_secret']);
 
         // 更新站点
-        try {
-            $site->fill($data);
-            $site->save();
-        } catch (QueryException $exception) {
-            if (str_contains($exception->getMessage(), '1142')) {
-                throw new BusinessException(500, '数据库权限不足，请联系管理员');
-            }
-
-            throw new BusinessException(500, '保存失败，请稍后再试');
-        }
+        $site->fill($data);
+        $site->save();
 
         return $this->success(null, '保存成功');
     }

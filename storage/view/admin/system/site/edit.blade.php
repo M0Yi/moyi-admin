@@ -548,6 +548,27 @@
 // 记录当前选择的存储类型
 let currentStorageType = null;
 
+/**
+ * 使用统一的提示弹窗（Toast），若不可用则降级为 alert
+ * @param {string} type 提示类型：success | danger | warning | info
+ * @param {string} message 提示内容
+ */
+function showFeedbackToast(type = 'info', message = '') {
+    const finalMessage = message || (type === 'success' ? '操作成功' : '操作失败');
+
+    if (window.Admin && typeof window.Admin.utils?.showToast === 'function') {
+        window.Admin.utils.showToast(type, finalMessage);
+        return;
+    }
+
+    if (typeof window.showToast === 'function') {
+        window.showToast(type, finalMessage);
+        return;
+    }
+
+    alert(finalMessage);
+}
+
 // 自定义上传配置开关
 document.addEventListener('DOMContentLoaded', function() {
     const useCustomUpload = document.getElementById('useCustomUpload');
@@ -836,7 +857,7 @@ function submitFormAsJson(form, formData, submitBtn, id) {
 
         // 验证必填字段
         if (!s3Cdn) {
-            alert('请填写 CDN 域名，这是必填项，用于访问图片');
+            showFeedbackToast('danger', '请填写 CDN 域名，这是必填项，用于访问图片');
             submitBtn.disabled = false;
             submitBtn.innerHTML = '保存';
             const cdnInput = document.querySelector('[name="s3_cdn"]');
@@ -912,14 +933,14 @@ function submitFormAsJson(form, formData, submitBtn, id) {
             submitBtn.disabled = false;
             submitBtn.innerHTML = '保存';
         } else {
-            alert(data.msg || data.message || '保存失败');
+            showFeedbackToast('danger', data.msg || data.message || '保存失败');
             submitBtn.disabled = false;
             submitBtn.innerHTML = '保存';
         }
     })
     .catch(error => {
         console.error('Error:', error);
-        alert('保存失败：' + error.message);
+        showFeedbackToast('danger', '保存失败：' + error.message);
         submitBtn.disabled = false;
         submitBtn.innerHTML = '保存';
     });

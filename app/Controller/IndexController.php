@@ -12,7 +12,6 @@ declare(strict_types=1);
 
 namespace App\Controller;
 use Hyperf\Database\Connection;
-use Hyperf\HttpServer\Annotation\AutoController;
 use Hyperf\View\RenderInterface;
 use Psr\Http\Message\ResponseInterface;
 use function Hyperf\ViewEngine\view;
@@ -23,7 +22,7 @@ use Hyperf\Contract\ConfigInterface;
 use Hyperf\Database\Schema\Schema;
 use Hyperf\Database\Schema\Blueprint;
 use Hyperf\Database\Migrations\Migration;
-#[AutoController]
+
 class IndexController extends AbstractController
 {
     protected string $connection = 'admin';

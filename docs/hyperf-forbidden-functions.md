@@ -164,7 +164,69 @@ $appName = config('app.name');
 {{ $appName }}
 ```
 
-### 8. `collect()` - 集合操作
+### 8. `request()` - 请求对象
+
+#### ❌ 禁止使用（在 Blade 模板中）
+```blade
+{{-- 错误：request() 函数在 Hyperf Blade 模板中不存在 --}}
+@php
+    $currentPath = request()->getUri()->getPath();
+    $checkUrl = preg_replace('/\/login$/', '/login/check-captcha', $currentPath);
+@endphp
+```
+
+#### ✅ Hyperf 替代方案
+
+**方式1：在控制器中获取并传递给视图（推荐）**
+
+```php
+// 控制器中
+use Hyperf\HttpServer\Contract\RequestInterface;
+
+class AuthController extends AbstractController
+{
+    public function __construct(
+        protected RequestInterface $request
+    ) {}
+
+    public function login(): \Psr\Http\Message\ResponseInterface
+    {
+        // 获取当前请求路径，用于构建验证码检查 URL
+        $currentPath = $this->request->getUri()->getPath();
+        $checkCaptchaUrl = preg_replace('/\/login$/', '/login/check-captcha', $currentPath);
+        
+        return $this->render->render('admin.auth.login', [
+            'checkCaptchaUrl' => $checkCaptchaUrl,
+        ]);
+    }
+}
+```
+
+```blade
+{{-- 模板中直接使用传递的变量 --}}
+@include('components.captcha', [
+    'checkUrl' => $checkCaptchaUrl ?? '/admin/login/check-captcha',
+])
+```
+
+**方式2：使用 PHP 全局变量（不推荐，仅用于简单场景）**
+
+```blade
+{{-- 仅在必要时使用，不推荐 --}}
+@php
+    $currentPath = $_SERVER['REQUEST_URI'] ?? '/';
+    // 注意：需要手动处理查询字符串
+    $currentPath = parse_url($currentPath, PHP_URL_PATH);
+@endphp
+```
+
+**说明**：
+- Hyperf 中 `request()` 辅助函数在 Blade 模板中不可用
+- **必须在控制器中通过依赖注入获取 `RequestInterface` 对象**
+- 在控制器中处理请求信息，然后通过 `render()` 方法传递给视图
+- Blade 模板应该只负责展示，不包含复杂的业务逻辑
+
+### 9. `collect()` - 集合操作
 
 #### ❌ 禁止使用
 ```php
@@ -210,7 +272,7 @@ $filtered = array_filter($users, fn($user) => $user['status'] === 1);
 - `config()` - 配置访问（Laravel 风格）
 - `collect()` - 集合辅助函数
 - `now()` - 当前时间（使用 Carbon 或 DateTime）
-- `request()` - 请求对象（使用依赖注入）
+- `request()` - 请求对象（在 Blade 模板中不可用，必须在控制器中通过依赖注入获取）
 - `auth()` - 认证（使用依赖注入）
 - `session()` - Session（使用依赖注入）
 - `public_path()` - 公共目录路径（使用 BASE_PATH）
@@ -233,8 +295,10 @@ $filtered = array_filter($users, fn($user) => $user['status'] === 1);
 - [ ] 不使用 `route()`，直接使用路径字符串
 - [ ] 不使用 `old()`，从 `$oldInput` 数组获取
 - [ ] 不使用 `csrf_token()`，从 `$csrfToken` 变量获取
+- [ ] 不使用 `request()`，在控制器中获取请求信息并传递给视图
 - [ ] 不使用 `collect()`，使用原生 PHP 数组函数
 - [ ] 不使用 `config()`，从控制器传递配置到视图
+- [ ] 不在模板中使用 `@php` 块处理复杂逻辑，应在控制器中处理
 
 ## 相关文档
 

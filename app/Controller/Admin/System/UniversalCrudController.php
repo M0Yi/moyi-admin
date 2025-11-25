@@ -8,11 +8,12 @@ use App\Controller\AbstractController;
 use App\Exception\BusinessException;
 use App\Exception\ValidationException;
 use App\Service\Admin\UniversalCrudService;
+use Hyperf\DbConnection\Exception\QueryException;
 use Hyperf\Di\Annotation\Inject;
-use Hyperf\HttpServer\Annotation\Controller;
 use Hyperf\HttpServer\Contract\RequestInterface;
 use Hyperf\HttpServer\Contract\ResponseInterface;
 use Hyperf\Validation\Contract\ValidatorFactoryInterface;
+use PDOException;
 use Psr\Http\Message\ResponseInterface as PsrResponseInterface;
 
 /**
@@ -138,6 +139,7 @@ class UniversalCrudController extends AbstractController
                         $filters = [];
                     }
                 } catch (\Throwable $e) {
+                    $this->rethrowIfDatabaseException($e);
                     logger()->error('[UniversalCrudController] JSON 解析异常', [
                         'error' => $e->getMessage(),
                         'trace' => $e->getTraceAsString(),
@@ -196,6 +198,7 @@ class UniversalCrudController extends AbstractController
 
             return $this->success($result);
         } catch (\Throwable $e) {
+            $this->rethrowIfDatabaseException($e);
             return $this->error($e->getMessage());
         }
     }
@@ -353,6 +356,7 @@ class UniversalCrudController extends AbstractController
                                     $value = [$value];
                                 }
                             } catch (\Throwable $e) {
+                                $this->rethrowIfDatabaseException($e);
                                 // 解析失败，保持原值
                             }
                         } elseif (!is_array($value)) {
@@ -376,6 +380,7 @@ class UniversalCrudController extends AbstractController
                                     }
                                 }
                             } catch (\Throwable $e) {
+                                $this->rethrowIfDatabaseException($e);
                                 // 解析失败，保持原值
                             }
                         }
@@ -432,6 +437,7 @@ class UniversalCrudController extends AbstractController
                                 $value = [$value];
                             }
                         } catch (\Throwable $e) {
+                            $this->rethrowIfDatabaseException($e);
                             // 解析失败，保持原值
                         }
                     } elseif (!is_array($value)) {
@@ -450,6 +456,7 @@ class UniversalCrudController extends AbstractController
                                 $value = array_filter(array_map('trim', explode(',', $value)));
                             }
                         } catch (\Throwable $e) {
+                            $this->rethrowIfDatabaseException($e);
                             // 解析失败，保持原值
                         }
                     }
@@ -496,6 +503,7 @@ class UniversalCrudController extends AbstractController
         } catch (BusinessException $e) {
             return $this->error($e->getMessage(), [], $e->getCode());
         } catch (\Throwable $e) {
+            $this->rethrowIfDatabaseException($e);
             return $this->error($e->getMessage());
         }
     }
@@ -594,6 +602,7 @@ class UniversalCrudController extends AbstractController
         } catch (BusinessException $e) {
             return $this->error($e->getMessage(), [], $e->getCode());
         } catch (\Throwable $e) {
+            $this->rethrowIfDatabaseException($e);
             return $this->error($e->getMessage());
         }
     }
@@ -643,6 +652,7 @@ class UniversalCrudController extends AbstractController
                         );
                     }
                 } catch (\Throwable $e) {
+                    $this->rethrowIfDatabaseException($e);
                     // 如果无法获取模型类，忽略错误，使用配置中的 soft_delete 选项
                     logger()->warning('[UniversalCrudController] 无法检查模型 SoftDeletes trait', [
                         'model' => $model,
@@ -666,6 +676,7 @@ class UniversalCrudController extends AbstractController
 
             return $this->success([], $message);
         } catch (\Throwable $e) {
+            $this->rethrowIfDatabaseException($e);
             logger()->error('[UniversalCrudController] 删除记录失败', [
                 'model' => $model,
                 'id' => $id,
@@ -727,6 +738,7 @@ class UniversalCrudController extends AbstractController
 
             return $this->success([], '状态更新成功');
         } catch (\Throwable $e) {
+            $this->rethrowIfDatabaseException($e);
             return $this->error($e->getMessage());
         }
     }
@@ -1140,6 +1152,7 @@ class UniversalCrudController extends AbstractController
                         $filters = [];
                     }
                 } catch (\Throwable $e) {
+                    $this->rethrowIfDatabaseException($e);
                     $filters = [];
                 }
             } elseif (!is_array($filters)) {
@@ -1276,6 +1289,7 @@ class UniversalCrudController extends AbstractController
                 throw $e;
             }
         } catch (\Throwable $e) {
+            $this->rethrowIfDatabaseException($e);
             logger()->error('[UniversalCrudController] 导出失败', [
                 'model' => $model,
                 'error' => $e->getMessage(),
@@ -1396,6 +1410,7 @@ class UniversalCrudController extends AbstractController
                 ],
             ]);
         } catch (\Throwable $e) {
+            $this->rethrowIfDatabaseException($e);
             return $this->error($e->getMessage(), code:500);
         }
     }
@@ -1476,6 +1491,7 @@ class UniversalCrudController extends AbstractController
                         $filters = [];
                     }
                 } catch (\Throwable $e) {
+                    $this->rethrowIfDatabaseException($e);
                     $filters = [];
                 }
             } elseif (!is_array($filters)) {
@@ -1513,6 +1529,7 @@ class UniversalCrudController extends AbstractController
 
             return $this->success($result);
         } catch (\Throwable $e) {
+            $this->rethrowIfDatabaseException($e);
             return $this->error($e->getMessage());
         }
     }
@@ -1532,6 +1549,7 @@ class UniversalCrudController extends AbstractController
             }
             return $this->error('恢复失败');
         } catch (\Throwable $e) {
+            $this->rethrowIfDatabaseException($e);
             return $this->error($e->getMessage());
         }
     }
@@ -1551,6 +1569,7 @@ class UniversalCrudController extends AbstractController
             }
             return $this->error('永久删除失败');
         } catch (\Throwable $e) {
+            $this->rethrowIfDatabaseException($e);
             return $this->error($e->getMessage());
         }
     }
@@ -1574,6 +1593,7 @@ class UniversalCrudController extends AbstractController
             }
             return $this->success(['count' => $count], "成功恢复 {$count} 条记录");
         } catch (\Throwable $e) {
+            $this->rethrowIfDatabaseException($e);
             return $this->error($e->getMessage());
         }
     }
@@ -1597,6 +1617,7 @@ class UniversalCrudController extends AbstractController
             }
             return $this->success(['count' => $count], "成功永久删除 {$count} 条记录");
         } catch (\Throwable $e) {
+            $this->rethrowIfDatabaseException($e);
             return $this->error($e->getMessage());
         }
     }
@@ -1615,7 +1636,18 @@ class UniversalCrudController extends AbstractController
             }
             return $this->success(['count' => $count], "成功清空回收站，共永久删除 {$count} 条记录");
         } catch (\Throwable $e) {
+            $this->rethrowIfDatabaseException($e);
             return $this->error($e->getMessage());
+        }
+    }
+
+    /**
+     * 让数据库类异常交给 AppExceptionHandler 处理.
+     */
+    private function rethrowIfDatabaseException(\Throwable $exception): void
+    {
+        if ($exception instanceof QueryException || $exception instanceof PDOException) {
+            throw $exception;
         }
     }
 }

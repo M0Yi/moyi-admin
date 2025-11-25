@@ -233,19 +233,13 @@ use App\Controller\Admin\AbstractAdminController;
 use App\Model\Admin\\{$modelName};
 use App\Request\Admin\\{$modelName}StoreRequest;
 use App\Request\Admin\\{$modelName}UpdateRequest;
-use Hyperf\HttpServer\Annotation\Controller;
-use Hyperf\HttpServer\Annotation\GetMapping;
-use Hyperf\HttpServer\Annotation\PostMapping;
-use Hyperf\HttpServer\Annotation\DeleteMapping;
 use Psr\Http\Message\ResponseInterface;
 
-        #[Controller(prefix: '/admin/{{adminPath}}/{$routePrefix}')]
 class {$controllerName} extends AbstractAdminController
 {
     /**
      * 列表页面
      */
-    #[GetMapping('')]
     public function index(): ResponseInterface
     {
         \$params = \$this->request->all();
@@ -273,7 +267,6 @@ class {$controllerName} extends AbstractAdminController
     /**
      * 创建页面
      */
-    #[GetMapping('create')]
     public function create(): ResponseInterface
     {
         return \$this->render('admin.system.{$routeSlug}.create');
@@ -282,7 +275,6 @@ class {$controllerName} extends AbstractAdminController
     /**
      * 保存数据
      */
-    #[PostMapping('')]
     public function store({$modelName}StoreRequest \$request): ResponseInterface
     {
         \$data = \$request->validated();
@@ -296,7 +288,6 @@ class {$controllerName} extends AbstractAdminController
     /**
      * 编辑页面
      */
-    #[GetMapping('{id:\\\d+}/edit')]
     public function edit(int \$id): ResponseInterface
     {
         \$item = {$modelName}::query()
@@ -311,7 +302,6 @@ class {$controllerName} extends AbstractAdminController
     /**
      * 更新数据
      */
-    #[PostMapping('{id:\\\d+}')]
     public function update(int \$id, {$modelName}UpdateRequest \$request): ResponseInterface
     {
         \$item = {$modelName}::query()
@@ -327,7 +317,6 @@ class {$controllerName} extends AbstractAdminController
     /**
      * 删除数据
      */
-    #[DeleteMapping('{id:\\\d+}')]
     public function destroy(int \$id): ResponseInterface
     {
         \$item = {$modelName}::query()

@@ -22,14 +22,26 @@ Router::get('/install/check-environment', 'App\Controller\Admin\InstallControlle
 
 Router::addRoute(['GET', 'POST', 'HEAD'], '/', 'App\Controller\IndexController@index');
 
-
+// ========================================
+// 验证码路由（通用接口，无需登录）
+// ========================================
+Router::get('/captcha', 'App\Controller\CaptchaController@getCaptcha');
 
 Router::addGroup('/admin/{adminPath:[a-zA-Z0-9\-_]+}', function () {
     // ========================================
     // 认证相关路由（无需登录）
     // ========================================
     Router::get('/login', 'App\Controller\Admin\AuthController@login');
+    
+    // 登录提交路由（需要验证码验证）
+    Router::addGroup('', function () {
     Router::post('/login', 'App\Controller\Admin\AuthController@doLogin');
+    }, [
+        'middleware' => [
+            \App\Middleware\LoginCaptchaMiddleware::class,
+        ]
+    ]);
+    
     Router::get('/logout', 'App\Controller\Admin\AuthController@logout');
     Router::get('', 'App\Controller\Admin\DashboardController@index');
 
