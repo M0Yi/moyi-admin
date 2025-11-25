@@ -12,23 +12,26 @@ declare(strict_types=1);
 
 namespace App\Controller;
 
+use DateTimeInterface;
+use Hyperf\Contract\SessionInterface;
 use Hyperf\Di\Annotation\Inject;
 use Hyperf\HttpMessage\Stream\SwooleStream;
 use Hyperf\HttpServer\Contract\RequestInterface;
 use Hyperf\HttpServer\Contract\ResponseInterface;
-use Hyperf\View\RenderInterface;
-use Psr\Container\ContainerInterface;
-use Hyperf\Contract\SessionInterface;
 use Hyperf\Validation\Contract\ValidatorFactoryInterface;
-
+use Hyperf\View\RenderInterface;
+use JsonException;
+use JsonSerializable;
+use Psr\Container\ContainerInterface;
 
 abstract class AbstractController
 {
+    private const MAX_JS_SAFE_INTEGER = 9007199254740991;
 
     #[Inject]
     protected ValidatorFactoryInterface $validationFactory;
-    #[Inject]
 
+    #[Inject]
     protected SessionInterface $session;
 
     #[Inject]
@@ -43,14 +46,37 @@ abstract class AbstractController
     #[Inject]
     protected RenderInterface $render;
 
-    protected function result(string $msg = '', array $data = null, int $code = 0,array $extra = []): \Psr\Http\Message\ResponseInterface
+    protected function result(string $msg = '', array $data = null, int $code = 0, array $extra = []): \Psr\Http\Message\ResponseInterface
     {
-
-        return $this->response->json(array_merge([
+        $payload = array_merge([
             'code' => $code,
             'msg' => $msg,
             'data' => $data,
-        ],$extra));
+        ], $extra);
+
+        $normalized = $this->normalizeJsonPayload($payload);
+
+        try {
+            $json = json_encode(
+                $normalized,
+                JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
+            );
+        } catch (JsonException $exception) {
+            logger()->error('[AbstractController] JSON encode failed', [
+                'error' => $exception->getMessage(),
+            ]);
+
+            $fallback = [
+                'code' => 500,
+                'msg' => 'JSON encode error',
+                'data' => null,
+            ];
+            $json = json_encode($fallback, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '{}';
+        }
+
+        return $this->response
+            ->withAddedHeader('Content-Type', 'application/json; charset=utf-8')
+            ->withBody(new SwooleStream($json));
     }
 
 
@@ -62,6 +88,48 @@ abstract class AbstractController
     protected function success(array|null $data = null, string $msg = '', int $code = 200): \Psr\Http\Message\ResponseInterface
     {
         return $this->result($msg, $data, $code);
+    }
+
+    protected function normalizeJsonPayload(mixed $value): mixed
+    {
+        if (is_array($value)) {
+            foreach ($value as $key => $item) {
+                $value[$key] = $this->normalizeJsonPayload($item);
+            }
+
+            return $value;
+        }
+
+        if ($value instanceof JsonSerializable) {
+            return $this->normalizeJsonPayload($value->jsonSerialize());
+        }
+
+        if (is_object($value)) {
+            if ($value instanceof DateTimeInterface) {
+                return $value->format('Y-m-d H:i:s');
+            }
+
+            if (method_exists($value, 'toArray')) {
+                return $this->normalizeJsonPayload($value->toArray());
+            }
+
+            return $this->normalizeJsonPayload(get_object_vars($value));
+        }
+
+        if (is_int($value) && $this->isUnsafeInteger($value)) {
+            return (string) $value;
+        }
+
+        if ($value instanceof \Traversable) {
+            return $this->normalizeJsonPayload(iterator_to_array($value));
+        }
+
+        return $value;
+    }
+
+    private function isUnsafeInteger(int $value): bool
+    {
+        return $value > self::MAX_JS_SAFE_INTEGER || $value < -self::MAX_JS_SAFE_INTEGER;
     }
 
     /**
