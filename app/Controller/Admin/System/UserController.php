@@ -77,9 +77,17 @@ class UserController extends BaseModelCrudController
      */
     public function create(RequestInterface $request): ResponseInterface
     {
-        $formSchema = $this->userService->getFormFields('create');
+        $fields = $this->userService->getFormFields('create');
+        $formSchema = [
+            'title' => '新增用户',
+            'fields' => $fields,
+            'submitUrl' => admin_route('system/users'),
+            'method' => 'POST',
+            'redirectUrl' => admin_route('system/users'),
+        ];
+
         return $this->renderAdmin('admin.system.user.create', [
-            'formSchemaJson' => json_encode($formSchema),
+            'formSchemaJson' => json_encode($formSchema, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
         ]);
     }
 
@@ -102,11 +110,18 @@ class UserController extends BaseModelCrudController
     public function edit(RequestInterface $request, int $id): ResponseInterface
     {
         $user = $this->userService->getById($id);
-        $formSchema = $this->userService->getFormFields('update', $user);
+        $fields = $this->userService->getFormFields('update', $user);
+        $formSchema = [
+            'title' => '编辑用户',
+            'fields' => $fields,
+            'submitUrl' => admin_route("system/users/{$id}"),
+            'method' => 'PUT',
+            'redirectUrl' => admin_route('system/users'),
+        ];
         
         return $this->renderAdmin('admin.system.user.edit', [
             'user' => $user,
-            'formSchemaJson' => json_encode($formSchema),
+            'formSchemaJson' => json_encode($formSchema, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
         ]);
     }
 

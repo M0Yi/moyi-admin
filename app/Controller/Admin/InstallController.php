@@ -244,95 +244,173 @@ class InstallController extends AbstractController
      */
     private function createDefaultPermissions(int $siteId): void
     {
-        $permissions = [
-            // 仪表盘
+        $permissionTree = $this->getDefaultPermissionDefinitions();
+        $this->persistPermissionTree($permissionTree, $siteId);
+    }
+
+    /**
+     * 构建默认权限定义，需与菜单配置保持一致
+     */
+    private function getDefaultPermissionDefinitions(): array
+    {
+        return [
             [
-                'site_id' => $siteId,
-                'parent_id' => 0,
                 'name' => '仪表盘',
                 'slug' => 'dashboard',
                 'type' => 'menu',
                 'icon' => 'grid',
                 'path' => '/dashboard',
-                'status' => 1,
                 'sort' => 1,
-            ],
-            // iframe 模式体验
-            [
-                'site_id' => $siteId,
-                'parent_id' => 0,
-                'name' => 'Iframe 模式体验',
-                'slug' => 'system.iframe-demo.view',
-                'type' => 'menu',
-                'icon' => 'columns-gap',
-                'path' => '/system/iframe-demo',
                 'status' => 1,
-                'sort' => 902,
+                'children' => [
+                    $this->makeButtonPermission('访问仪表盘', 'dashboard.view', '/dashboard', 1),
+                ],
             ],
-//            // 用户管理
-//            [
-//                'site_id' => $siteId,
-//                'parent_id' => 0,
-//                'name' => '用户管理',
-//                'slug' => 'users',
-//                'type' => 'menu',
-//                'icon' => 'users',
-//                'path' => '/users',
-//                'status' => 1,
-//                'sort' => 2,
-//            ],
-//            // 角色管理
-//            [
-//                'site_id' => $siteId,
-//                'parent_id' => 0,
-//                'name' => '角色管理',
-//                'slug' => 'roles',
-//                'type' => 'menu',
-//                'icon' => 'shield',
-//                'path' => '/roles',
-//                'status' => 1,
-//                'sort' => 3,
-//            ],
-//            // 权限管理
-//            [
-//                'site_id' => $siteId,
-//                'parent_id' => 0,
-//                'name' => '权限管理',
-//                'slug' => 'permissions',
-//                'type' => 'menu',
-//                'icon' => 'key',
-//                'path' => '/permissions',
-//                'status' => 1,
-//                'sort' => 4,
-//            ],
-//            // 站点管理
-//            [
-//                'site_id' => $siteId,
-//                'parent_id' => 0,
-//                'name' => '站点管理',
-//                'slug' => 'sites',
-//                'type' => 'menu',
-//                'icon' => 'globe',
-//                'path' => '/sites',
-//                'status' => 1,
-//                'sort' => 5,
-//            ],
-//            // 系统配置
-//            [
-//                'site_id' => $siteId,
-//                'parent_id' => 0,
-//                'name' => '系统配置',
-//                'slug' => 'settings',
-//                'type' => 'menu',
-//                'icon' => 'settings',
-//                'path' => '/settings',
-//                'status' => 1,
-//                'sort' => 6,
-//            ],
+            [
+                'name' => '系统管理',
+                'slug' => 'system',
+                'type' => 'menu',
+                'icon' => 'settings',
+                'path' => '/system',
+                'sort' => 100,
+                'status' => 1,
+                'children' => [
+                    $this->buildCrudPermissionDefinition(
+                        '用户管理',
+                        'system.users',
+                        '/system/users',
+                        110,
+                        'users'
+                    ),
+                    $this->buildCrudPermissionDefinition(
+                        '角色管理',
+                        'system.roles',
+                        '/system/roles',
+                        120,
+                        'shield'
+                    ),
+                    $this->buildCrudPermissionDefinition(
+                        '权限管理',
+                        'system.permissions',
+                        '/system/permissions',
+                        130,
+                        'key'
+                    ),
+                    $this->buildCrudPermissionDefinition(
+                        '菜单管理',
+                        'system.menus',
+                        '/system/menus',
+                        140,
+                        'menu-button-wide'
+                    ),
+                    [
+                        'name' => '站点设置',
+                        'slug' => 'system.sites',
+                        'type' => 'menu',
+                        'icon' => 'globe',
+                        'path' => '/system/sites',
+                        'sort' => 150,
+                        'status' => 1,
+                        'children' => [
+                            $this->makeButtonPermission('查看站点设置', 'system.sites.view', '/system/sites', 1),
+                            $this->makeButtonPermission('更新站点设置', 'system.sites.edit', '/system/sites', 2),
+                        ],
+                    ],
+                    [
+                        'name' => 'CRUD 生成器',
+                        'slug' => 'system.crud-generator',
+                        'type' => 'menu',
+                        'icon' => 'code-slash',
+                        'path' => '/system/crud-generator',
+                        'sort' => 160,
+                        'status' => 1,
+                        'children' => [
+                            $this->makeButtonPermission('访问 CRUD 生成器', 'system.crud-generator.view', '/system/crud-generator*', 1),
+                            $this->makeButtonPermission('生成 CRUD 模块', 'system.crud-generator.generate', '/system/crud-generator/generate*', 2),
+                            $this->makeButtonPermission('删除 CRUD 配置', 'system.crud-generator.delete', '/system/crud-generator*', 3),
+                        ],
+                    ],
+                    [
+                        'name' => 'Iframe 模式体验',
+                        'slug' => 'system.iframe-demo',
+                        'type' => 'menu',
+                        'icon' => 'columns-gap',
+                        'path' => '/system/iframe-demo',
+                        'sort' => 170,
+                        'status' => 1,
+                        'children' => [
+                            $this->makeButtonPermission('访问 Iframe 模式', 'system.iframe-demo.view', '/system/iframe-demo*', 1),
+                        ],
+                    ],
+                ],
+            ],
         ];
+    }
 
-        foreach ($permissions as $permission) {
-            AdminPermission::create($permission);
+    private function buildCrudPermissionDefinition(
+        string $name,
+        string $slugPrefix,
+        string $basePath,
+        int $sort,
+        string $icon
+    ): array {
+        $wildcardPath = $basePath . '*';
+
+        return [
+            'name' => $name,
+            'slug' => $slugPrefix,
+            'type' => 'menu',
+            'icon' => $icon,
+            'path' => $wildcardPath,
+            'sort' => $sort,
+            'status' => 1,
+            'children' => [
+                $this->makeButtonPermission("查看{$name}", "{$slugPrefix}.view", $wildcardPath, 1),
+                $this->makeButtonPermission("新增{$name}", "{$slugPrefix}.create", "{$basePath}/create", 2),
+                $this->makeButtonPermission("编辑{$name}", "{$slugPrefix}.edit", "{$basePath}/*/edit", 3),
+                $this->makeButtonPermission("删除{$name}", "{$slugPrefix}.delete", $wildcardPath, 4),
+                $this->makeButtonPermission("批量删除{$name}", "{$slugPrefix}.batch-delete", "{$basePath}/batch-destroy", 5),
+                $this->makeButtonPermission("切换{$name}状态", "{$slugPrefix}.toggle-status", "{$basePath}/*/toggle-status", 6),
+            ],
+        ];
+    }
+
+    private function makeButtonPermission(string $name, string $slug, string $path, int $sort): array
+    {
+        return [
+            'name' => $name,
+            'slug' => $slug,
+            'type' => 'button',
+            'icon' => null,
+            'path' => $path,
+            'sort' => $sort,
+            'status' => 1,
+        ];
+    }
+
+    private function persistPermissionTree(array $definitions, int $siteId, int $parentId = 0): void
+    {
+        foreach ($definitions as $definition) {
+            $children = $definition['children'] ?? [];
+            unset($definition['children']);
+
+            $permission = AdminPermission::query()->updateOrCreate(
+                [
+                    'site_id' => $siteId,
+                    'slug' => $definition['slug'],
+                ],
+                array_merge(
+                    $definition,
+                    [
+                        'site_id' => $siteId,
+                        'parent_id' => $parentId,
+                    ]
+                )
+            );
+
+            if (!empty($children)) {
+                $this->persistPermissionTree($children, $siteId, (int) $permission->id);
+            }
         }
     }
 
@@ -992,6 +1070,46 @@ class InstallController extends AbstractController
                 $table->index('created_at', 'idx_created_at');
             });
             Db::statement("ALTER TABLE `admin_upload_files` COMMENT = '上传文件表'");
+        }
+
+        if (! Schema::hasTable('admin_error_statistics')) {
+            Schema::create('admin_error_statistics', function (Blueprint $table) {
+                $table->engine = 'InnoDB';
+                $table->charset = 'utf8mb4';
+                $table->collation = 'utf8mb4_unicode_ci';
+                $table->bigIncrements('id')->comment('错误统计ID');
+                $table->unsignedBigInteger('site_id')->default(0)->comment('站点ID');
+                $table->unsignedBigInteger('user_id')->nullable()->comment('用户ID');
+                $table->string('username', 50)->nullable()->comment('用户名');
+                $table->string('request_id', 100)->nullable()->comment('请求ID');
+                $table->string('error_hash', 64)->comment('错误指纹');
+                $table->string('exception_class', 191)->comment('异常类');
+                $table->string('error_code', 50)->nullable()->comment('错误码');
+                $table->string('error_message', 500)->comment('错误信息');
+                $table->string('error_file', 255)->nullable()->comment('异常文件');
+                $table->integer('error_line')->nullable()->comment('异常行号');
+                $table->string('error_level', 20)->default('error')->comment('级别');
+                $table->unsignedSmallInteger('status_code')->nullable()->comment('HTTP 状态码');
+                $table->string('request_method', 10)->nullable()->comment('请求方法');
+                $table->string('request_path', 255)->nullable()->comment('请求路径');
+                $table->string('request_ip', 50)->nullable()->comment('客户端IP');
+                $table->string('user_agent', 255)->nullable()->comment('User Agent');
+                $table->json('request_query')->nullable()->comment('请求查询参数');
+                $table->json('request_body')->nullable()->comment('请求体');
+                $table->json('request_headers')->nullable()->comment('请求头');
+                $table->longText('error_trace')->nullable()->comment('堆栈信息');
+                $table->json('context')->nullable()->comment('上下文信息');
+                $table->unsignedInteger('occurrence_count')->default(1)->comment('出现次数');
+                $table->timestamp('first_occurred_at')->nullable()->comment('首次发生时间');
+                $table->timestamp('last_occurred_at')->nullable()->comment('最近发生时间');
+                $table->tinyInteger('status')->default(0)->comment('处理状态：0=未处理，1=处理中，2=已解决');
+                $table->timestamp('resolved_at')->nullable()->comment('解决时间');
+                $table->timestamps();
+                $table->index(['site_id', 'last_occurred_at'], 'admin_error_stats_site_last_index');
+                $table->index('status', 'admin_error_stats_status_index');
+                $table->unique(['site_id', 'error_hash'], 'uk_site_error_hash');
+            });
+            Db::statement("ALTER TABLE `admin_error_statistics` COMMENT = '系统错误统计表'");
         }
 
         if (! Schema::hasTable('users')) {

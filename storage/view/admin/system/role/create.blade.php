@@ -48,6 +48,7 @@
         : time();
 @endphp
 @include('components.admin-script', ['path' => '/js/components/universal-form-renderer.js', 'version' => $universalFormJsVersion])
+@include('components.admin-script', ['path' => '/js/admin/system/role-form.js'])
 
 <script>
 window.RoleFormPage = {
@@ -68,6 +69,10 @@ document.addEventListener('DOMContentLoaded', function () {
         submitButtonId: 'submitBtn',
         loadingIndicatorId: 'roleFormLoading'
     });
+
+    if (window.RoleForm && typeof window.RoleForm.init === 'function') {
+        window.RoleForm.init();
+    }
 });
 </script>
 @endpush

@@ -143,21 +143,19 @@
 
 @push('admin_scripts')
 @include('components.admin-script', ['path' => '/js/components/refresh-parent-listener.js'])
+@include('components.admin-script', ['path' => '/js/admin/system/role-page.js'])
 <script>
-(function() {
-    'use strict';
-    window.destroyRouteTemplate_roleTable = '{{ admin_route("system/roles") }}';
-    initRefreshParentListener('roleTable', {
+document.addEventListener('DOMContentLoaded', function () {
+    if (window.RolePage && typeof window.RolePage.initList === 'function') {
+        window.RolePage.initList({
+            tableId: 'roleTable',
+            destroyRoute: '{{ admin_route("system/roles") }}',
         logPrefix: '[Role]'
     });
-})();
-
-function renderRolePermissionsCount(value, column, row) {
-    if (!value || !value.length) {
-        return '<span class="badge bg-secondary">0</span>';
+    } else {
+        console.warn('[RolePage] initList 未定义');
     }
-    return `<span class="badge bg-info">${value.length}</span>`;
-}
+});
 </script>
 @endpush
 

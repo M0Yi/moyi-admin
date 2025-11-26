@@ -134,21 +134,19 @@
 
 @push('admin_scripts')
 @include('components.admin-script', ['path' => '/js/components/refresh-parent-listener.js'])
+@include('components.admin-script', ['path' => '/js/admin/system/user-page.js'])
 <script>
-(function() {
-    'use strict';
-    window.destroyRouteTemplate_userTable = '{{ admin_route("system/users") }}';
-    initRefreshParentListener('userTable', {
+document.addEventListener('DOMContentLoaded', function () {
+    if (window.UserPage && typeof window.UserPage.initList === 'function') {
+        window.UserPage.initList({
+            tableId: 'userTable',
+            destroyRoute: '{{ admin_route("system/users") }}',
         logPrefix: '[User]'
     });
-})();
-
-function renderUserRoles(value, column, row) {
-    if (!value || !value.length) {
-        return '<span class="text-muted">-</span>';
-    }
-    return value.map(role => `<span class="badge bg-info me-1">${role.name}</span>`).join('');
+    } else {
+        console.warn('[UserPage] initList 未定义');
 }
+});
 </script>
 @endpush
 

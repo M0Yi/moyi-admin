@@ -75,9 +75,17 @@ class RoleController extends BaseModelCrudController
      */
     public function create(RequestInterface $request): ResponseInterface
     {
-        $formSchema = $this->roleService->getFormFields('create');
+        $fields = $this->roleService->getFormFields('create');
+        $formSchema = [
+            'title' => '新增角色',
+            'fields' => $fields,
+            'submitUrl' => admin_route('system/roles'),
+            'method' => 'POST',
+            'redirectUrl' => admin_route('system/roles'),
+        ];
+
         return $this->renderAdmin('admin.system.role.create', [
-            'formSchemaJson' => json_encode($formSchema),
+            'formSchemaJson' => json_encode($formSchema, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
         ]);
     }
 
@@ -100,11 +108,18 @@ class RoleController extends BaseModelCrudController
     public function edit(RequestInterface $request, int $id): ResponseInterface
     {
         $role = $this->roleService->getById($id);
-        $formSchema = $this->roleService->getFormFields('update', $role);
+        $fields = $this->roleService->getFormFields('update', $role);
+        $formSchema = [
+            'title' => '编辑角色',
+            'fields' => $fields,
+            'submitUrl' => admin_route("system/roles/{$id}"),
+            'method' => 'PUT',
+            'redirectUrl' => admin_route('system/roles'),
+        ];
         
         return $this->renderAdmin('admin.system.role.edit', [
             'role' => $role,
-            'formSchemaJson' => json_encode($formSchema),
+            'formSchemaJson' => json_encode($formSchema, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
         ]);
     }
 

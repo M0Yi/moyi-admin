@@ -48,6 +48,7 @@
         : time();
 @endphp
 @include('components.admin-script', ['path' => '/js/components/universal-form-renderer.js', 'version' => $universalFormJsVersion])
+@include('components.admin-script', ['path' => '/js/admin/system/permission-form.js'])
 
 <script>
 window.PermissionFormPage = {
@@ -68,6 +69,10 @@ document.addEventListener('DOMContentLoaded', function () {
         submitButtonId: 'submitBtn',
         loadingIndicatorId: 'permissionFormLoading'
     });
+
+    if (window.PermissionForm && typeof window.PermissionForm.init === 'function') {
+        window.PermissionForm.init();
+    }
 });
 </script>
 @endpush

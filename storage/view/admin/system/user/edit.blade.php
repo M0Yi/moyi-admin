@@ -48,6 +48,7 @@
         : time();
 @endphp
 @include('components.admin-script', ['path' => '/js/components/universal-form-renderer.js', 'version' => $universalFormJsVersion])
+@include('components.admin-script', ['path' => '/js/admin/system/user-form.js'])
 
 <script>
 window.UserFormPage = {
@@ -68,6 +69,10 @@ document.addEventListener('DOMContentLoaded', function () {
         submitButtonId: 'submitBtn',
         loadingIndicatorId: 'userFormLoading'
     });
+
+    if (window.UserForm && typeof window.UserForm.init === 'function') {
+        window.UserForm.init();
+    }
 });
 </script>
 @endpush

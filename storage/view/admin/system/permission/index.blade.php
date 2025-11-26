@@ -156,23 +156,19 @@
 
 @push('admin_scripts')
 @include('components.admin-script', ['path' => '/js/components/refresh-parent-listener.js'])
+@include('components.admin-script', ['path' => '/js/admin/system/permission-page.js'])
 <script>
-(function() {
-    'use strict';
-    window.destroyRouteTemplate_permissionTable = '{{ admin_route("system/permissions") }}';
-    initRefreshParentListener('permissionTable', {
+document.addEventListener('DOMContentLoaded', function () {
+    if (window.PermissionPage && typeof window.PermissionPage.initList === 'function') {
+        window.PermissionPage.initList({
+            tableId: 'permissionTable',
+            destroyRoute: '{{ admin_route("system/permissions") }}',
         logPrefix: '[Permission]'
     });
-})();
-
-function renderPermissionName(value, column, row) {
-    const level = row.level || 0;
-    const indent = level > 0 ? '└─'.repeat(level) + ' ' : '';
-    return `<div class="d-flex align-items-center permission-level-${level}">
-        ${level > 0 ? `<span class="text-muted me-2">${indent}</span>` : ''}
-        <span class="fw-medium">${value || '-'}</span>
-    </div>`;
+    } else {
+        console.warn('[PermissionPage] initList 未定义');
 }
+});
 </script>
 @endpush
 

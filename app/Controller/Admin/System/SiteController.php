@@ -8,6 +8,7 @@ use App\Controller\AbstractController;
 use App\Exception\BusinessException;
 use App\Exception\ValidationException;
 use App\Model\Admin\AdminSite;
+use App\Service\Admin\SiteService;
 use Hyperf\Database\Exception\QueryException;
 use Hyperf\Di\Annotation\Inject;
 use Hyperf\HttpServer\Contract\RequestInterface;
@@ -22,6 +23,9 @@ class SiteController extends AbstractController
     #[Inject]
     protected ValidatorFactoryInterface $validatorFactory;
 
+    #[Inject]
+    protected SiteService $siteService;
+
     /**
      * 编辑页面
      */
@@ -34,8 +38,27 @@ class SiteController extends AbstractController
             throw new BusinessException(500, '站点不存在');
         }
 
+        // 获取表单字段配置
+        $fields = $this->siteService->getFormFields('edit', $site);
+        
+        // 构建表单 Schema
+        $formSchema = [
+            'title' => '站点设置',
+            'fields' => $fields,
+            'submitUrl' => admin_route('system/sites'),
+            'method' => 'PUT',
+            'redirectUrl' => admin_route('system/sites'),
+            'endpoints' => [
+                'uploadToken' => admin_route('api/admin/upload/token'),
+            ],
+        ];
+
+        // 将 Schema 转换为 JSON（用于前端渲染）
+        $formSchemaJson = json_encode($formSchema, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+
         return $this->renderAdmin('admin.system.site.edit', [
             'site' => $site,
+            'formSchemaJson' => $formSchemaJson,
         ]);
     }
 

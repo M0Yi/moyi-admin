@@ -14,6 +14,7 @@ namespace App\Exception\Handler;
 
 use App\Exception\BusinessException;
 use App\Exception\ValidationException;
+use App\Service\Admin\ErrorStatisticService;
 use Hyperf\Context\Context;
 use Hyperf\Contract\StdoutLoggerInterface;
 use Hyperf\Database\Exception\QueryException;
@@ -31,7 +32,8 @@ class AppExceptionHandler extends ExceptionHandler
 {
     public function __construct(
         protected StdoutLoggerInterface $logger,
-        protected RenderInterface $render
+        protected RenderInterface $render,
+        protected ErrorStatisticService $errorStatisticService
     ) {
     }
 
@@ -40,6 +42,10 @@ class AppExceptionHandler extends ExceptionHandler
 
         $request = Context::get(ServerRequestInterface::class);
         $isApiRequest = $this->isApiRequest($request);
+
+        if ($this->shouldRecordStatistic($throwable)) {
+            $this->errorStatisticService->record($throwable, $request);
+        }
 
         if ($throwable instanceof BusinessException) {
             $payload = [
@@ -164,5 +170,29 @@ class AppExceptionHandler extends ExceptionHandler
         }
 
         return false;
+    }
+
+    /**
+     * 是否需要写入错误统计
+     */
+    protected function shouldRecordStatistic(Throwable $throwable): bool
+    {
+        if ($throwable instanceof BusinessException) {
+            return false;
+        }
+
+        if ($throwable instanceof ValidationException) {
+            return false;
+        }
+
+        if ($throwable instanceof NotFoundHttpException) {
+            return false;
+        }
+
+        if ($throwable instanceof MethodNotAllowedHttpException) {
+            return false;
+        }
+
+        return true;
     }
 }

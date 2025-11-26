@@ -74,9 +74,17 @@ class PermissionController extends BaseModelCrudController
      */
     public function create(RequestInterface $request): ResponseInterface
     {
-        $formSchema = $this->permissionService->getFormFields('create');
+        $fields = $this->permissionService->getFormFields('create');
+        $formSchema = [
+            'title' => '新增权限',
+            'fields' => $fields,
+            'submitUrl' => admin_route('system/permissions'),
+            'method' => 'POST',
+            'redirectUrl' => admin_route('system/permissions'),
+        ];
+
         return $this->renderAdmin('admin.system.permission.create', [
-            'formSchemaJson' => json_encode($formSchema),
+            'formSchemaJson' => json_encode($formSchema, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
         ]);
     }
 
@@ -99,11 +107,18 @@ class PermissionController extends BaseModelCrudController
     public function edit(RequestInterface $request, int $id): ResponseInterface
     {
         $permission = $this->permissionService->getById($id);
-        $formSchema = $this->permissionService->getFormFields('update', $permission);
+        $fields = $this->permissionService->getFormFields('update', $permission);
+        $formSchema = [
+            'title' => '编辑权限',
+            'fields' => $fields,
+            'submitUrl' => admin_route("system/permissions/{$id}"),
+            'method' => 'PUT',
+            'redirectUrl' => admin_route('system/permissions'),
+        ];
         
         return $this->renderAdmin('admin.system.permission.edit', [
             'permission' => $permission,
-            'formSchemaJson' => json_encode($formSchema),
+            'formSchemaJson' => json_encode($formSchema, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
         ]);
     }
 
