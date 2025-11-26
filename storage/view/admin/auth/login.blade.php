@@ -74,6 +74,22 @@
             position: relative;
         }
 
+        .quick-login-box {
+            border: 1px dashed rgba(99,102,241,0.4);
+            border-radius: 12px;
+            padding: 16px;
+            background: #eef2ff;
+            margin-bottom: 20px;
+        }
+
+        .quick-login-text {
+            font-size: 14px;
+            color: #4338ca;
+            margin-bottom: 12px;
+            font-weight: 500;
+        }
+
+
         .login-header {
             text-align: center;
             margin-bottom: 30px;
@@ -244,6 +260,15 @@
             background: var(--primary);
             color: white;
         }
+
+        .quick-login-btn {
+            background: #4338ca;
+            color: #fff;
+        }
+
+        .quick-login-btn:hover {
+            background: #3730a3;
+        }
         .btn-primary:hover {
             background: var(--primary-hover);
             transform: translateY(-1px);
@@ -374,6 +399,17 @@
             <div id="demoAlert" class="alert alert-success" style="display: none;">
                 体验账号：demo 密码：moyi123456
             </div>
+
+            @if (!empty($isLoggedIn) && !empty($quickLoginUrl))
+                <div class="quick-login-box">
+                    <div class="quick-login-text">
+                        已检测到您已登录{{ $loggedInUserName ? '：' . $loggedInUserName : '' }}
+                    </div>
+                    <button type="button" class="btn quick-login-btn" onclick="window.location.href='{{ $quickLoginUrl }}'">
+                        快速进入后台
+                    </button>
+                </div>
+            @endif
 
             <div id="alert" style="display: none;"></div>
 

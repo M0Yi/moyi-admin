@@ -25,19 +25,28 @@ class AuthController extends AbstractController
      */
     public function login(): \Psr\Http\Message\ResponseInterface
     {
-        // 如果已登录，跳转到仪表盘
-        $adminUser = Context::get('admin_user');
-        if ($adminUser) {
-            $adminPath = Context::get('admin_entry_path', '/admin');
-            return $this->response->redirect($adminPath . '/dashboard');
-        }
-        
         // 验证码接口 URL（通用接口，不在管理后台路径下）
         $captchaUrl = '/captcha';
+
+        $guard = auth('admin');
+        $isLoggedIn = $guard->check();
+        $adminPath = Context::get('admin_entry_path', '/admin');
+        $loggedInUserName = null;
+        if ($isLoggedIn) {
+            $user = $guard->user();
+            if (is_object($user)) {
+                $loggedInUserName = $user->real_name ?: $user->username ?? null;
+            } elseif (is_array($user)) {
+                $loggedInUserName = $user['real_name'] ?? $user['username'] ?? null;
+            }
+        }
 
         // 不需要传递 $site 到视图，视图中直接使用 site() 全局函数
         return $this->render->render('admin.auth.login', [
             'captchaUrl' => $captchaUrl,
+            'isLoggedIn' => $isLoggedIn,
+            'quickLoginUrl' => $isLoggedIn ? $adminPath . '/dashboard' : null,
+            'loggedInUserName' => $loggedInUserName,
         ]);
     }
 

@@ -38,7 +38,7 @@
             @forelse($sidebarMenus as $menu)
                 @include('admin.components.sidebar-menu-item', ['menu' => $menu])
             @empty
-                <li class="nav-item">
+                <li class="nav-item w-100">
                     <a class="nav-link d-flex align-items-center gap-2"
                        href="{{ admin_route('dashboard') }}"
                        data-path="dashboard"
@@ -105,29 +105,81 @@
         }
     });
 
-    // 子菜单展开/折叠功能
+    const getSubmenuFromLink = (link) => {
+        let targetSelector = link.getAttribute('data-target');
+        if (!targetSelector) {
+            return null;
+        }
+        if (!targetSelector.startsWith('#')) {
+            targetSelector = `#${targetSelector}`;
+        }
+        return sidebar.querySelector(targetSelector);
+    };
+
+    const rotateArrow = (link, expanded) => {
+        const arrow = link.querySelector('.submenu-arrow');
+        if (arrow) {
+            arrow.style.transform = expanded ? 'rotate(180deg)' : 'rotate(0deg)';
+        }
+        link.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+    };
+
+    const collapseNestedSubmenus = (submenuElement) => {
+        const nestedLinks = submenuElement.querySelectorAll('.nav-link.has-children');
+        nestedLinks.forEach(nestedLink => {
+            const nestedSubmenu = getSubmenuFromLink(nestedLink);
+            if (nestedSubmenu) {
+                nestedSubmenu.classList.remove('show');
+            }
+            rotateArrow(nestedLink, false);
+        });
+    };
+
+    const closeSubmenu = (link, options = {}) => {
+        const { collapseChildren = true } = options;
+        const submenu = getSubmenuFromLink(link);
+        if (!submenu) {
+            return;
+        }
+        submenu.classList.remove('show');
+        if (collapseChildren) {
+            collapseNestedSubmenus(submenu);
+        }
+        rotateArrow(link, false);
+    };
+
+    const collapseSiblingSubmenus = (link, options = {}) => {
+        const parentList = link.closest('ul');
+        if (!parentList) {
+            return;
+        }
+        Array.from(parentList.children).forEach(listItem => {
+            const siblingLink = listItem.querySelector('.nav-link.has-children');
+            if (siblingLink && siblingLink !== link) {
+                closeSubmenu(siblingLink, options);
+            }
+        });
+    };
+
+    // 子菜单展开/折叠功能，支持多级菜单
     const submenuLinks = sidebar.querySelectorAll('.nav-link.has-children');
     submenuLinks.forEach(link => {
         link.addEventListener('click', function(e) {
-            // 阻止 tab 管理器处理有子菜单的链接
+            e.preventDefault();
             e.stopPropagation();
-            
-            const targetId = link.getAttribute('data-target');
-            if (!targetId) return;
 
-            const submenu = document.querySelector(targetId);
-            if (!submenu) return;
+            const submenu = getSubmenuFromLink(link);
+            if (!submenu) {
+                return;
+            }
 
-            // 切换展开/折叠
             const isExpanded = submenu.classList.contains('show');
-            const arrow = link.querySelector('.submenu-arrow');
-
             if (isExpanded) {
-                submenu.classList.remove('show');
-                if (arrow) arrow.style.transform = 'rotate(0deg)';
+                closeSubmenu(link);
             } else {
+                collapseSiblingSubmenus(link, { collapseChildren: false });
                 submenu.classList.add('show');
-                if (arrow) arrow.style.transform = 'rotate(180deg)';
+                rotateArrow(link, true);
             }
         });
     });

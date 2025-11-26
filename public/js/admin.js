@@ -716,68 +716,80 @@ function formatDate(date, format = 'YYYY-MM-DD HH:mm:ss') {
  * 根据给定路径高亮侧边栏菜单
  * @param {string} pathname - 如 /admin/users 或 /manage/system/config
  */
-function setSidebarActiveByUrl(pathname) {
-    try {
-        const sidebar = document.querySelector('.sidebar');
-        if (!sidebar) {
-            return;
-        }
-
-        const navLinks = sidebar.querySelectorAll('.nav-link[data-path]');
-
-        // 先清空所有 active 状态
-        navLinks.forEach(link => {
-            link.classList.remove('active');
-        });
-
-        // 折叠所有子菜单
-        const submenus = sidebar.querySelectorAll('.collapse');
-        submenus.forEach(menu => {
-            menu.classList.remove('show');
-        });
-
-        let matchedLink = null;
-
-        navLinks.forEach(link => {
-            const linkPath = link.getAttribute('data-path');
-            if (!linkPath) {
+    function setSidebarActiveByUrl(pathname) {
+        try {
+            const sidebar = document.querySelector('.sidebar');
+            if (!sidebar) {
                 return;
             }
 
-            const fullPath = adminRoute(linkPath);
+            const navLinks = sidebar.querySelectorAll('.nav-link[data-path]');
+            const submenus = sidebar.querySelectorAll('.collapse');
 
-            if (pathname === fullPath || (linkPath !== 'dashboard' && pathname.startsWith(fullPath + '/'))) {
-                matchedLink = link;
-            }
-        });
+            const updateArrowState = (link, expanded) => {
+                if (!link) {
+                    return;
+                }
+                const arrow = link.querySelector('.submenu-arrow');
+                if (arrow) {
+                    arrow.style.transform = expanded ? 'rotate(180deg)' : 'rotate(0deg)';
+                }
+                link.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+            };
 
-        if (matchedLink) {
-            matchedLink.classList.add('active');
+            const expandAncestors = (link) => {
+                let currentSubmenu = link.closest('.collapse');
+                while (currentSubmenu) {
+                    currentSubmenu.classList.add('show');
+                    const parentLink = sidebar.querySelector(`.nav-link[data-target="#${currentSubmenu.id}"]`);
+                    updateArrowState(parentLink, true);
+                    currentSubmenu = parentLink ? parentLink.closest('.collapse') : null;
+                }
+            };
 
-            // 展开父菜单
-            const submenu = matchedLink.closest('.collapse');
-            if (submenu) {
-                submenu.classList.add('show');
-                const parentLink = document.querySelector(`[data-target="#${submenu.id}"]`);
-                if (parentLink) {
-                    const arrow = parentLink.querySelector('.submenu-arrow');
-                    if (arrow) {
-                        arrow.style.transform = 'rotate(180deg)';
-                    }
+            // 先清空所有 active 状态
+            navLinks.forEach(link => {
+                link.classList.remove('active');
+                if (link.classList.contains('has-children')) {
+                    updateArrowState(link, false);
+                }
+            });
+
+            // 折叠所有子菜单
+            submenus.forEach(menu => {
+                menu.classList.remove('show');
+            });
+
+            let matchedLink = null;
+
+            navLinks.forEach(link => {
+                const linkPath = link.getAttribute('data-path');
+                if (!linkPath) {
+                    return;
+                }
+
+                const fullPath = adminRoute(linkPath);
+
+                if (pathname === fullPath || (linkPath !== 'dashboard' && pathname.startsWith(fullPath + '/'))) {
+                    matchedLink = link;
+                }
+            });
+
+            if (matchedLink) {
+                matchedLink.classList.add('active');
+                expandAncestors(matchedLink);
+            } else if (pathname.startsWith(window.ADMIN_ENTRY_PATH)) {
+                // 没有找到匹配项时，且仍在后台路径下，默认高亮仪表盘
+                const dashboardLink = sidebar.querySelector('.nav-link[data-path="dashboard"]');
+                if (dashboardLink) {
+                    dashboardLink.classList.add('active');
                 }
             }
-        } else if (pathname.startsWith(window.ADMIN_ENTRY_PATH)) {
-            // 没有找到匹配项时，且仍在后台路径下，默认高亮仪表盘
-            const dashboardLink = sidebar.querySelector('.nav-link[data-path="dashboard"]');
-            if (dashboardLink) {
-                dashboardLink.classList.add('active');
-            }
+        } catch (e) {
+            // 安全兜底，避免因为菜单高亮影响主流程
+            // console.warn('setSidebarActiveByUrl error:', e);
         }
-    } catch (e) {
-        // 安全兜底，避免因为菜单高亮影响主流程
-        // console.warn('setSidebarActiveByUrl error:', e);
     }
-}
 
 /* ==================== iframe 内页统一成功处理 ==================== */
 /**

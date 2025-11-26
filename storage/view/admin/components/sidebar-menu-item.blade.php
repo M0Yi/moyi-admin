@@ -3,6 +3,11 @@
 支持多级嵌套、图标、徽章、分割线等
 --}}
 
+@php
+    $level = isset($level) ? (int) $level : 0;
+    $nextLevel = $level + 1;
+@endphp
+
 @if($menu['type'] === 'divider')
     {{-- 分割线 --}}
     <hr class="my-3 mx-3" style="border-color: #e2e8f0;">
@@ -22,22 +27,29 @@
 
 @else
     {{-- 普通菜单项 或 外部链接 --}}
-    <li class="nav-item">
+    <li class="nav-item w-100" data-menu-level="{{ $level }}" style="--menu-level: {{ $level }};">
         @php
             $isExternalLink = $menu['type'] === 'link';
             $hasChildren = isset($menu['children']) && count($menu['children']) > 0;
-            $linkHref = $isExternalLink ? $menu['path'] : admin_route($menu['path']);
+            $linkHref = $isExternalLink ? ($menu['path'] ?? '#') : admin_route((string) ($menu['path'] ?? ''));
             // 有子菜单的项不应该打开 tab，而是展开/折叠
             $shouldOpenTab = !$hasChildren && !$isExternalLink;
+            $submenuId = $hasChildren ? 'submenu-' . md5(($menu['path'] ?? '') . '-' . ($menu['id'] ?? uniqid('', true))) : null;
         @endphp
         <a class="nav-link d-flex align-items-center gap-2 {{ $hasChildren ? 'has-children' : '' }}"
-           href="{{ $linkHref }}"
+           href="{{ $hasChildren ? 'javascript:void(0);' : $linkHref }}"
            target="{{ $menu['target'] ?? '_self' }}"
            data-path="{{ $menu['path'] }}"
            data-admin-tab="{{ $shouldOpenTab ? '1' : '0' }}"
            data-tab-mode="{{ $isExternalLink ? 'external' : 'internal' }}"
            data-tab-title="{{ $menu['title'] ?? '' }}"
-           @if($hasChildren) data-toggle="collapse" data-target="#submenu-{{ md5($menu['path'] ?? $menu['id'] ?? uniqid()) }}" @endif>
+           @if($hasChildren)
+               data-toggle="collapse"
+               data-target="#{{ $submenuId }}"
+               role="button"
+               aria-expanded="false"
+               aria-controls="{{ $submenuId }}"
+           @endif>
 
             {{-- 图标 --}}
             @if(!empty($menu['icon']))
@@ -51,7 +63,7 @@
                     </svg>
                 @else
                     {{-- 其他图标 --}}
-                    <i class="{{ $menu['icon'] }}></i>
+                    <i class="{{ $menu['icon'] }}"></i>
                 @endif
             @else
                 {{-- 默认图标占位 --}}
@@ -75,10 +87,13 @@
         </a>
 
         {{-- 子菜单 --}}
-        @if($hasChildren)
-            <ul class="nav flex-column ms-3 collapse" id="submenu-{{ md5($menu['path'] ?? $menu['id'] ?? uniqid()) }}">
+        @if($hasChildren && $submenuId)
+            <ul class="nav flex-column ms-3 collapse sidebar-submenu"
+                id="{{ $submenuId }}"
+                data-menu-level="{{ $nextLevel }}"
+                style="--menu-level: {{ $nextLevel }};">
                 @foreach($menu['children'] as $child)
-                    @include('admin.components.sidebar-menu-item', ['menu' => $child])
+                    @include('admin.components.sidebar-menu-item', ['menu' => $child, 'level' => $nextLevel])
                 @endforeach
             </ul>
         @endif
