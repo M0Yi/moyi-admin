@@ -762,8 +762,8 @@ img.sidebar-brand__logo {
 .sidebar .nav-link span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: all 0.3s ease; }
 .sidebar-heading { padding: 1rem 1.5rem 0.5rem; font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; color: #94a3b8; }
 .sidebar .nav .nav { padding-left: 0; margin-top: 0.25rem; margin-bottom: 0.25rem; }
-.sidebar .nav .nav .nav-link { padding-left: 3rem; font-size: 0.85rem; }
-.sidebar .nav .nav .nav .nav-link { padding-left: 4rem; }
+.sidebar .nav .nav .nav-link { padding-left: 1.5rem; font-size: 0.85rem; }
+.sidebar .nav .nav .nav .nav-link { padding-left: 1.5rem; }
 .sidebar .badge { font-size: 0.65rem; padding: 0.25rem 0.5rem; }
 
 /* 子菜单展开/折叠 */
