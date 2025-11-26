@@ -742,14 +742,19 @@ function formatDate(date, format = 'YYYY-MM-DD HH:mm:ss') {
                 while (currentSubmenu) {
                     currentSubmenu.classList.add('show');
                     const parentLink = sidebar.querySelector(`.nav-link[data-target="#${currentSubmenu.id}"]`);
+                    if (!parentLink) {
+                        break;
+                    }
+                    parentLink.classList.add('active-parent');
                     updateArrowState(parentLink, true);
-                    currentSubmenu = parentLink ? parentLink.closest('.collapse') : null;
+                    currentSubmenu = parentLink.closest('.collapse');
                 }
             };
 
             // 先清空所有 active 状态
             navLinks.forEach(link => {
                 link.classList.remove('active');
+                link.classList.remove('active-parent');
                 if (link.classList.contains('has-children')) {
                     updateArrowState(link, false);
                 }
