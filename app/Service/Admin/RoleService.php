@@ -25,16 +25,11 @@ class RoleService
      */
     public function getList(array $params = []): array
     {
+        // 角色已解耦站点，全局共享，只有超级管理员可以管理角色
         $query = AdminRole::query()
             ->with(['permissions']) // 预加载权限
             ->orderBy('sort', 'asc')
             ->orderBy('id', 'asc');
-
-        // 站点过滤
-        $siteId = $params['site_id'] ?? site_id() ?? 0;
-        if ($siteId && !is_super_admin()) {
-            $query->where('site_id', $siteId);
-        }
 
         // 关键词搜索
         if (!empty($params['keyword'])) {
@@ -68,14 +63,11 @@ class RoleService
      */
     public function getById(int $id): AdminRole
     {
-        $query = AdminRole::query()->where('id', $id);
-        
-        $siteId = site_id() ?? 0;
-        if ($siteId && !is_super_admin()) {
-            $query->where('site_id', $siteId);
-        }
-
-        $role = $query->with(['permissions'])->first();
+        // 角色已解耦站点，全局共享
+        $role = AdminRole::query()
+            ->where('id', $id)
+            ->with(['permissions'])
+            ->first();
 
         if (!$role) {
             throw new BusinessException(ErrorCode::NOT_FOUND, '角色不存在');
@@ -95,10 +87,8 @@ class RoleService
      */
     public function create(array $data): AdminRole
     {
-        $siteId = $data['site_id'] ?? site_id() ?? 0;
-        
-        // 检查标识是否存在
-        if (AdminRole::where('slug', $data['slug'])->where('site_id', $siteId)->exists()) {
+        // 角色已解耦站点，全局共享，检查标识是否存在（全局唯一）
+        if (AdminRole::where('slug', $data['slug'])->exists()) {
             throw new BusinessException(ErrorCode::VALIDATION_ERROR, '角色标识已存在');
         }
 
@@ -108,8 +98,6 @@ class RoleService
             $hasPermissionField = array_key_exists('permission_ids', $data);
             $permissionIds = $hasPermissionField ? $data['permission_ids'] : [];
             unset($data['permission_ids']);
-            
-            $data['site_id'] = $siteId;
             
             // 创建角色（只包含 fillable 中的字段）
             $role = AdminRole::create($data);
@@ -137,11 +125,10 @@ class RoleService
     public function update(int $id, array $data): AdminRole
     {
         $role = $this->getById($id);
-        $siteId = $role->site_id;
 
-        // 检查标识唯一性
+        // 检查标识唯一性（全局唯一）
         if (isset($data['slug']) && $data['slug'] !== $role->slug) {
-            if (AdminRole::where('slug', $data['slug'])->where('site_id', $siteId)->where('id', '!=', $id)->exists()) {
+            if (AdminRole::where('slug', $data['slug'])->where('id', '!=', $id)->exists()) {
                 throw new BusinessException(ErrorCode::VALIDATION_ERROR, '角色标识已存在');
             }
         }
@@ -232,9 +219,8 @@ class RoleService
      */
     public function getPermissionOptions(): array
     {
-        $siteId = site_id() ?? 0;
+        // 权限已解耦站点，全局共享
         $permissions = AdminPermission::query()
-            ->where('site_id', $siteId)
             ->orderBy('sort', 'asc')
             ->orderBy('id', 'asc')
             ->get()
@@ -276,9 +262,8 @@ class RoleService
      */
     public function getPermissionTree(): array
     {
-        $siteId = site_id() ?? 0;
+        // 权限已解耦站点，全局共享
         $permissions = AdminPermission::query()
-            ->where('site_id', $siteId)
             ->where('status', 1)
             ->orderBy('sort', 'asc')
             ->orderBy('id', 'asc')

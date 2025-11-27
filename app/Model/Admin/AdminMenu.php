@@ -315,33 +315,25 @@ class AdminMenu extends Model
 
     /**
      * 构建树形结构
+     * 注意：菜单已解耦站点，全局共享
      *
-     * @param int $siteId 站点ID（0=全局）
      * @param int $parentId 父级ID
      * @return array
      */
-    public static function getTree(int $siteId = 0, int $parentId = 0): array
+    public static function getTree(int $parentId = 0): array
     {
         $query = self::query()
             ->active()
             ->visible()
-            ->ordered();
-
-        // 获取指定站点的菜单和全局菜单
-        if ($siteId > 0) {
-            $query->whereIn('site_id', [0, $siteId]);
-        } else {
-            $query->where('site_id', 0);
-        }
-
-        $query->where('parent_id', $parentId);
+            ->ordered()
+            ->where('parent_id', $parentId);
 
         $menus = $query->get();
 
         $tree = [];
         foreach ($menus as $menu) {
             $item = $menu->toArray();
-            $children = self::getTree($siteId, $menu->id);
+            $children = self::getTree($menu->id);
 
             if (!empty($children)) {
                 $item['children'] = $children;
@@ -355,30 +347,22 @@ class AdminMenu extends Model
 
     /**
      * 获取扁平化菜单列表（带层级缩进）
+     * 注意：菜单已解耦站点，全局共享
      *
-     * @param int $siteId 站点ID
      * @param int $parentId 父级ID
      * @param int $level 层级
      * @param string $prefix 前缀字符
      * @return array
      */
     public static function getList(
-        int $siteId = 0,
         int $parentId = 0,
         int $level = 0,
         string $prefix = '　'
     ): array {
         $query = self::query()
             ->active()
-            ->ordered();
-
-        if ($siteId > 0) {
-            $query->whereIn('site_id', [0, $siteId]);
-        } else {
-            $query->where('site_id', 0);
-        }
-
-        $query->where('parent_id', $parentId);
+            ->ordered()
+            ->where('parent_id', $parentId);
 
         $menus = $query->get();
 
@@ -391,7 +375,7 @@ class AdminMenu extends Model
             $list[] = $item;
 
             // 递归获取子菜单
-            $children = self::getList($siteId, $menu->id, $level + 1, $prefix);
+            $children = self::getList($menu->id, $level + 1, $prefix);
             if (!empty($children)) {
                 $list = array_merge($list, $children);
             }

@@ -19,9 +19,8 @@ class PermissionService
      */
     public function getTree(array $params = []): array
     {
-        $siteId = $params['site_id'] ?? site_id() ?? 0;
+        // 角色和权限已解耦站点，全局共享
         $permissions = AdminPermission::query()
-            ->where('site_id', $siteId)
             ->orderBy('sort', 'asc')
             ->orderBy('id', 'asc')
             ->get()
@@ -38,9 +37,8 @@ class PermissionService
      */
     public function getList(array $params = []): array
     {
-        $siteId = $params['site_id'] ?? site_id() ?? 0;
+        // 角色和权限已解耦站点，全局共享
         $query = AdminPermission::query()
-            ->where('site_id', $siteId)
             ->orderBy('sort', 'asc')
             ->orderBy('id', 'asc');
 
@@ -90,14 +88,8 @@ class PermissionService
      */
     public function getById(int $id): AdminPermission
     {
-        $query = AdminPermission::query()->where('id', $id);
-        
-        $siteId = site_id() ?? 0;
-        if ($siteId && !is_super_admin()) {
-            $query->where('site_id', $siteId);
-        }
-
-        $permission = $query->first();
+        // 角色和权限已解耦站点，全局共享
+        $permission = AdminPermission::query()->where('id', $id)->first();
 
         if (!$permission) {
             throw new BusinessException(ErrorCode::NOT_FOUND, '权限不存在');
@@ -114,21 +106,19 @@ class PermissionService
      */
     public function create(array $data): AdminPermission
     {
-        $siteId = $data['site_id'] ?? site_id() ?? 0;
-        
-        // 检查标识是否存在
-        if (AdminPermission::where('slug', $data['slug'])->where('site_id', $siteId)->exists()) {
+        // 角色和权限已解耦站点，全局共享
+        // 检查标识是否存在（全局唯一）
+        if (AdminPermission::where('slug', $data['slug'])->exists()) {
             throw new BusinessException(ErrorCode::VALIDATION_ERROR, '权限标识已存在');
         }
 
         // 检查父级是否存在
         if (!empty($data['parent_id'])) {
-            if (!AdminPermission::where('id', $data['parent_id'])->where('site_id', $siteId)->exists()) {
+            if (!AdminPermission::where('id', $data['parent_id'])->exists()) {
                 throw new BusinessException(ErrorCode::VALIDATION_ERROR, '父级权限不存在');
             }
         }
 
-        $data['site_id'] = $siteId;
         $data['parent_id'] = $data['parent_id'] ?? 0;
 
         return AdminPermission::create($data);
@@ -144,11 +134,10 @@ class PermissionService
     public function update(int $id, array $data): AdminPermission
     {
         $permission = $this->getById($id);
-        $siteId = $permission->site_id;
 
-        // 检查标识唯一性
+        // 检查标识唯一性（全局唯一）
         if (isset($data['slug']) && $data['slug'] !== $permission->slug) {
-            if (AdminPermission::where('slug', $data['slug'])->where('site_id', $siteId)->where('id', '!=', $id)->exists()) {
+            if (AdminPermission::where('slug', $data['slug'])->where('id', '!=', $id)->exists()) {
                 throw new BusinessException(ErrorCode::VALIDATION_ERROR, '权限标识已存在');
             }
         }
@@ -165,7 +154,7 @@ class PermissionService
                     throw new BusinessException(ErrorCode::VALIDATION_ERROR, '不能将子级设为父级');
                 }
 
-                if (!AdminPermission::where('id', $data['parent_id'])->where('site_id', $siteId)->exists()) {
+                if (!AdminPermission::where('id', $data['parent_id'])->exists()) {
                     throw new BusinessException(ErrorCode::VALIDATION_ERROR, '父级权限不存在');
                 }
             }
@@ -251,9 +240,8 @@ class PermissionService
      */
     public function getParentOptions(?int $excludeId = null): array
     {
-        $siteId = site_id() ?? 0;
+        // 角色和权限已解耦站点，全局共享
         $query = AdminPermission::query()
-            ->where('site_id', $siteId)
             ->orderBy('sort', 'asc')
             ->orderBy('id', 'asc');
 

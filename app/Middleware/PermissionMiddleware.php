@@ -60,13 +60,8 @@ class PermissionMiddleware implements MiddlewareInterface
             return $handler->handle($request);
         }
 
-        $siteId = site_id() ?? 0;
-
-        // 查询所有可能匹配当前 method 的权限规则
+        // 查询所有可能匹配当前 method 的权限规则（角色和权限已解耦站点，全局共享）
         $permissions = AdminPermission::query()
-            ->when($siteId > 0, static function ($query) use ($siteId) {
-                return $query->where('site_id', $siteId);
-            })
             ->where('status', 1)
             ->whereNotNull('path')
             ->where('path', '!=', '')

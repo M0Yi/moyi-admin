@@ -4,10 +4,10 @@
     use App\Model\Admin\AdminUser;
     use Hyperf\Context\Context;
 
+    // 菜单已解耦站点，全局共享
     $sidebarMenus = AdminMenu::query()
         ->where('status', 1)
         ->where('visible', 1)
-        ->whereIn('site_id', [0, site_id()])
         ->orderBy('sort', 'asc')
         ->orderBy('id', 'asc')
         ->get()
@@ -46,21 +46,14 @@
 
     $allowedPermissions = [];
     if (! $isSuperAdmin && $userId !== null) {
-        $siteId = site_id() ?? 0;
-
+        // 角色和权限已解耦站点，全局共享
         $allowedPermissions = AdminPermission::query()
             ->select('slug')
             ->where('status', 1)
             ->whereNotNull('slug')
             ->where('slug', '!=', '')
-            ->when($siteId > 0, static function ($query) use ($siteId) {
-                return $query->whereIn('site_id', [0, $siteId]);
-            })
-            ->whereHas('roles', function ($roleQuery) use ($userId, $siteId) {
+            ->whereHas('roles', function ($roleQuery) use ($userId) {
                 $roleQuery->where('status', 1)
-                    ->when($siteId > 0, static function ($query) use ($siteId) {
-                        return $query->whereIn('site_id', [0, $siteId]);
-                    })
                     ->whereHas('users', static function ($userQuery) use ($userId) {
                         $userQuery->where('admin_users.id', $userId);
                     });

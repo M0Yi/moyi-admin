@@ -16,7 +16,7 @@
     function init(options = {}) {
         const {
             passwordFieldSelector = '[data-field-name="password"] input',
-            roleFieldSelector = '[data-field-name="role_ids"]'
+            roleFieldSelector = '[data-field-name="role_ids"]',
         } = options;
 
         const passwordInput = document.querySelector(passwordFieldSelector);
@@ -75,11 +75,13 @@
             const checkboxSelector = 'input[type="checkbox"]';
             const getCheckboxes = () => Array.from(roleField.querySelectorAll(checkboxSelector));
 
-            function updateSummary() {
+            const updateSummary = () => {
                 const total = getCheckboxes().length;
                 const checked = getCheckboxes().filter(cb => cb.checked).length;
-                summary.textContent = `已选择 ${checked} / ${total} 个角色`;
-            }
+                summary.textContent = total === 0
+                    ? '暂无可分配角色'
+                    : `已选择 ${checked} / ${total} 个角色`;
+            };
 
             roleField.addEventListener('change', event => {
                 if (event.target.matches(checkboxSelector)) {
@@ -92,8 +94,7 @@
     }
 
     window.UserForm = {
-        init
+        init,
     };
 })();
-
 

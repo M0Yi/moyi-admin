@@ -80,9 +80,9 @@ class InstallController extends AbstractController
             $site = $this->createSite($data);
             logger()->info('站点创建完成，ID=' . $site->id);
 
-            // 2. 创建超级管理员角色
+            // 2. 创建超级管理员角色（角色已解耦站点，全局共享）
             logger()->info('开始创建超级管理员角色');
-            $superAdminRole = $this->createSuperAdminRole($site->id);
+            $superAdminRole = $this->createSuperAdminRole();
             logger()->info('超级管理员角色创建完成，ID=' . $superAdminRole->id);
 
             // 3. 创建默认权限
@@ -238,11 +238,17 @@ class InstallController extends AbstractController
 
     /**
      * 创建超级管理员角色
+     * 注意：角色已解耦站点，全局共享
      */
-    protected function createSuperAdminRole(int $siteId): AdminRole
+    protected function createSuperAdminRole(): AdminRole
     {
+        // 检查是否已存在超级管理员角色（全局唯一）
+        $existingRole = AdminRole::where('slug', 'super-admin')->first();
+        if ($existingRole) {
+            return $existingRole;
+        }
+
         return AdminRole::create([
-            'site_id' => $siteId,
             'name' => '超级管理员',
             'slug' => 'super-admin',
             'description' => '拥有所有权限的超级管理员',

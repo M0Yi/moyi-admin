@@ -734,14 +734,16 @@
 
         renderCheckboxGroup(field) {
             const options = this.getOptions(field);
+            const groupAttr = `data-checkbox-group="${this.escapeAttr(field.name)}"`;
+
             if (!options.length) {
-                return '<div class="text-muted small">未配置选项</div>';
+                return `<div class="text-muted small" ${groupAttr}>未配置选项</div>`;
             }
 
             const currentValue = this.normalizeArrayValue(this.getFieldValue(field));
 
             return `
-                <div class="d-flex flex-wrap gap-3">
+                <div class="d-flex flex-wrap gap-3 universal-checkbox-group" ${groupAttr}>
                     ${options
                         .map((option, index) => {
                             const id = `${this.getFieldId(field)}_${index}`;

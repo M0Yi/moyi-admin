@@ -22,12 +22,11 @@ class MenuService
      */
     public function getTree(array $params = []): array
     {
-        $siteId = $params['site_id'] ?? site_id() ?? 0;
+        // 菜单已解耦站点，全局共享
         $parentId = $params['parent_id'] ?? 0;
         $status = $params['status'] ?? null;
 
         $query = AdminMenu::query()
-            ->where('site_id', $siteId)
             ->where('parent_id', $parentId)
             ->orderBy('sort', 'asc')
             ->orderBy('id', 'asc');
@@ -45,7 +44,6 @@ class MenuService
             
             // 递归获取子菜单
             $children = $this->getTree([
-                'site_id' => $siteId,
                 'parent_id' => $menu->id,
                 'status' => $status,
             ]);
@@ -68,10 +66,8 @@ class MenuService
      */
     public function getList(array $params = []): array
     {
-        $siteId = $params['site_id'] ?? site_id() ?? 0;
-
+        // 菜单已解耦站点，全局共享
         $query = AdminMenu::query()
-            ->where('site_id', $siteId)
             ->orderBy('sort', 'asc')
             ->orderBy('id', 'asc');
 
@@ -117,11 +113,9 @@ class MenuService
      */
     public function getById(int $id): AdminMenu
     {
-        $siteId = site_id() ?? 0;
-        
+        // 菜单已解耦站点，全局共享
         $menu = AdminMenu::query()
             ->where('id', $id)
-            ->where('site_id', $siteId)
             ->first();
 
         if (!$menu) {
@@ -375,10 +369,8 @@ class MenuService
      */
     public function getParentOptions(?int $excludeId = null): array
     {
-        $siteId = site_id() ?? 0;
-
+        // 菜单已解耦站点，全局共享
         $query = AdminMenu::query()
-            ->where('site_id', $siteId)
             ->where('status', 1)
             ->orderBy('sort', 'asc')
             ->orderBy('id', 'asc');
@@ -455,11 +447,11 @@ class MenuService
      */
     public function create(array $data): AdminMenu
     {
+        // 菜单已解耦站点，全局共享
         // 验证父级菜单
         if (!empty($data['parent_id'])) {
             $parent = AdminMenu::query()
                 ->where('id', $data['parent_id'])
-                ->where('site_id', $data['site_id'] ?? site_id() ?? 0)
                 ->first();
 
             if (!$parent) {
@@ -467,10 +459,9 @@ class MenuService
             }
         }
 
-        // 验证路径唯一性
+        // 验证路径唯一性（全局唯一）
         if (!empty($data['path'])) {
             $exists = AdminMenu::query()
-                ->where('site_id', $data['site_id'] ?? site_id() ?? 0)
                 ->where('path', $data['path'])
                 ->exists();
 
@@ -480,7 +471,6 @@ class MenuService
         }
 
         // 设置默认值
-        $data['site_id'] = $data['site_id'] ?? site_id() ?? 0;
         $data['parent_id'] = $data['parent_id'] ?? 0;
         $data['type'] = $data['type'] ?? AdminMenu::TYPE_MENU;
         $data['target'] = $data['target'] ?? AdminMenu::TARGET_SELF;
@@ -516,9 +506,9 @@ class MenuService
                 throw new BusinessException(ErrorCode::VALIDATION_ERROR, '不能将子菜单设为父级');
             }
 
+            // 菜单已解耦站点，全局共享
             $parent = AdminMenu::query()
                 ->where('id', $data['parent_id'])
-                ->where('site_id', $menu->site_id)
                 ->first();
 
             if (!$parent) {
@@ -526,10 +516,9 @@ class MenuService
             }
         }
 
-        // 验证路径唯一性（排除自己）
+        // 验证路径唯一性（排除自己，全局唯一）
         if (!empty($data['path']) && $data['path'] != $menu->path) {
             $exists = AdminMenu::query()
-                ->where('site_id', $menu->site_id)
                 ->where('path', $data['path'])
                 ->where('id', '!=', $id)
                 ->exists();
@@ -576,7 +565,7 @@ class MenuService
      */
     public function batchDelete(array $ids): int
     {
-        $siteId = site_id() ?? 0;
+        // 菜单已解耦站点，全局共享
         $count = 0;
 
         Db::beginTransaction();
@@ -584,7 +573,6 @@ class MenuService
             foreach ($ids as $id) {
                 $menu = AdminMenu::query()
                     ->where('id', $id)
-                    ->where('site_id', $siteId)
                     ->first();
 
                 if (!$menu) {
@@ -685,14 +673,12 @@ class MenuService
      */
     public function updateSort(array $sorts): bool
     {
-        $siteId = site_id() ?? 0;
-
+        // 菜单已解耦站点，全局共享
         Db::beginTransaction();
         try {
             foreach ($sorts as $item) {
                 AdminMenu::query()
                     ->where('id', $item['id'])
-                    ->where('site_id', $siteId)
                     ->update(['sort' => $item['sort']]);
             }
 

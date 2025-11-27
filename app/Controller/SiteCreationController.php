@@ -7,6 +7,7 @@ namespace App\Controller;
 use App\Controller\Admin\InstallController;
 use App\Model\Admin\AdminRole;
 use App\Model\Admin\AdminSite;
+use App\Model\Admin\AdminUser;
 use App\Support\SiteVerificationToken;
 use Hyperf\DbConnection\Db;
 use Psr\Http\Message\ResponseInterface;
@@ -556,6 +557,23 @@ class SiteCreationController extends InstallController
     private function isPublicCreationEnabled(): bool
     {
         return (bool) config('site.public_creation_enabled', false);
+    }
+
+    /**
+     * 公共站点注册产生的管理员不自动授予超级管理员
+     */
+    protected function createAdminUser(array $data, int $siteId): AdminUser
+    {
+        return AdminUser::create([
+            'site_id' => $siteId,
+            'username' => $data['username'],
+            'password' => $data['password'],
+            'email' => $data['email'] ?? '',
+            'mobile' => $data['mobile'] ?? '',
+            'real_name' => $data['real_name'] ?? '站点管理员',
+            'status' => 1,
+            'is_admin' => 0,
+        ]);
     }
 }
 

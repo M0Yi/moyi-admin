@@ -118,7 +118,12 @@ class UserService
             throw new BusinessException(ErrorCode::VALIDATION_ERROR, '邮箱已存在');
         }
 
-        $roleIds = $this->extractRoleIds($data);
+        $isSuperAdmin = is_super_admin();
+        if (! $isSuperAdmin && array_key_exists('role_ids', $data)) {
+            throw new BusinessException(ErrorCode::FORBIDDEN, '只有超级管理员可以分配角色');
+        }
+
+        $roleIds = $isSuperAdmin ? $this->extractRoleIds($data) : null;
 
         Db::beginTransaction();
         try {
@@ -174,7 +179,12 @@ class UserService
             }
         }
 
-        $roleIds = $this->extractRoleIds($data, true);
+        $isSuperAdmin = is_super_admin();
+        if (! $isSuperAdmin && array_key_exists('role_ids', $data)) {
+            throw new BusinessException(ErrorCode::FORBIDDEN, '只有超级管理员可以分配角色');
+        }
+
+        $roleIds = $isSuperAdmin ? $this->extractRoleIds($data, true) : null;
 
         Db::beginTransaction();
         try {
@@ -263,13 +273,12 @@ class UserService
      *
      * @return array
      */
-    public function getRoleOptions(?int $siteId = null): array
+    public function getRoleOptions(): array
     {
-        $siteId = $siteId ?? site_id() ?? 0;
         $roles = AdminRole::query()
-            ->where('site_id', $siteId)
             ->where('status', 1)
             ->orderBy('sort', 'asc')
+            ->orderBy('id', 'asc')
             ->get();
 
         $options = [];
@@ -294,7 +303,7 @@ class UserService
         $isSuperAdmin = is_super_admin();
         $siteOptions = $isSuperAdmin ? $this->getSiteOptions() : [];
         $defaultSiteId = (int) ($user?->site_id ?? site_id() ?? ($siteOptions[0]['value'] ?? 0));
-        $roleOptions = $this->getRoleOptions($defaultSiteId);
+        $roleOptions = $isSuperAdmin ? $this->getRoleOptions() : [];
 
         $fields = [
             [
@@ -343,15 +352,6 @@ class UserService
                 'col' => 'col-12 col-md-6',
             ],
             [
-                'name' => 'role_ids',
-                'label' => '角色',
-                'type' => 'checkbox', // 多选框
-                'required' => false,
-                'options' => $roleOptions,
-                'default' => $user?->role_ids ?? [],
-                'col' => 'col-12', 
-            ],
-            [
                 'name' => 'status',
                 'label' => '状态',
                 'type' => 'switch',
@@ -393,6 +393,26 @@ class UserService
                 'help' => '超级管理员可为用户指定所属站点',
                 'col' => 'col-12 col-md-6',
             ]]);
+        }
+
+        if ($isSuperAdmin) {
+            $roleField = [
+                'name' => 'role_ids',
+                'label' => '角色',
+                'type' => 'checkbox',
+                'required' => false,
+                'options' => $roleOptions,
+                'default' => $user?->role_ids ?? [],
+                'col' => 'col-12',
+            ];
+
+            $fieldNames = array_column($fields, 'name');
+            $statusIndex = array_search('status', $fieldNames, true);
+            if ($statusIndex === false) {
+                $fields[] = $roleField;
+            } else {
+                array_splice($fields, $statusIndex, 0, [$roleField]);
+            }
         }
 
         return $fields;

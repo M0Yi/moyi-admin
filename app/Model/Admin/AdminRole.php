@@ -9,7 +9,6 @@ use Carbon\Carbon;
 
 /**
  * @property int $id
- * @property int|null $site_id
  * @property string $name
  * @property string $slug
  * @property string $description
@@ -29,7 +28,6 @@ class AdminRole extends Model
      * 可批量赋值的属性
      */
     protected array $fillable = [
-        'site_id',
         'name',
         'slug',
         'description',
@@ -42,20 +40,11 @@ class AdminRole extends Model
      */
     protected array $casts = [
         'id' => 'integer',
-        'site_id' => 'integer',
         'status' => 'integer',
         'sort' => 'integer',
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
     ];
-
-    /**
-     * 关联站点
-     */
-    public function site()
-    {
-        return $this->belongsTo(AdminSite::class, 'site_id', 'id');
-    }
 
     /**
      * 关联用户
@@ -81,14 +70,6 @@ class AdminRole extends Model
             'role_id',
             'permission_id'
         )->withTimestamps();
-    }
-
-    /**
-     * 查询作用域：指定站点
-     */
-    public function scopeBySite($query, int $siteId)
-    {
-        return $query->where('site_id', $siteId);
     }
 
     /**
