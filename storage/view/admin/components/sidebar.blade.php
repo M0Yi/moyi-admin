@@ -1,5 +1,9 @@
 @php
     use App\Model\Admin\AdminMenu;
+    use App\Model\Admin\AdminPermission;
+    use App\Model\Admin\AdminUser;
+    use Hyperf\Context\Context;
+
     $sidebarMenus = AdminMenu::query()
         ->where('status', 1)
         ->where('visible', 1)
@@ -9,6 +13,159 @@
         ->get()
         ->toArray();
     $sidebarMenus = AdminMenu::buildTree($sidebarMenus);
+
+    $currentUser = Context::get('admin_user');
+    $userId = null;
+    $isSuperAdmin = false;
+
+    if ($currentUser instanceof AdminUser) {
+        $userId = (int) $currentUser->id;
+        $isSuperAdmin = (int) $currentUser->is_admin === 1;
+    } elseif (is_array($currentUser)) {
+        $userId = isset($currentUser['id']) ? (int) $currentUser['id'] : null;
+        $isSuperAdmin = (int) ($currentUser['is_admin'] ?? 0) === 1;
+    }
+
+    if ($userId === null) {
+        try {
+            $guard = auth('admin');
+            if ($guard && $guard->check()) {
+                $authUser = $guard->user();
+                if ($authUser instanceof AdminUser) {
+                    $userId = (int) $authUser->id;
+                    $isSuperAdmin = (int) $authUser->is_admin === 1;
+                } elseif (is_array($authUser)) {
+                    $userId = isset($authUser['id']) ? (int) $authUser['id'] : null;
+                    $isSuperAdmin = (int) ($authUser['is_admin'] ?? 0) === 1;
+                }
+            }
+        } catch (\Throwable $exception) {
+            $userId = null;
+        }
+    }
+
+    $allowedPermissions = [];
+    if (! $isSuperAdmin && $userId !== null) {
+        $siteId = site_id() ?? 0;
+
+        $allowedPermissions = AdminPermission::query()
+            ->select('slug')
+            ->where('status', 1)
+            ->whereNotNull('slug')
+            ->where('slug', '!=', '')
+            ->when($siteId > 0, static function ($query) use ($siteId) {
+                return $query->whereIn('site_id', [0, $siteId]);
+            })
+            ->whereHas('roles', function ($roleQuery) use ($userId, $siteId) {
+                $roleQuery->where('status', 1)
+                    ->when($siteId > 0, static function ($query) use ($siteId) {
+                        return $query->whereIn('site_id', [0, $siteId]);
+                    })
+                    ->whereHas('users', static function ($userQuery) use ($userId) {
+                        $userQuery->where('admin_users.id', $userId);
+                    });
+            })
+            ->pluck('slug')
+            ->toArray();
+
+        $allowedPermissions = array_values(array_unique(array_filter($allowedPermissions)));
+    }
+
+    if (! $isSuperAdmin && $sidebarMenus !== []) {
+        $permissionLookup = $allowedPermissions !== [] ? array_fill_keys($allowedPermissions, true) : [];
+
+        $normalizePermissionSlugs = static function (mixed $raw): array {
+            if ($raw === null || $raw === '') {
+                return [];
+            }
+
+            if (is_array($raw)) {
+                $normalized = array_map(static fn ($value) => trim((string) $value), $raw);
+            } else {
+                $parts = preg_split('/[,\|]+/', (string) $raw) ?: [];
+                $normalized = array_map(static fn ($value) => trim($value), $parts);
+            }
+
+            return array_values(array_filter($normalized, static fn ($value) => $value !== ''));
+        };
+
+        $hasMenuPermission = static function (array $slugs) use ($permissionLookup): bool {
+            if ($slugs === []) {
+                return true;
+            }
+
+            if ($permissionLookup === []) {
+                return false;
+            }
+
+            foreach ($slugs as $slug) {
+                if (isset($permissionLookup[$slug])) {
+                    return true;
+                }
+            }
+
+            return false;
+        };
+
+        $filterMenusByPermission = static function (array $menus) use (
+            &$filterMenusByPermission,
+            $normalizePermissionSlugs,
+            $hasMenuPermission
+        ): array {
+            $filtered = [];
+
+            foreach ($menus as $menu) {
+                $children = $menu['children'] ?? [];
+                if (! empty($children)) {
+                    $menu['children'] = $filterMenusByPermission($children);
+                }
+
+                $menuSlugs = $normalizePermissionSlugs($menu['permission'] ?? null);
+                $hasPermission = $hasMenuPermission($menuSlugs);
+                $hasVisibleChildren = isset($menu['children']) && count($menu['children']) > 0;
+
+                if ($menu['type'] === AdminMenu::TYPE_GROUP) {
+                    if ($hasVisibleChildren) {
+                        $filtered[] = $menu;
+                    }
+                    continue;
+                }
+
+                if ($menu['type'] === AdminMenu::TYPE_DIVIDER) {
+                    $filtered[] = $menu;
+                    continue;
+                }
+
+                if ($hasPermission || $hasVisibleChildren) {
+                    $filtered[] = $menu;
+                }
+            }
+
+            $cleaned = [];
+            foreach ($filtered as $item) {
+                if ($item['type'] === AdminMenu::TYPE_DIVIDER) {
+                    if ($cleaned === []) {
+                        continue;
+                    }
+
+                    if ($cleaned[count($cleaned) - 1]['type'] === AdminMenu::TYPE_DIVIDER) {
+                        continue;
+                    }
+                }
+
+                $cleaned[] = $item;
+            }
+
+            while (! empty($cleaned) && end($cleaned)['type'] === AdminMenu::TYPE_DIVIDER) {
+                array_pop($cleaned);
+            }
+
+            return $cleaned;
+        };
+
+        $sidebarMenus = $filterMenusByPermission($sidebarMenus);
+    }
+
     $siteName = site()?->name ?? '管理后台';
     $siteSlogan = site()?->slogan ?? '';
     $siteLogo = site()?->logo ?? null;

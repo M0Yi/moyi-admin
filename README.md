@@ -139,6 +139,17 @@ REDIS_PORT=6379
 REDIS_DB=0
 ```
 
+**🆕 自助创建站点开关**
+
+如果希望允许外部访问者自行创建独立站点，可以在 `.env` 中加入：
+
+```env
+ENABLE_PUBLIC_SITE_CREATION=true
+SITE_PUBLIC_DEFAULT_ROLE_ID=2
+```
+
+默认情况下该能力处于关闭状态，只有在显式启用后才会开放 `/site/register` 向导页面。`SITE_PUBLIC_DEFAULT_ROLE_ID` 可用来指定新站点管理员默认绑定的角色（默认值为 2）。
+
 **💡 多数据库配置**：
 
 系统支持管理多个数据库。如需配置多个数据库连接，请编辑 `config/autoload/databases.php` 文件：

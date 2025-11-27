@@ -6,6 +6,7 @@ namespace App\Service\Admin;
 
 use App\Model\Admin\AdminCrudConfig;
 use Hyperf\Contract\ConfigInterface;
+use Hyperf\Database\Schema\Schema;
 use Hyperf\DbConnection\Db;
 use Hyperf\Di\Annotation\Inject;
 use Psr\Container\ContainerInterface;
@@ -27,6 +28,13 @@ class UniversalCrudService
 
     #[Inject]
     protected CrudService $crudService;
+
+    /**
+     * 缓存“连接.表”是否包含 site_id 列，避免重复查询信息架构
+     *
+     * @var array<string, bool>
+     */
+    private array $tableSiteIdColumnCache = [];
 
     /**
      * 从数据库获取 CRUD 配置
@@ -759,8 +767,10 @@ class UniversalCrudService
     {
         $tableName = $this->getTableName($model);
         $config = $this->getModelConfig($model);
+        $connectionName = $this->getConnectionName($config);
         $connection = $this->getConnection($config);
         $relations = $config['relations'] ?? [];
+        $currentSiteId = site_id();
 
         $query = $connection->table($tableName . ' as main');
 
@@ -1056,10 +1066,13 @@ class UniversalCrudService
                         $multipleQuery = $connection->table($relationTable)
                             ->whereIn($valueField, $ids);
                         
-                        // 如果有 site_id，添加站点过滤
-                        if ($hasSiteId) {
-                            $multipleQuery->where('site_id', site_id());
-                        }
+                        $this->applyRelationSiteFilter(
+                            $multipleQuery,
+                            $hasSiteId,
+                            $currentSiteId,
+                            $connectionName,
+                            $relationTable
+                        );
                         
                         $labels = $multipleQuery->pluck($labelField, $valueField)->toArray();
                         
@@ -1336,9 +1349,13 @@ class UniversalCrudService
                         $multipleQuery = $connection->table($relationTable)
                             ->whereIn($valueField, $ids);
                         
-                        if ($hasSiteId && $siteId) {
-                            $multipleQuery->where('site_id', $siteId);
-                        }
+                        $this->applyRelationSiteFilter(
+                            $multipleQuery,
+                            $hasSiteId,
+                            $siteId,
+                            $connectionName,
+                            $relationTable
+                        );
                         
                         $labels = $multipleQuery->pluck($labelField, $valueField)->toArray();
                         $row["{$field}_label"] = array_values($labels);
@@ -1370,9 +1387,13 @@ class UniversalCrudService
                             $multipleQuery = $connection->table($relationTable)
                                 ->whereIn($valueField, $ids);
                             
-                            if ($hasSiteId && $siteId) {
-                                $multipleQuery->where('site_id', $siteId);
-                            }
+                            $this->applyRelationSiteFilter(
+                                $multipleQuery,
+                                $hasSiteId,
+                                $siteId,
+                                $connectionName,
+                                $relationTable
+                            );
                             
                             $labels = $multipleQuery->pluck($labelField, $valueField)->toArray();
                             $labelArray = [];
@@ -1654,9 +1675,13 @@ class UniversalCrudService
                         $multipleQuery = $connection->table($relationTable)
                             ->whereIn($valueField, $ids);
                         
-                        if ($hasSiteId && $siteId) {
-                            $multipleQuery->where('site_id', $siteId);
-                        }
+                        $this->applyRelationSiteFilter(
+                            $multipleQuery,
+                            $hasSiteId,
+                            $siteId,
+                            $connectionName,
+                            $relationTable
+                        );
                         
                         $labels = $multipleQuery->pluck($labelField, $valueField)->toArray();
                         $row["{$field}_label"] = array_values($labels);
@@ -1688,9 +1713,13 @@ class UniversalCrudService
                             $multipleQuery = $connection->table($relationTable)
                                 ->whereIn($valueField, $ids);
                             
-                            if ($hasSiteId && $siteId) {
-                                $multipleQuery->where('site_id', $siteId);
-                            }
+                            $this->applyRelationSiteFilter(
+                                $multipleQuery,
+                                $hasSiteId,
+                                $siteId,
+                                $connectionName,
+                                $relationTable
+                            );
                             
                             $labels = $multipleQuery->pluck($labelField, $valueField)->toArray();
                             $labelArray = [];
@@ -2886,7 +2915,9 @@ class UniversalCrudService
     {
         $config = $this->getModelConfig($model);
         $relations = $config['relations'] ?? [];
+        $connectionName = $this->getConnectionName($config);
         $connection = $this->getConnection($config);
+        $currentSiteId = site_id();
 
         $options = [];
         foreach ($relations as $field => $relation) {
@@ -2898,8 +2929,14 @@ class UniversalCrudService
                 $query = $connection->table($relationTable);
 
                 // 如果关联表也有站点过滤（超级管理员跳过）
-                if (!empty($relation['has_site_id']) && site_id() && !is_super_admin()) {
-                    $query->where('site_id', site_id());
+                if (!is_super_admin()) {
+                    $this->applyRelationSiteFilter(
+                        $query,
+                        !empty($relation['has_site_id']),
+                        $currentSiteId,
+                        $connectionName,
+                        $relationTable
+                    );
                 }
 
                 $options[$field] = $query->select($valueField . ' as value', $labelField . ' as label')->get();
@@ -3176,6 +3213,78 @@ class UniversalCrudService
     {
         $connectionName = $this->getConnectionName($config);
         return Db::connection($connectionName);
+    }
+
+    /**
+     * 针对关联表应用站点过滤（仅当表真实存在 site_id 字段时）
+     *
+     * @param \Hyperf\Database\Query\Builder|\Hyperf\DbConnection\Query\Builder $query
+     */
+    protected function applyRelationSiteFilter($query, bool $hasSiteId, ?int $siteId, string $connectionName, ?string $table = null): void
+    {
+        if (! $this->shouldApplyRelationSiteFilter($hasSiteId, $siteId, $connectionName, $table)) {
+            return;
+        }
+
+        $query->where('site_id', $siteId);
+    }
+
+    protected function shouldApplyRelationSiteFilter(bool $hasSiteId, ?int $siteId, string $connectionName, ?string $table = null): bool
+    {
+        if (! $hasSiteId || $siteId === null || $siteId <= 0) {
+            return false;
+        }
+
+        if (empty($table)) {
+            return true;
+        }
+
+        return $this->tableHasSiteIdColumn($table, $connectionName);
+    }
+
+    protected function tableHasSiteIdColumn(string $table, string $connectionName): bool
+    {
+        $normalizedTable = $this->normalizeTableName($table);
+        if ($normalizedTable === '') {
+            return false;
+        }
+
+        $cacheKey = "{$connectionName}.{$normalizedTable}";
+        if (! array_key_exists($cacheKey, $this->tableSiteIdColumnCache)) {
+            try {
+                $this->tableSiteIdColumnCache[$cacheKey] = Schema::connection($connectionName)
+                    ->hasColumn($normalizedTable, 'site_id');
+            } catch (\Throwable $throwable) {
+                logger()->warning('[UniversalCrudService] 检查表的 site_id 字段失败', [
+                    'table' => $normalizedTable,
+                    'connection' => $connectionName,
+                    'error' => $throwable->getMessage(),
+                ]);
+                $this->tableSiteIdColumnCache[$cacheKey] = false;
+            }
+        }
+
+        return $this->tableSiteIdColumnCache[$cacheKey];
+    }
+
+    protected function normalizeTableName(string $table): string
+    {
+        $table = trim($table);
+        if ($table === '') {
+            return '';
+        }
+
+        // 去掉 AS/别名部分
+        if (str_contains(strtolower($table), ' as ')) {
+            $table = preg_split('/\s+as\s+/i', $table)[0] ?? $table;
+        }
+
+        // 去掉多余空格和反引号
+        $table = trim($table);
+        $parts = preg_split('/\s+/', $table);
+        $table = $parts[0] ?? $table;
+
+        return trim($table, '`');
     }
 
     /**

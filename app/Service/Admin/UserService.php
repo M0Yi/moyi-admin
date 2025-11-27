@@ -6,8 +6,9 @@ namespace App\Service\Admin;
 
 use App\Constants\ErrorCode;
 use App\Exception\BusinessException;
-use App\Model\Admin\AdminUser;
 use App\Model\Admin\AdminRole;
+use App\Model\Admin\AdminSite;
+use App\Model\Admin\AdminUser;
 use Hyperf\DbConnection\Db;
 
 class UserService
@@ -21,22 +22,38 @@ class UserService
     public function getList(array $params = []): array
     {
         $query = AdminUser::query()
-            ->with(['roles']) // 预加载角色
+            ->with(['roles', 'site']) // 预加载角色与站点
             ->orderBy('id', 'desc');
 
-        // 站点过滤
-        $siteId = $params['site_id'] ?? site_id() ?? 0;
-        if ($siteId && !is_super_admin()) {
-            $query->where('site_id', $siteId);
+        // 站点过滤：普通管理员固定当前站点，超级管理员可根据筛选选择站点
+        $requestedSiteId = isset($params['site_id']) ? (int) $params['site_id'] : 0;
+        $currentSiteId = (int) (site_id() ?? 0);
+        if (is_super_admin()) {
+            if ($requestedSiteId > 0) {
+                $query->where('site_id', $requestedSiteId);
+            }
+        } elseif ($currentSiteId > 0) {
+            $query->where('site_id', $currentSiteId);
         }
 
         // 关键词搜索
         if (!empty($params['keyword'])) {
-            $query->where(function ($q) use ($params) {
-                $q->where('username', 'like', "%{$params['keyword']}%")
-                    ->orWhere('email', 'like', "%{$params['keyword']}%")
-                    ->orWhere('real_name', 'like', "%{$params['keyword']}%");
+            $keyword = trim((string) $params['keyword']);
+            $query->where(function ($q) use ($keyword) {
+                $q->where('username', 'like', "%{$keyword}%")
+                    ->orWhere('email', 'like', "%{$keyword}%")
+                    ->orWhere('real_name', 'like', "%{$keyword}%")
+                    ->orWhere('mobile', 'like', "%{$keyword}%");
             });
+        }
+
+        // 精确搜索
+        $searchableFields = ['username', 'real_name', 'mobile', 'email'];
+        foreach ($searchableFields as $field) {
+            if (!empty($params[$field])) {
+                $value = trim((string) $params[$field]);
+                $query->where($field, 'like', "%{$value}%");
+            }
         }
 
         // 状态筛选
@@ -78,9 +95,6 @@ class UserService
             throw new BusinessException(ErrorCode::NOT_FOUND, '用户不存在');
         }
 
-        // 转换角色ID为数组，方便前端回显
-        $user->role_ids = $user->roles->pluck('id')->toArray();
-
         return $user;
     }
 
@@ -92,7 +106,7 @@ class UserService
      */
     public function create(array $data): AdminUser
     {
-        $siteId = $data['site_id'] ?? site_id() ?? 0;
+        $siteId = $this->resolveSiteIdForWrite($data);
         
         // 检查用户名是否存在
         if (AdminUser::where('username', $data['username'])->where('site_id', $siteId)->exists()) {
@@ -104,16 +118,22 @@ class UserService
             throw new BusinessException(ErrorCode::VALIDATION_ERROR, '邮箱已存在');
         }
 
+        $roleIds = $this->extractRoleIds($data);
+
         Db::beginTransaction();
         try {
             $data['site_id'] = $siteId;
+            
+            // 将空字符串转换为 NULL，避免唯一约束冲突
+            $data = $this->normalizeNullableFields($data);
+            $data = $this->filterFillableFields($data);
             
             // 创建用户
             $user = AdminUser::create($data);
 
             // 关联角色
-            if (isset($data['role_ids']) && is_array($data['role_ids'])) {
-                $user->roles()->sync($data['role_ids']);
+            if ($roleIds !== null) {
+                $user->roles()->sync($roleIds);
             }
 
             Db::commit();
@@ -134,7 +154,11 @@ class UserService
     public function update(int $id, array $data): AdminUser
     {
         $user = $this->getById($id);
-        $siteId = $user->site_id;
+        $siteId = $this->resolveSiteIdForUpdate($data, $user->site_id);
+
+        // 先将空字符串转换为 NULL，避免唯一约束冲突
+        // 需要在唯一性检查之前进行规范化，确保检查的是规范化后的值
+        $data = $this->normalizeNullableFields($data);
 
         // 检查用户名唯一性
         if (isset($data['username']) && $data['username'] !== $user->username) {
@@ -143,12 +167,14 @@ class UserService
             }
         }
 
-        // 检查邮箱唯一性
-        if (isset($data['email']) && $data['email'] !== $user->email) {
+        // 检查邮箱唯一性（NULL 值不违反唯一约束，所以不需要检查 NULL 的唯一性）
+        if (isset($data['email']) && $data['email'] !== null && $data['email'] !== $user->email) {
             if (AdminUser::where('email', $data['email'])->where('site_id', $siteId)->where('id', '!=', $id)->exists()) {
                 throw new BusinessException(ErrorCode::VALIDATION_ERROR, '邮箱已存在');
             }
         }
+
+        $roleIds = $this->extractRoleIds($data, true);
 
         Db::beginTransaction();
         try {
@@ -157,11 +183,20 @@ class UserService
                 unset($data['password']);
             }
 
+            // 过滤可更新字段，避免非法字段导致更新失败
+            $data = $this->filterFillableFields($data);
+
+            if (! is_super_admin()) {
+                unset($data['site_id']);
+            } else {
+                $data['site_id'] = $siteId;
+            }
+
             $user->update($data);
 
             // 更新角色关联
-            if (isset($data['role_ids']) && is_array($data['role_ids'])) {
-                $user->roles()->sync($data['role_ids']);
+            if ($roleIds !== null) {
+                $user->roles()->sync($roleIds);
             }
 
             Db::commit();
@@ -228,9 +263,9 @@ class UserService
      *
      * @return array
      */
-    public function getRoleOptions(): array
+    public function getRoleOptions(?int $siteId = null): array
     {
-        $siteId = site_id() ?? 0;
+        $siteId = $siteId ?? site_id() ?? 0;
         $roles = AdminRole::query()
             ->where('site_id', $siteId)
             ->where('status', 1)
@@ -256,7 +291,10 @@ class UserService
      */
     public function getFormFields(string $scene = 'create', ?AdminUser $user = null): array
     {
-        $roleOptions = $this->getRoleOptions();
+        $isSuperAdmin = is_super_admin();
+        $siteOptions = $isSuperAdmin ? $this->getSiteOptions() : [];
+        $defaultSiteId = (int) ($user?->site_id ?? site_id() ?? ($siteOptions[0]['value'] ?? 0));
+        $roleOptions = $this->getRoleOptions($defaultSiteId);
 
         $fields = [
             [
@@ -344,7 +382,156 @@ class UserService
             ],
         ];
 
+        if ($isSuperAdmin) {
+            array_splice($fields, 1, 0, [[
+                'name' => 'site_id',
+                'label' => '站点',
+                'type' => 'select',
+                'required' => true,
+                'options' => $siteOptions,
+                'default' => (string) $defaultSiteId,
+                'help' => '超级管理员可为用户指定所属站点',
+                'col' => 'col-12 col-md-6',
+            ]]);
+        }
+
         return $fields;
+    }
+
+    /**
+     * 获取站点筛选选项
+     */
+    public function getSiteFilterOptions(): array
+    {
+        return $this->getSiteOptions();
+    }
+
+    /**
+     * 规范化可空字段：将空字符串转换为 NULL
+     * 避免数据库唯一约束冲突（NULL 不违反唯一约束，但空字符串会）
+     *
+     * @param array $data
+     * @return array
+     */
+    private function normalizeNullableFields(array $data): array
+    {
+        // 可空字段列表：这些字段在数据库中允许为 NULL，且有唯一约束
+        $nullableFields = ['email', 'mobile'];
+
+        foreach ($nullableFields as $field) {
+            if (isset($data[$field]) && $data[$field] === '') {
+                $data[$field] = null;
+            }
+        }
+
+        return $data;
+    }
+
+    /**
+     * 过滤可批量赋值的字段，避免意外字段导致更新失败
+     */
+    private function filterFillableFields(array $data): array
+    {
+        static $fillableMap = null;
+
+        if ($fillableMap === null) {
+            $fillable = (new AdminUser())->getFillable();
+            $fillableMap = array_flip($fillable);
+        }
+
+        if (empty($fillableMap)) {
+            return $data;
+        }
+
+        return array_intersect_key($data, $fillableMap);
+    }
+
+    /**
+     * 从数据中提取角色ID，并移除 role_ids 字段
+     *
+     * @return array<int>|null 返回 null 表示未提交角色信息
+     */
+    private function extractRoleIds(array &$data, bool $emptyWhenMissing = false): ?array
+    {
+        if (!array_key_exists('role_ids', $data)) {
+            return $emptyWhenMissing ? [] : null;
+        }
+
+        $roleIds = $data['role_ids'];
+        unset($data['role_ids']);
+
+        if (!is_array($roleIds)) {
+            return [];
+        }
+
+        $roleIds = array_map(
+            static fn($id) => (int)$id,
+            array_filter(
+                $roleIds,
+                static fn($id) => $id !== null && $id !== ''
+            )
+        );
+
+        return array_values(array_unique($roleIds));
+    }
+
+    private function resolveSiteIdForWrite(array &$data): int
+    {
+        if (is_super_admin() && isset($data['site_id']) && $data['site_id'] !== '') {
+            $siteId = (int) $data['site_id'];
+            $this->assertSiteExists($siteId);
+        } else {
+            $siteId = site_id() ?? 0;
+        }
+
+        if (! is_super_admin()) {
+            unset($data['site_id']);
+        }
+
+        return $siteId;
+    }
+
+    private function resolveSiteIdForUpdate(array &$data, int $currentSiteId): int
+    {
+        if (is_super_admin() && array_key_exists('site_id', $data) && $data['site_id'] !== '') {
+            $siteId = (int) $data['site_id'];
+            $this->assertSiteExists($siteId);
+            return $siteId;
+        }
+
+        $data['site_id'] = $currentSiteId;
+        return $currentSiteId;
+    }
+
+    private function assertSiteExists(int $siteId): void
+    {
+        if ($siteId <= 0) {
+            throw new BusinessException(ErrorCode::VALIDATION_ERROR, '请选择站点');
+        }
+
+        $exists = AdminSite::query()
+            ->where('id', $siteId)
+            ->where('status', AdminSite::STATUS_ENABLED)
+            ->exists();
+
+        if (! $exists) {
+            throw new BusinessException(ErrorCode::NOT_FOUND, '站点不存在或已停用');
+        }
+    }
+
+    private function getSiteOptions(): array
+    {
+        return AdminSite::query()
+            ->where('status', AdminSite::STATUS_ENABLED)
+            ->orderBy('id')
+            ->get(['id', 'name'])
+            ->map(static function (AdminSite $site) {
+                return [
+                    'value' => (string) $site->id,
+                    'label' => $site->name . " (#{$site->id})",
+                ];
+            })
+            ->toArray();
     }
 }
 

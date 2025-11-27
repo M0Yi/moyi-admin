@@ -6,13 +6,17 @@ namespace App\Service\Admin;
 
 use App\Constants\ErrorCode;
 use App\Exception\BusinessException;
-use App\Model\Admin\AdminRole;
 use App\Model\Admin\AdminPermission;
+use App\Model\Admin\AdminRole;
 use App\Model\Admin\AdminUser;
 use Hyperf\DbConnection\Db;
 
 class RoleService
 {
+    public function __construct()
+    {
+    }
+
     /**
      * 获取角色列表
      *
@@ -100,14 +104,19 @@ class RoleService
 
         Db::beginTransaction();
         try {
+            // 提取权限ID（permission_ids 不在 fillable 中，需要单独处理）
+            $hasPermissionField = array_key_exists('permission_ids', $data);
+            $permissionIds = $hasPermissionField ? $data['permission_ids'] : [];
+            unset($data['permission_ids']);
+            
             $data['site_id'] = $siteId;
             
-            // 创建角色
+            // 创建角色（只包含 fillable 中的字段）
             $role = AdminRole::create($data);
 
             // 关联权限
-            if (isset($data['permission_ids']) && is_array($data['permission_ids'])) {
-                $role->permissions()->sync($data['permission_ids']);
+            if ($hasPermissionField) {
+                $role->permissions()->sync(is_array($permissionIds) ? $permissionIds : []);
             }
 
             Db::commit();
@@ -139,11 +148,22 @@ class RoleService
 
         Db::beginTransaction();
         try {
-            $role->update($data);
+            // 提取权限ID（permission_ids 不在 fillable 中，需要单独处理）
+            $hasPermissionField = array_key_exists('permission_ids', $data);
+            $permissionIds = $hasPermissionField ? $data['permission_ids'] : [];
+            unset($data['permission_ids']);
 
+            // 从模型 attributes 中移除 permission_ids，避免在 SQL 错误处理时触发类型转换错误
+            // 因为 getById() 方法会将 permission_ids 数组写入 attributes
+            $role->offsetUnset('permission_ids');
+
+            // 更新角色基本信息（只包含 fillable 中的字段）
+            $role->update($data);
             // 更新权限关联
-            if (isset($data['permission_ids']) && is_array($data['permission_ids'])) {
-                $role->permissions()->sync($data['permission_ids']);
+            // 如果 permission_ids 未传递（null），保持现有权限不变
+            // 如果传递了数组（包括空数组），同步权限
+            if ($hasPermissionField) {
+                $role->permissions()->sync(is_array($permissionIds) ? $permissionIds : []);
             }
 
             Db::commit();
@@ -215,7 +235,6 @@ class RoleService
         $siteId = site_id() ?? 0;
         $permissions = AdminPermission::query()
             ->where('site_id', $siteId)
-            ->where('status', 1)
             ->orderBy('sort', 'asc')
             ->orderBy('id', 'asc')
             ->get()
@@ -251,6 +270,25 @@ class RoleService
     }
 
     /**
+     * 获取权限树（仅启用状态）
+     *
+     * @return array
+     */
+    public function getPermissionTree(): array
+    {
+        $siteId = site_id() ?? 0;
+        $permissions = AdminPermission::query()
+            ->where('site_id', $siteId)
+            ->where('status', 1)
+            ->orderBy('sort', 'asc')
+            ->orderBy('id', 'asc')
+            ->get()
+            ->toArray();
+
+        return AdminPermission::buildTree($permissions);
+    }
+
+    /**
      * 获取表单字段配置
      *
      * @param string $scene
@@ -260,6 +298,19 @@ class RoleService
     public function getFormFields(string $scene = 'create', ?AdminRole $role = null): array
     {
         $permissionOptions = $this->getPermissionOptions();
+        $permissionTree = $this->getPermissionTree();
+
+        // 权限类型展示配置（供前端树形组件使用）
+        $permissionTypeMap = [
+            'menu' => [
+                'label' => '菜单',
+                'class' => 'badge-menu',
+            ],
+            'button' => [
+                'label' => '按钮',
+                'class' => 'badge-button',
+            ],
+        ];
 
         $fields = [
             [
@@ -311,9 +362,11 @@ class RoleService
             [
                 'name' => 'permission_ids',
                 'label' => '权限分配',
-                'type' => 'checkbox', // 多选框，未来可以改为树形选择组件
+                'type' => 'permission_tree', // 树形结构的多选组件
                 'required' => false,
                 'options' => $permissionOptions,
+                'treeData' => $permissionTree,
+                'typeMap' => $permissionTypeMap,
                 'default' => $role?->permission_ids ?? [],
                 'col' => 'col-12',
             ],

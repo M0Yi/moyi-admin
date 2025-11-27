@@ -51,7 +51,9 @@ class UniversalCrudController extends AbstractController
         $model = $request->route('model');
 
         // 获取配置
-        $config = $this->service->getModelConfig($model);
+        $config = $this->filterSiteIdColumnForNonSuperAdmin(
+            $this->service->getModelConfig($model)
+        );
 
         // 仅保留需要在列表中展示的字段（show_in_list 或 list_default 为 true）
         if (!empty($config['fields_config']) && is_array($config['fields_config'])) {
@@ -217,7 +219,9 @@ class UniversalCrudController extends AbstractController
         }
 
         // 获取配置
-        $config = $this->service->getModelConfig($model);
+        $config = $this->filterSiteIdColumnForNonSuperAdmin(
+            $this->service->getModelConfig($model)
+        );
 
         $fields = $this->service->getFormFields($model, 'create');
         $relationOptions = $this->normalizeRelationOptions(
@@ -1430,6 +1434,8 @@ class UniversalCrudController extends AbstractController
             return $this->error('该模型未启用软删除功能');
         }
 
+        $config = $this->filterSiteIdColumnForNonSuperAdmin($config);
+
         // 仅保留需要在列表中展示的字段（show_in_list 或 list_default 为 true）
         if (!empty($config['fields_config']) && is_array($config['fields_config'])) {
             $config['fields_config'] = array_values(array_filter(
@@ -1649,6 +1655,43 @@ class UniversalCrudController extends AbstractController
         if ($exception instanceof QueryException || $exception instanceof PDOException) {
             throw $exception;
         }
+    }
+
+    /**
+     * 非超级管理员不展示 site_id 相关列（前端列控制/列显示）
+     */
+    protected function filterSiteIdColumnForNonSuperAdmin(array $config): array
+    {
+        if (is_super_admin()) {
+            return $config;
+        }
+
+        if (!empty($config['columns']) && is_array($config['columns'])) {
+            $config['columns'] = $this->removeSiteIdEntries($config['columns']);
+        }
+
+        if (!empty($config['fields_config']) && is_array($config['fields_config'])) {
+            $config['fields_config'] = $this->removeSiteIdEntries($config['fields_config']);
+        }
+
+        return $config;
+    }
+
+    /**
+     * 过滤掉 name/field 为 site_id 的列
+     */
+    protected function removeSiteIdEntries(array $items): array
+    {
+        $filtered = array_filter($items, static function ($item) {
+            if (!is_array($item)) {
+                return true;
+            }
+
+            $name = $item['name'] ?? $item['field'] ?? null;
+            return $name !== 'site_id';
+        });
+
+        return array_values($filtered);
     }
 }
 

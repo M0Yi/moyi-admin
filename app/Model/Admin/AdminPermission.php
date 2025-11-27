@@ -16,6 +16,7 @@ use Carbon\Carbon;
  * @property string $type
  * @property string $icon
  * @property string $path
+ * @property string $method
  * @property string $component
  * @property string $description
  * @property int $status
@@ -40,6 +41,7 @@ class AdminPermission extends Model
         'slug',
         'type',
         'icon',
+        'method',
         'path',
         'component',
         'description',

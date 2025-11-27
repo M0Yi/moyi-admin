@@ -25,6 +25,26 @@
 
             this.renderFields();
             this.attachFormSubmit();
+            this.ensureDefaultEndpoints();
+        }
+
+        ensureDefaultEndpoints() {
+            if (!this.schema.endpoints) {
+                this.schema.endpoints = {};
+            }
+
+            if (!this.schema.endpoints.uploadToken) {
+                if (typeof window !== 'undefined' && window.ADMIN_ENTRY_PATH) {
+                    const base = window.ADMIN_ENTRY_PATH.replace(/\/$/, '');
+                    this.schema.endpoints.uploadToken = `${base}/api/admin/upload/token`;
+                }
+            }
+
+            if (!this.endpoints) {
+                this.endpoints = {};
+            }
+
+            this.endpoints = Object.assign({}, this.schema.endpoints, this.endpoints);
         }
 
         renderFields() {
@@ -186,12 +206,8 @@
                 data[key] = arrayBuffer[key];
             });
 
-            Object.keys(data).forEach((key) => {
-                if (key.endsWith('_ids') && Array.isArray(data[key])) {
-                    data[key] = JSON.stringify(data[key]);
-                }
-            });
-
+            // 这里不再对 *_ids 字段进行 JSON 字符串化，保持为原始数组，
+            // 以便后端（如角色权限 permission_ids）可以按数组类型接收和验证。
             return data;
         }
 
@@ -418,9 +434,146 @@
                     return this.renderImagesField(field);
                 case 'rich_text':
                     return this.renderRichTextField(field);
+                case 'permission_tree':
+                    return this.renderPermissionTreeField(field);
                 default:
                     return this.renderTextInput(field, 'text');
             }
+        }
+
+        renderPermissionTreeField(field) {
+            const fieldName = field.name || 'permission_ids';
+            const treeData = Array.isArray(field.treeData) ? field.treeData : [];
+            const selectedValues = this.normalizeArrayValue(this.getFieldValue(field));
+            const typeMap = field.typeMap || {};
+
+            const buildNodes = (nodes, level = 0) => {
+                if (!Array.isArray(nodes) || !nodes.length) {
+                    return '';
+                }
+
+                    return nodes.map((node) => {
+                    const id = String(node.id ?? '');
+                    if (!id) {
+                        return '';
+                    }
+                    const hasChildren = Array.isArray(node.children) && node.children.length > 0;
+                    const isChecked = selectedValues.includes(id);
+                    const name = this.escape(node.name ?? '');
+                    const type = String(node.type ?? '');
+                    const slug = this.escape(node.slug ?? '');
+                    const path = this.escape(node.path ?? '');
+                    const method = String(node.method ?? '');
+
+                    let typeBadge = '';
+                    if (type) {
+                        const cfg = typeMap[type] || null;
+                        if (cfg) {
+                            const cls = cfg.class || 'badge bg-secondary';
+                            const label = cfg.label || type;
+                            typeBadge = `<span class="badge ${this.escapeAttr(cls)} ms-2">${this.escape(label)}</span>`;
+                        } else {
+                            typeBadge = `<span class="badge bg-secondary ms-2">${this.escape(type)}</span>`;
+                        }
+                    }
+
+                    const childrenHtml = hasChildren ? `<ul class="list-unstyled ms-4 permission-tree-children">
+                            ${buildNodes(node.children, level + 1)}
+                        </ul>` : '';
+
+                    return `
+                        <li class="permission-tree-node mb-1" data-id="${this.escapeAttr(id)}" data-parent-id="${this.escapeAttr(String(node.parent_id ?? '0'))}">
+                            <div class="d-flex align-items-center">
+                                ${hasChildren
+                                    ? `<button type="button"
+                                            class="btn btn-sm btn-link text-secondary px-0 me-1 permission-tree-toggle"
+                                            data-expanded="1"
+                                            aria-label="切换子节点显示">
+                                            <i class="bi bi-chevron-down" style="font-size: 0.9rem;"></i>
+                                       </button>`
+                                    : '<span class="d-inline-block me-1" style="width: 1.25rem;"></span>'}
+                                <div class="flex-grow-1">
+                                    <div class="form-check m-0">
+                                        <input
+                                            class="form-check-input permission-tree-checkbox"
+                                            type="checkbox"
+                                            name="${this.escapeAttr(fieldName)}[]"
+                                            value="${this.escapeAttr(id)}"
+                                            data-label="${name}"
+                                            ${isChecked ? 'checked' : ''}
+                                        >
+                                        <label class="form-check-label d-inline-flex align-items-center ms-1">
+                                            <span class="fw-normal">${name || '-'}</span>
+                                            ${typeBadge}
+                                        </label>
+                                    </div>
+                                    ${(slug || path || method)
+                                        ? `<div class="text-muted small mt-1">
+                                                ${slug ? `<span class="me-3">标识：<code>${slug}</code></span>` : ''}
+                                                ${path ? `<span class="me-3 permission-tree-meta-path">路径：<code>${path}</code></span>` : ''}
+                                                ${method ? `<span>方法：<code>${this.escape(method)}</code></span>` : ''}
+                                           </div>`
+                                        : ''
+                                    }
+                                </div>
+                            </div>
+                            ${childrenHtml}
+                        </li>
+                    `;
+                }).join('');
+            };
+
+            const treeHtml = buildNodes(treeData);
+
+            return `
+                <div class="permission-tree-wrapper" data-permission-tree="${this.escapeAttr(fieldName)}">
+                    <div class="row g-3">
+                        <div class="col-12 col-md-7">
+                            <div class="border rounded p-2 h-100 d-flex flex-column">
+                                <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+                                    <div class="btn-group btn-group-sm" role="group">
+                                        <button type="button" class="btn btn-outline-secondary" data-tree-action="expand-all">
+                                            <i class="bi bi-arrows-expand"></i> 展开全部
+                                        </button>
+                                        <button type="button" class="btn btn-outline-secondary" data-tree-action="collapse-all">
+                                            <i class="bi bi-arrows-collapse"></i> 收起全部
+                                        </button>
+                                    </div>
+                                    <div class="btn-group btn-group-sm ms-1" role="group">
+                                        <button type="button" class="btn btn-outline-secondary" data-tree-action="select-all">
+                                            <i class="bi bi-check2-all"></i> 全选
+                                        </button>
+                                        <button type="button" class="btn btn-outline-secondary" data-tree-action="clear-all">
+                                            <i class="bi bi-x-lg"></i> 全不选
+                                        </button>
+                                    </div>
+                                    <div class="ms-auto d-flex align-items-center gap-2" style="min-width: 220px;">
+                                        <div class="input-group input-group-sm">
+                                            <span class="input-group-text"><i class="bi bi-search"></i></span>
+                                            <input type="search" class="form-control" placeholder="搜索权限名称/标识" data-tree-search>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="permission-tree-body flex-grow-1 overflow-auto" style="max-height: 420px;">
+                                    <ul class="list-unstyled mb-0 permission-tree-root">
+                                        ${treeHtml || '<li class="text-muted small">暂无可分配的权限</li>'}
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-12 col-md-5">
+                            <div class="border rounded p-2 bg-light h-100 d-flex flex-column">
+                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                    <span class="fw-semibold small text-muted">已选权限</span>
+                                    <span class="small text-muted" data-permission-tree-summary>0 项</span>
+                                </div>
+                                <div class="permission-tree-selected-list small flex-grow-1 overflow-auto" data-permission-tree-selected-list style="max-height: 420px;">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
         }
 
         renderTextInput(field, subtype) {
@@ -770,6 +923,7 @@
             this.initializeImageFields();
             this.initializeMultiImageFields();
             this.initializeDateInputs();
+            this.initializePermissionTreeFields();
         }
         
         initializeGroups() {
@@ -1308,7 +1462,7 @@
             }
 
             // 全宽字段类型
-            const fullWidthTypes = ['textarea', 'rich_text', 'number_range'];
+            const fullWidthTypes = ['textarea', 'rich_text', 'number_range', 'permission_tree'];
             if (fullWidthTypes.includes(fieldType)) {
                 return 'col-12';
             }
@@ -1425,6 +1579,235 @@
             }
 
             return attrs.join(' ');
+        }
+
+        initializePermissionTreeFields() {
+            const wrappers = this.form.querySelectorAll('[data-permission-tree]');
+            if (!wrappers.length) {
+                return;
+            }
+
+            wrappers.forEach((wrapper) => {
+                if (wrapper.dataset.permissionTreeInitialized === '1') {
+                    return;
+                }
+                wrapper.dataset.permissionTreeInitialized = '1';
+
+                const fieldName = wrapper.dataset.permissionTree;
+                const root = wrapper.querySelector('.permission-tree-root');
+                const summaryEl = wrapper.querySelector('[data-permission-tree-summary]');
+                const selectedListEl = wrapper.querySelector('[data-permission-tree-selected-list]');
+                const searchInput = wrapper.querySelector('[data-tree-search]');
+
+                if (!root) {
+                    return;
+                }
+
+                const getAllCheckboxes = () => Array.from(root.querySelectorAll('input.permission-tree-checkbox'));
+
+                const updateAncestors = (startLi) => {
+                    let current = startLi;
+                    while (current) {
+                        const parentLi = current.parentElement ? current.parentElement.closest('.permission-tree-node') : null;
+                        if (!parentLi) {
+                            break;
+                        }
+
+                        // 只能在当前节点内查找自身复选框，不能在 Element.querySelector 中使用以 > 开头的选择器
+                        const parentCheckbox = parentLi.querySelector('.d-flex .permission-tree-checkbox');
+                        if (!parentCheckbox) {
+                            current = parentLi;
+                            continue;
+                        }
+
+                        const descendantCheckboxes = parentLi.querySelectorAll('ul input.permission-tree-checkbox');
+                        let total = 0;
+                        let checkedCount = 0;
+                        let indeterminateCount = 0;
+
+                        descendantCheckboxes.forEach((cb) => {
+                            total += 1;
+                            if (cb.checked) {
+                                checkedCount += 1;
+                            }
+                            if (cb.indeterminate) {
+                                indeterminateCount += 1;
+                            }
+                        });
+
+                        if (total === 0) {
+                            parentCheckbox.checked = false;
+                            parentCheckbox.indeterminate = false;
+                        } else if (checkedCount === total && indeterminateCount === 0) {
+                            parentCheckbox.checked = true;
+                            parentCheckbox.indeterminate = false;
+                        } else if (checkedCount === 0 && indeterminateCount === 0) {
+                            parentCheckbox.checked = false;
+                            parentCheckbox.indeterminate = false;
+                        } else {
+                            parentCheckbox.checked = false;
+                            parentCheckbox.indeterminate = true;
+                        }
+
+                        current = parentLi;
+                    }
+                };
+
+                const updateSummaryAndSelectedList = () => {
+                    const allCbs = getAllCheckboxes();
+                    const checkedCbs = allCbs.filter((cb) => cb.checked);
+
+                    if (summaryEl) {
+                        summaryEl.textContent = `已选 ${checkedCbs.length} / ${allCbs.length} 项`;
+                    }
+
+                    if (selectedListEl) {
+                        if (!checkedCbs.length) {
+                            selectedListEl.innerHTML = '<div class="text-muted small">暂无已选权限</div>';
+                            return;
+                        }
+
+                        const itemsHtml = checkedCbs
+                            .map((cb) => {
+                                const label = cb.dataset.label || cb.value;
+                                return `<span class="badge permission-tree-selected-badge" title="${this.escapeAttr(label)}">
+                                            ${this.escape(label)}
+                                        </span>`;
+                            })
+                            .join('');
+                        selectedListEl.innerHTML = itemsHtml;
+                    }
+                };
+
+                const handleCheckboxChange = (checkbox) => {
+                    const li = checkbox.closest('.permission-tree-node');
+                    if (!li) {
+                        return;
+                    }
+
+                    const isChecked = checkbox.checked;
+
+                    // 子节点联动
+                    const childCheckboxes = li.querySelectorAll('ul input.permission-tree-checkbox');
+                    childCheckboxes.forEach((cb) => {
+                        cb.checked = isChecked;
+                        cb.indeterminate = false;
+                    });
+
+                    // 向上更新父节点半选/全选状态
+                    updateAncestors(li);
+
+                    // 更新右侧统计与已选列表
+                    updateSummaryAndSelectedList();
+                };
+
+                root.addEventListener('change', (event) => {
+                    const checkbox = event.target;
+                    if (!checkbox.matches('input.permission-tree-checkbox')) {
+                        return;
+                    }
+                    handleCheckboxChange(checkbox);
+                });
+
+                // 展开/收起
+                root.addEventListener('click', (event) => {
+                    const toggleBtn = event.target.closest('.permission-tree-toggle');
+                    if (!toggleBtn) {
+                        return;
+                    }
+
+                    const li = toggleBtn.closest('.permission-tree-node');
+                    if (!li) {
+                        return;
+                    }
+
+                    const childrenContainer = li.querySelector('.permission-tree-children');
+                    if (!childrenContainer) {
+                        return;
+                    }
+
+                    const isExpanded = toggleBtn.dataset.expanded !== '0';
+                    childrenContainer.style.display = isExpanded ? 'none' : 'block';
+                    toggleBtn.dataset.expanded = isExpanded ? '0' : '1';
+
+                    const icon = toggleBtn.querySelector('i');
+                    if (icon) {
+                        icon.className = isExpanded ? 'bi bi-chevron-right' : 'bi bi-chevron-down';
+                    }
+                });
+
+                // 工具栏按钮
+                wrapper.addEventListener('click', (event) => {
+                    const actionBtn = event.target.closest('[data-tree-action]');
+                    if (!actionBtn) {
+                        return;
+                    }
+
+                    const action = actionBtn.getAttribute('data-tree-action');
+                    const allCbs = getAllCheckboxes();
+
+                    if (action === 'expand-all' || action === 'collapse-all') {
+                        const expand = action === 'expand-all';
+                        root.querySelectorAll('.permission-tree-children').forEach((childrenContainer) => {
+                            childrenContainer.style.display = expand ? 'block' : 'none';
+                        });
+                        root.querySelectorAll('.permission-tree-toggle').forEach((btn) => {
+                            btn.dataset.expanded = expand ? '1' : '0';
+                            const icon = btn.querySelector('i');
+                            if (icon) {
+                                icon.className = expand ? 'bi bi-chevron-down' : 'bi bi-chevron-right';
+                            }
+                        });
+                    } else if (action === 'select-all' || action === 'clear-all') {
+                        const check = action === 'select-all';
+                        allCbs.forEach((cb) => {
+                            cb.checked = check;
+                            cb.indeterminate = false;
+                        });
+
+                        // 全选/全不选后，所有父节点状态也要同步
+                        const allNodes = root.querySelectorAll('.permission-tree-node');
+                        Array.from(allNodes).reverse().forEach((node) => {
+                            updateAncestors(node);
+                        });
+
+                        updateSummaryAndSelectedList();
+                    }
+                });
+
+                // 搜索过滤
+                if (searchInput) {
+                    searchInput.addEventListener('input', (event) => {
+                        const keyword = (event.target.value || '').trim().toLowerCase();
+                        const nodes = root.querySelectorAll('.permission-tree-node');
+
+                        nodes.forEach((node) => {
+                            const labelEl = node.querySelector('.form-check-label');
+                            const metaEl = node.querySelector('.text-muted.small');
+                            const textParts = [];
+                            if (labelEl) {
+                                textParts.push(labelEl.textContent || '');
+                            }
+                            if (metaEl) {
+                                textParts.push(metaEl.textContent || '');
+                            }
+                            const text = textParts.join(' ').toLowerCase();
+
+                            const visible = !keyword || text.includes(keyword);
+                            node.style.display = visible ? '' : 'none';
+                        });
+                    });
+                }
+
+                // 初始统计
+                updateSummaryAndSelectedList();
+
+                // 初始化父节点半选状态（根据初始选中值）
+                const allNodes = root.querySelectorAll('.permission-tree-node');
+                Array.from(allNodes).reverse().forEach((node) => {
+                    updateAncestors(node);
+                });
+            });
         }
 
         escape(value) {

@@ -21,6 +21,13 @@ Router::get('/install/check-environment', 'App\Controller\Admin\InstallControlle
 
 Router::addRoute(['GET', 'POST', 'HEAD'], '/', 'App\Controller\IndexController@index');
 
+Router::addGroup('/site', function () {
+    Router::get('/register', 'App\Controller\SiteCreationController@create');
+    Router::post('/register', 'App\Controller\SiteCreationController@store');
+    Router::post('/register/verify-domain', 'App\Controller\SiteCreationController@verifyDomain');
+    Router::get('/verification', 'App\Controller\SiteVerificationController@verify');
+});
+
 // ========================================
 // 验证码路由（通用接口，无需登录）
 // ========================================
@@ -198,6 +205,7 @@ Router::addGroup('/admin/{adminPath:[a-zA-Z0-9\-_]+}', function () {
     }, [
         'middleware' => [
             \App\Middleware\AdminAuthMiddleware::class,
+            \App\Middleware\PermissionMiddleware::class,
         ]
     ]);
 

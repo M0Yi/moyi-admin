@@ -2,6 +2,11 @@
 
 @section('title', '用户管理')
 
+@php
+    $userSearchConfig = $searchConfig ?? [];
+    $hasSearchConfig = !empty($userSearchConfig['search_fields'] ?? []);
+@endphp
+
 @if (! ($isEmbedded ?? false))
 @push('admin_sidebar')
     @include('admin.components.sidebar')
@@ -25,6 +30,10 @@
                 'tableId' => 'userTable',
                 'storageKey' => 'userTableColumns',
                 'ajaxUrl' => admin_route('system/users'),
+                'searchFormId' => 'searchForm_userTable',
+                'searchPanelId' => 'searchPanel_userTable',
+                'searchConfig' => $userSearchConfig,
+                'showSearch' => $hasSearchConfig,
                 'showPagination' => true,
                 'columns' => [
                     [
@@ -51,6 +60,13 @@
                     ],
                     [
                         'index' => 3,
+                        'label' => '所属站点',
+                        'field' => 'site.name',
+                        'type' => 'text',
+                        'visible' => true,
+                    ],
+                    [
+                        'index' => 4,
                         'label' => '角色',
                         'field' => 'roles',
                         'type' => 'custom',
@@ -58,7 +74,21 @@
                         'visible' => true,
                     ],
                     [
-                        'index' => 4,
+                        'index' => 5,
+                        'label' => '邮箱',
+                        'field' => 'email',
+                        'type' => 'text',
+                        'visible' => false,
+                    ],
+                    [
+                        'index' => 6,
+                        'label' => '手机号',
+                        'field' => 'mobile',
+                        'type' => 'text',
+                        'visible' => false,
+                    ],
+                    [
+                        'index' => 7,
                         'label' => '状态',
                         'field' => 'status',
                         'type' => 'switch',
@@ -67,7 +97,7 @@
                         'width' => '80',
                     ],
                     [
-                        'index' => 5,
+                        'index' => 8,
                         'label' => '创建时间',
                         'field' => 'created_at',
                         'type' => 'date',
@@ -76,7 +106,7 @@
                         'width' => '150',
                     ],
                     [
-                        'index' => 6,
+                        'index' => 9,
                         'label' => '操作',
                         'type' => 'actions',
                         'actions' => [
@@ -133,6 +163,9 @@
 @endsection
 
 @push('admin_scripts')
+@if ($hasSearchConfig)
+    @include('components.admin-script', ['path' => '/js/components/search-form-renderer.js'])
+@endif
 @include('components.admin-script', ['path' => '/js/components/refresh-parent-listener.js'])
 @include('components.admin-script', ['path' => '/js/admin/system/user-page.js'])
 <script>
@@ -148,5 +181,37 @@ document.addEventListener('DOMContentLoaded', function () {
 }
 });
 </script>
+@if ($hasSearchConfig)
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const config = @json($userSearchConfig);
+    if (!config || !config.search_fields || !config.search_fields.length) {
+        return;
+    }
+    if (typeof window.SearchFormRenderer !== 'function') {
+        console.warn('[UserPage] SearchFormRenderer 未加载');
+        return;
+    }
+
+    const renderer = new window.SearchFormRenderer({
+        config,
+        formId: 'searchForm_userTable',
+        panelId: 'searchPanel_userTable',
+        tableId: 'userTable'
+    });
+
+    window['_searchFormRenderer_userTable'] = renderer;
+    if (typeof window.createSearchFormResetFunction === 'function') {
+        window.resetSearchForm_userTable = window.createSearchFormResetFunction('userTable');
+    } else {
+        window.resetSearchForm_userTable = function () {
+            if (renderer && typeof renderer.reset === 'function') {
+                renderer.reset();
+            }
+        };
+    }
+});
+</script>
+@endif
 @endpush
 

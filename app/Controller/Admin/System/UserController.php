@@ -49,7 +49,58 @@ class UserController extends BaseModelCrudController
             return $this->listData($request);
         }
 
-        return $this->renderAdmin('admin.system.user.index');
+        $searchFields = ['username', 'real_name', 'mobile', 'email'];
+        $fields = [
+            [
+                'name' => 'username',
+                'label' => '用户名',
+                'type' => 'text',
+                'placeholder' => '请输入用户名',
+                'col' => 'col-12 col-md-3',
+            ],
+            [
+                'name' => 'real_name',
+                'label' => '真实姓名',
+                'type' => 'text',
+                'placeholder' => '请输入真实姓名',
+                'col' => 'col-12 col-md-3',
+            ],
+            [
+                'name' => 'mobile',
+                'label' => '手机号',
+                'type' => 'text',
+                'placeholder' => '请输入手机号',
+                'col' => 'col-12 col-md-3',
+            ],
+            [
+                'name' => 'email',
+                'label' => '邮箱',
+                'type' => 'text',
+                'placeholder' => '请输入邮箱',
+                'col' => 'col-12 col-md-3',
+            ],
+        ];
+
+        if (is_super_admin()) {
+            $searchFields[] = 'site_id';
+            $fields[] = [
+                'name' => 'site_id',
+                'label' => '所属站点',
+                'type' => 'select',
+                'options' => $this->userService->getSiteFilterOptions(),
+                'placeholder' => '请选择站点',
+                'col' => 'col-12 col-md-3',
+            ];
+        }
+
+        $searchConfig = [
+            'search_fields' => $searchFields,
+            'fields' => $fields,
+        ];
+
+        return $this->renderAdmin('admin.system.user.index', [
+            'searchConfig' => $searchConfig,
+        ]);
     }
 
     /**
@@ -58,6 +109,12 @@ class UserController extends BaseModelCrudController
     public function listData(RequestInterface $request): ResponseInterface
     {
         $params = $request->all();
+        $filters = $this->normalizeFilters($request->input('filters', []));
+        if (!empty($filters)) {
+            $params = array_merge($params, $filters);
+        }
+        unset($params['filters']);
+
         $result = $this->userService->getList($params);
         
         // 统一返回格式：将 list 改为 data，并添加 last_page

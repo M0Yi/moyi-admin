@@ -161,7 +161,7 @@ class InstallController extends AbstractController
     /**
      * 验证安装数据
      */
-    private function validateInstallData(array $data): array
+    protected function validateInstallData(array $data): array
     {
         $errors = [];
 
@@ -182,6 +182,18 @@ class InstallController extends AbstractController
             $errors['username'] = '用户名长度至少3位';
         } elseif (!preg_match('/^[a-zA-Z0-9_]+$/', $data['username'])) {
             $errors['username'] = '用户名只能包含字母、数字和下划线';
+        } else {
+            $exists = false;
+            try {
+                $exists = AdminUser::query()
+                    ->where('username', $data['username'])
+                    ->exists();
+            } catch (\Throwable $exception) {
+                logger()->warning('跳过用户名唯一性检查：' . $exception->getMessage());
+            }
+            if ($exists) {
+                $errors['username'] = '该用户名已被使用，请更换其他用户名';
+            }
         }
 
         // 管理员密码
@@ -209,7 +221,7 @@ class InstallController extends AbstractController
     /**
      * 创建站点
      */
-    private function createSite(array $data): AdminSite
+    protected function createSite(array $data): AdminSite
     {
         // 生成随机的后台入口路径
         $adminPath = AdminSite::generateRandomAdminPath(16);
@@ -227,7 +239,7 @@ class InstallController extends AbstractController
     /**
      * 创建超级管理员角色
      */
-    private function createSuperAdminRole(int $siteId): AdminRole
+    protected function createSuperAdminRole(int $siteId): AdminRole
     {
         return AdminRole::create([
             'site_id' => $siteId,
@@ -242,7 +254,7 @@ class InstallController extends AbstractController
     /**
      * 创建默认权限
      */
-    private function createDefaultPermissions(int $siteId): void
+    protected function createDefaultPermissions(int $siteId): void
     {
         $permissionTree = $this->getDefaultPermissionDefinitions();
         $this->persistPermissionTree($permissionTree, $siteId);
@@ -251,7 +263,7 @@ class InstallController extends AbstractController
     /**
      * 构建默认权限定义，需与菜单配置保持一致
      */
-    private function getDefaultPermissionDefinitions(): array
+    protected function getDefaultPermissionDefinitions(): array
     {
         return [
             [
@@ -260,10 +272,12 @@ class InstallController extends AbstractController
                 'type' => 'menu',
                 'icon' => 'grid',
                 'path' => '/dashboard',
+                'method' => 'GET',
                 'sort' => 1,
                 'status' => 1,
                 'children' => [
-                    $this->makeButtonPermission('访问仪表盘', 'dashboard.view', '/dashboard', 1),
+                    // 仪表盘访问：GET 页面
+                    $this->makeButtonPermission('访问仪表盘', 'dashboard.view', '/dashboard', 1, 'GET'),
                 ],
             ],
             [
@@ -272,6 +286,7 @@ class InstallController extends AbstractController
                 'type' => 'menu',
                 'icon' => 'settings',
                 'path' => '/system',
+                'method' => 'GET',
                 'sort' => 100,
                 'status' => 1,
                 'children' => [
@@ -309,11 +324,14 @@ class InstallController extends AbstractController
                         'type' => 'menu',
                         'icon' => 'globe',
                         'path' => '/system/sites',
+                        'method' => 'GET',
                         'sort' => 150,
                         'status' => 1,
                         'children' => [
-                            $this->makeButtonPermission('查看站点设置', 'system.sites.view', '/system/sites', 1),
-                            $this->makeButtonPermission('更新站点设置', 'system.sites.edit', '/system/sites', 2),
+                            // 查看站点设置页面：GET /system/sites
+                            $this->makeButtonPermission('查看站点设置', 'system.sites.view', '/system/sites', 1, 'GET'),
+                            // 更新站点设置：PUT /system/sites
+                            $this->makeButtonPermission('更新站点设置', 'system.sites.edit', '/system/sites', 2, 'PUT'),
                         ],
                     ],
                     [
@@ -322,12 +340,16 @@ class InstallController extends AbstractController
                         'type' => 'menu',
                         'icon' => 'code-slash',
                         'path' => '/system/crud-generator',
+                        'method' => 'GET',
                         'sort' => 160,
                         'status' => 1,
                         'children' => [
-                            $this->makeButtonPermission('访问 CRUD 生成器', 'system.crud-generator.view', '/system/crud-generator*', 1),
-                            $this->makeButtonPermission('生成 CRUD 模块', 'system.crud-generator.generate', '/system/crud-generator/generate*', 2),
-                            $this->makeButtonPermission('删除 CRUD 配置', 'system.crud-generator.delete', '/system/crud-generator*', 3),
+                            // 访问 CRUD 生成器页面：GET /system/crud-generator*
+                            $this->makeButtonPermission('访问 CRUD 生成器', 'system.crud-generator.view', '/system/crud-generator*', 1, 'GET'),
+                            // 生成 CRUD 模块：POST /system/crud-generator/generate*
+                            $this->makeButtonPermission('生成 CRUD 模块', 'system.crud-generator.generate', '/system/crud-generator/generate*', 2, 'POST'),
+                            // 删除 CRUD 配置：DELETE /system/crud-generator/{id}
+                            $this->makeButtonPermission('删除 CRUD 配置', 'system.crud-generator.delete', '/system/crud-generator*', 3, 'DELETE'),
                         ],
                     ],
                     [
@@ -336,10 +358,12 @@ class InstallController extends AbstractController
                         'type' => 'menu',
                         'icon' => 'columns-gap',
                         'path' => '/system/iframe-demo',
+                        'method' => 'GET',
                         'sort' => 170,
                         'status' => 1,
                         'children' => [
-                            $this->makeButtonPermission('访问 Iframe 模式', 'system.iframe-demo.view', '/system/iframe-demo*', 1),
+                            // 访问 Iframe 示范页面：GET /system/iframe-demo*
+                            $this->makeButtonPermission('访问 Iframe 模式', 'system.iframe-demo.view', '/system/iframe-demo*', 1, 'GET'),
                         ],
                     ],
                 ],
@@ -347,7 +371,7 @@ class InstallController extends AbstractController
         ];
     }
 
-    private function buildCrudPermissionDefinition(
+    protected function buildCrudPermissionDefinition(
         string $name,
         string $slugPrefix,
         string $basePath,
@@ -362,20 +386,28 @@ class InstallController extends AbstractController
             'type' => 'menu',
             'icon' => $icon,
             'path' => $wildcardPath,
+            // 列表 / 详情等页面均为 GET
+            'method' => 'GET',
             'sort' => $sort,
             'status' => 1,
             'children' => [
-                $this->makeButtonPermission("查看{$name}", "{$slugPrefix}.view", $wildcardPath, 1),
-                $this->makeButtonPermission("新增{$name}", "{$slugPrefix}.create", "{$basePath}/create", 2),
-                $this->makeButtonPermission("编辑{$name}", "{$slugPrefix}.edit", "{$basePath}/*/edit", 3),
-                $this->makeButtonPermission("删除{$name}", "{$slugPrefix}.delete", $wildcardPath, 4),
-                $this->makeButtonPermission("批量删除{$name}", "{$slugPrefix}.batch-delete", "{$basePath}/batch-destroy", 5),
-                $this->makeButtonPermission("切换{$name}状态", "{$slugPrefix}.toggle-status", "{$basePath}/*/toggle-status", 6),
+                // 查看列表 / 页面等：GET {basePath}*
+                $this->makeButtonPermission("查看{$name}", "{$slugPrefix}.view", $wildcardPath, 1, 'GET'),
+                // 新建页面：GET {basePath}/create
+                $this->makeButtonPermission("新增{$name}", "{$slugPrefix}.create", "{$basePath}/create", 2, 'GET'),
+                // 编辑页面：GET {basePath}/*/edit
+                $this->makeButtonPermission("编辑{$name}", "{$slugPrefix}.edit", "{$basePath}/*/edit", 3, 'GET'),
+                // 删除单条：DELETE {basePath}/{id}
+                $this->makeButtonPermission("删除{$name}", "{$slugPrefix}.delete", $wildcardPath, 4, 'DELETE'),
+                // 批量删除：POST {basePath}/batch-destroy
+                $this->makeButtonPermission("批量删除{$name}", "{$slugPrefix}.batch-delete", "{$basePath}/batch-destroy", 5, 'POST'),
+                // 切换状态：POST {basePath}/{id}/toggle-status
+                $this->makeButtonPermission("切换{$name}状态", "{$slugPrefix}.toggle-status", "{$basePath}/*/toggle-status", 6, 'POST'),
             ],
         ];
     }
 
-    private function makeButtonPermission(string $name, string $slug, string $path, int $sort): array
+    protected function makeButtonPermission(string $name, string $slug, string $path, int $sort, string $method = '*'): array
     {
         return [
             'name' => $name,
@@ -383,12 +415,13 @@ class InstallController extends AbstractController
             'type' => 'button',
             'icon' => null,
             'path' => $path,
+            'method' => $method,
             'sort' => $sort,
             'status' => 1,
         ];
     }
 
-    private function persistPermissionTree(array $definitions, int $siteId, int $parentId = 0): void
+    protected function persistPermissionTree(array $definitions, int $siteId, int $parentId = 0): void
     {
         foreach ($definitions as $definition) {
             $children = $definition['children'] ?? [];
@@ -414,7 +447,7 @@ class InstallController extends AbstractController
         }
     }
 
-    private function createDefaultMenus(int $siteId): void
+    protected function createDefaultMenus(int $siteId): void
     {
         $dashboard = AdminMenu::query()->firstOrCreate(
             ['site_id' => $siteId, 'path' => '/dashboard'],
@@ -674,7 +707,7 @@ class InstallController extends AbstractController
     /**
      * 创建管理员用户
      */
-    private function createAdminUser(array $data, int $siteId): AdminUser
+    protected function createAdminUser(array $data, int $siteId): AdminUser
     {
         return AdminUser::create([
             'site_id' => $siteId,
@@ -878,6 +911,7 @@ class InstallController extends AbstractController
                 $table->string('slug', 100)->comment('权限标识');
                 $table->string('type', 20)->default('menu')->comment('类型：menu=菜单，button=按钮');
                 $table->string('icon', 50)->nullable()->comment('图标');
+                $table->string('method', 10)->default('*')->comment('请求方法：GET/POST/PUT/DELETE/*');
                 $table->string('path', 255)->nullable()->comment('路径');
                 $table->string('component', 255)->nullable()->comment('组件');
                 $table->string('description', 255)->nullable()->comment('描述');
@@ -1232,7 +1266,7 @@ class InstallController extends AbstractController
     /**
      * 插入测试数据
      */
-    private function insertTestData(int $siteId, int $userId): void
+    protected function insertTestData(int $siteId, int $userId): void
     {
         $testData = [
             [

@@ -293,7 +293,8 @@
  */
 function renderMenuName(value, column, row) {
     const level = row.level || 0;
-    const indent = level > 0 ? '└─'.repeat(level) + ' ' : '';
+    // 仅用一个 "└─" 表示有父级，层级深度主要通过缩进样式体现，避免视觉过于复杂
+    const indent = level > 0 ? '└─ ' : '';
     return `<div class="d-flex align-items-center menu-level-${level}">
         ${level > 0 ? `<span class="text-muted me-2">${indent}</span>` : ''}
         <span class="fw-medium">${value || '-'}</span>

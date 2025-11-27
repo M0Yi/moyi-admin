@@ -53,18 +53,11 @@ class SiteMiddleware implements MiddlewareInterface
 
         // 移除端口号（如果有）
         $domain = $this->extractDomain($host);
-
-        // 根据域名查找站点
+        // 根据域名查找站点（不再回退默认站点）
         $site = $this->findSiteByDomain($domain);
-
         if (! $site) {
-            // 域名未匹配，使用默认站点（ID=1）
-            $site = $this->getDefaultSite();
-
-            if (!$site) {
-                // 默认站点也不存在，重定向到安装页面
-                return $this->response->redirect('/install');
-            }
+            // 未匹配任何站点，继续后续流程（site() 将返回 null）
+            return $handler->handle($request);
         }
 
         // 检查站点状态
@@ -85,16 +78,46 @@ class SiteMiddleware implements MiddlewareInterface
     }
 
     /**
-     * 从 Host 中提取域名（移除端口号）
+     * 从 Host 中提取域名，非默认端口需要保留
      */
     private function extractDomain(string $host): string
     {
-        // 如果包含端口号，移除它
-        if (str_contains($host, ':')) {
-            return explode(':', $host)[0];
+        // 处理 IPv6（形如 [::1]:8080）
+        if (str_starts_with($host, '[')) {
+            $endBracket = strpos($host, ']');
+            if ($endBracket !== false) {
+                $ip = substr($host, 0, $endBracket + 1);
+                $port = substr($host, $endBracket + 1);
+                if ($port !== '' && str_starts_with($port, ':')) {
+                    $port = substr($port, 1);
+                }
+                return $this->formatHostWithPort($ip, $port);
+            }
         }
 
-        return $host;
+        // IPv4 或域名
+        $parts = explode(':', $host);
+        $domain = $parts[0];
+        $port = $parts[1] ?? null;
+
+        return $this->formatHostWithPort($domain, $port);
+    }
+
+    /**
+     * 根据端口拼接 Host，保留非默认端口
+     */
+    private function formatHostWithPort(string $domain, ?string $port): string
+    {
+        if ($port === null || $port === '') {
+            return $domain;
+        }
+
+        // 默认 HTTP/HTTPS 端口不需要写在域名上
+        if ($port === '80' || $port === '443') {
+            return $domain;
+        }
+
+        return $domain . ':' . $port;
     }
 
     /**
@@ -113,28 +136,6 @@ class SiteMiddleware implements MiddlewareInterface
                 'Site middleware: Failed to find site by domain',
                 [
                     'domain' => $domain,
-                    'error' => $e->getMessage(),
-                ]
-            );
-
-            return null;
-        }
-    }
-
-    /**
-     * 获取默认站点（ID=1）
-     */
-    private function getDefaultSite(): ?AdminSite
-    {
-        try {
-            return AdminSite::query()
-                ->where('id', 1)
-                ->first();
-        } catch (\Throwable $e) {
-            // 记录错误日志
-            \Hyperf\Support\make(\Psr\Log\LoggerInterface::class)->error(
-                'Site middleware: Failed to get default site',
-                [
                     'error' => $e->getMessage(),
                 ]
             );

@@ -15,6 +15,13 @@
         if (!container || container.dataset[DATA_INITIALIZED]) {
             return;
         }
+
+        // 如果该字段已经使用权限树组件渲染（内部自带工具栏），则不再额外渲染一组按钮
+        if (container.querySelector('.permission-tree-wrapper')) {
+            container.dataset[DATA_INITIALIZED] = '1';
+            return;
+        }
+
         container.dataset[DATA_INITIALIZED] = '1';
 
         const checkboxSelector = 'input[type="checkbox"]';

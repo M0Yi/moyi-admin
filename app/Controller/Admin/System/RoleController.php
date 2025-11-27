@@ -95,10 +95,12 @@ class RoleController extends BaseModelCrudController
     public function store(RequestInterface $request): ResponseInterface
     {
         $data = $request->all();
+        if (! array_key_exists('permission_ids', $data)) {
+            $data['permission_ids'] = [];
+        }
         $this->validateData($data, 'create');
-        
         $role = $this->roleService->create($data);
-        
+
         return $this->success(['id' => $role->id], '创建成功');
     }
 
@@ -129,8 +131,10 @@ class RoleController extends BaseModelCrudController
     public function update(RequestInterface $request, int $id): ResponseInterface
     {
         $data = $request->all();
+        if (! array_key_exists('permission_ids', $data)) {
+            $data['permission_ids'] = [];
+        }
         $this->validateData($data, 'update', $id);
-        
         $role = $this->roleService->update($id, $data);
         
         return $this->success(['id' => $role->id], '更新成功');

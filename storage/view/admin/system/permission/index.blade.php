@@ -73,6 +73,22 @@
                     ],
                     [
                         'index' => 5,
+                        'label' => '请求方法',
+                        'field' => 'method',
+                        'type' => 'badge',
+                        'badgeMap' => [
+                            '*' => ['text' => '任意', 'variant' => 'secondary'],
+                            'GET' => ['text' => 'GET', 'variant' => 'primary'],
+                            'POST' => ['text' => 'POST', 'variant' => 'success'],
+                            'PUT' => ['text' => 'PUT', 'variant' => 'warning'],
+                            'DELETE' => ['text' => 'DELETE', 'variant' => 'danger'],
+                            'PATCH' => ['text' => 'PATCH', 'variant' => 'info'],
+                        ],
+                        'visible' => true,
+                        'width' => '90',
+                    ],
+                    [
+                        'index' => 6,
                         'label' => '排序',
                         'field' => 'sort',
                         'type' => 'number',
@@ -80,7 +96,7 @@
                         'width' => '70',
                     ],
                     [
-                        'index' => 6,
+                        'index' => 7,
                         'label' => '状态',
                         'field' => 'status',
                         'type' => 'switch',
@@ -89,7 +105,7 @@
                         'width' => '80',
                     ],
                     [
-                        'index' => 7,
+                        'index' => 8,
                         'label' => '创建时间',
                         'field' => 'created_at',
                         'type' => 'date',
@@ -98,7 +114,7 @@
                         'width' => '150',
                     ],
                     [
-                        'index' => 8,
+                        'index' => 9,
                         'label' => '操作',
                         'type' => 'actions',
                         'actions' => [

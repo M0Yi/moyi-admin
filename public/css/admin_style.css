@@ -564,6 +564,36 @@ body:has(.sidebar.collapsed) .fixed-bottom-actions {
     font-size: 1.1rem;
 }
 
+/* 角色权限树中路径信息单行截断 */
+.permission-tree-meta-path {
+    display: inline-block;
+    max-width: 320px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    vertical-align: middle;
+}
+
+/* 角色权限树 - 已选权限 badge 展示 */
+.permission-tree-selected-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    align-content: flex-start;
+}
+
+.permission-tree-selected-badge {
+    background: #e3f2fd;
+    color: #1d4ed8;
+    border-radius: 999px;
+    padding: 0.3rem 0.75rem;
+    font-size: 0.8rem;
+    max-width: 100%;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+}
+
 /* 侧边栏主体与折叠/展开 */
 .sidebar {
     position: fixed;

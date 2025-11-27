@@ -77,6 +77,13 @@ class AdminUser extends Model implements AuthenticatableInterface,JwtSubjectInte
     ];
 
     /**
+     * 追加的访问器属性
+     */
+    protected array $appends = [
+        'role_ids',
+    ];
+
+    /**
      * 类型转换
      */
     protected array $casts = [
@@ -141,6 +148,21 @@ class AdminUser extends Model implements AuthenticatableInterface,JwtSubjectInte
     public function verifyPassword(string $password): bool
     {
         return password_verify($password, $this->password);
+    }
+
+    /**
+     * 获取角色ID数组（用于表单回显）
+     */
+    public function getRoleIdsAttribute(): array
+    {
+        if (! $this->relationLoaded('roles')) {
+            $this->load('roles');
+        }
+
+        return $this->roles
+            ->pluck('id')
+            ->map(static fn ($id) => (int) $id)
+            ->toArray();
     }
 
     /**

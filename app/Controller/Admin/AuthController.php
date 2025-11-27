@@ -72,10 +72,9 @@ class AuthController extends AbstractController
         }
 
         try {
-            // 3. 查询用户（根据用户名和站点ID）
+            // 3. 查询用户（先根据用户名查找，不限定站点）
             $user = \App\Model\Admin\AdminUser::query()
                 ->where('username', $username)
-                ->where('site_id', $site->id)
                 ->first();
 
             // 4. 验证用户是否存在
@@ -83,6 +82,12 @@ class AuthController extends AbstractController
                 // 登录失败，增加失败次数
                 $this->loginAttemptService->increment();
                 return $this->error('用户名或密码错误', null, 400);
+            }
+
+            // 4.1 校验用户站点是否匹配
+            if ((int)$user->site_id !== (int)$site->id) {
+                $this->loginAttemptService->increment();
+                return $this->error('账号所属站点不匹配', null, 400);
             }
 
             // 5. 验证密码（使用 Model 中的 verifyPassword 方法）

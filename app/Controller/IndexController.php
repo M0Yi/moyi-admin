@@ -22,6 +22,7 @@ use Hyperf\Contract\ConfigInterface;
 use Hyperf\Database\Schema\Schema;
 use Hyperf\Database\Schema\Blueprint;
 use Hyperf\Database\Migrations\Migration;
+use function Hyperf\Config\config;
 
 class IndexController extends AbstractController
 {
@@ -29,6 +30,20 @@ class IndexController extends AbstractController
 
     public function index(RenderInterface $render): ResponseInterface
     {
+        $currentSite = site();
+        if (! $currentSite) {
+            $uri = $this->request->getUri();
+            $allowPublicCreation = (bool) config('site.public_creation_enabled', false);
+            return $render->render('errors.site_not_found', [
+                'requestHost' => $uri->getHost(),
+                'requestPath' => $uri->getPath(),
+                'allowPublicSiteCreation' => $allowPublicCreation,
+                'siteCreationUrl' => $allowPublicCreation
+                    ? '/site/register?domain=' . rawurlencode($uri->getHost())
+                    : null,
+            ])->withStatus(503);
+        }
+
         $redisStatus = 'disconnected';
         $mysqlStatus = 'disconnected';
 

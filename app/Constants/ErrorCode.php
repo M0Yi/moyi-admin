@@ -47,4 +47,9 @@ class ErrorCode extends AbstractConstants
      * @Message("滑动验证失败")
      */
     public const CAPTCHA_FAILED = 462;
+
+    /**
+     * @Message("Not Found")
+     */
+    public const NOT_FOUND = 404;
 }
