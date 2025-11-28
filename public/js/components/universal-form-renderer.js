@@ -436,6 +436,8 @@
                     return this.renderRichTextField(field);
                 case 'permission_tree':
                     return this.renderPermissionTreeField(field);
+                case 'color':
+                    return this.renderColorField(field);
                 default:
                     return this.renderTextInput(field, 'text');
             }
@@ -915,6 +917,61 @@
                     rows="${field.rows ? parseInt(field.rows, 10) : 10}"
                     placeholder="${this.escapeAttr(field.placeholder ?? '请输入内容...')}"
                 >${this.escape(value)}</textarea>
+            `;
+        }
+
+        renderColorField(field) {
+            const id = this.getFieldId(field);
+            const value = this.getFieldValue(field);
+            const previewId = `${id}_preview`;
+            // 规范化颜色值，确保以 # 开头
+            let normalizedValue = '';
+            if (value) {
+                normalizedValue = value.startsWith('#') ? value : `#${value}`;
+                // 验证是否为有效的 HEX 颜色值
+                if (!/^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{4}|[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/.test(normalizedValue)) {
+                    normalizedValue = '#f8f9fa';
+                }
+            } else {
+                normalizedValue = '#f8f9fa';
+            }
+
+            return `
+                <div class="color-input-group">
+                    <div class="input-group">
+                        <span class="input-group-text p-0" style="width: 40px; border-right: none;">
+                            <span
+                                id="${this.escapeAttr(previewId)}"
+                                class="color-preview-swatch d-inline-block w-100 h-100"
+                                style="background-color: ${this.escapeAttr(normalizedValue)}; border-radius: 0.375rem 0 0 0.375rem;"
+                            ></span>
+                        </span>
+                        <input
+                            type="text"
+                            class="form-control"
+                            id="${this.escapeAttr(id)}"
+                            name="${this.escapeAttr(field.name)}"
+                            placeholder="${this.escapeAttr(field.placeholder ?? '例如：#667eea')}"
+                            value="${this.escapeAttr(value)}"
+                            data-color-input="true"
+                            data-color-preview="${this.escapeAttr(previewId)}"
+                            ${field.required ? 'required' : ''}
+                            ${field.disabled ? 'disabled' : ''}
+                            ${field.readonly ? 'readonly' : ''}
+                        >
+                        <button
+                            class="btn btn-outline-secondary"
+                            type="button"
+                            data-bs-toggle="modal"
+                            data-bs-target="#colorPickerModal"
+                            data-target-input="${this.escapeAttr(id)}"
+                            data-preview-target="${this.escapeAttr(previewId)}"
+                            ${field.disabled || field.readonly ? 'disabled' : ''}
+                        >
+                            <i class="bi bi-palette2 me-1"></i>选择颜色
+                        </button>
+                    </div>
+                </div>
             `;
         }
 
