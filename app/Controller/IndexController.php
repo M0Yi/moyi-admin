@@ -11,6 +11,7 @@ declare(strict_types=1);
  */
 
 namespace App\Controller;
+use App\Model\Admin\AdminSite;
 use Hyperf\Database\Connection;
 use Hyperf\View\RenderInterface;
 use Psr\Http\Message\ResponseInterface;
@@ -18,6 +19,7 @@ use function Hyperf\ViewEngine\view;
 use Hyperf\DbConnection\Db;
 use Hyperf\Redis\RedisFactory;
 use Hyperf\Contract\ConfigInterface;
+use Hyperf\HttpServer\Contract\ResponseInterface as HttpResponse;
 
 use Hyperf\Database\Schema\Schema;
 use Hyperf\Database\Schema\Blueprint;
@@ -28,10 +30,19 @@ class IndexController extends AbstractController
 {
     protected string $connection = 'admin';
 
-    public function index(RenderInterface $render): ResponseInterface
+    public function index(RenderInterface $render, HttpResponse $response): ResponseInterface
     {
         $currentSite = site();
         if (! $currentSite) {
+            // 检查系统是否已安装（是否有任何站点）
+            $isInstalled = $this->isSystemInstalled();
+            
+            if (! $isInstalled) {
+                // 系统未安装，重定向到安装页面
+                return $response->redirect('/install');
+            }
+            
+            // 系统已安装但当前域名没有匹配的站点，显示"站点未配置"错误页面
             $uri = $this->request->getUri();
             $allowPublicCreation = (bool) config('site.public_creation_enabled', false);
             return $render->render('errors.site_not_found', [
@@ -96,6 +107,25 @@ class IndexController extends AbstractController
             ],
         ]);
     }
+
+    /**
+     * 检查系统是否已安装
+     * 
+     * 判断标准：是否存在任何站点
+     * 
+     * @return bool
+     */
+    private function isSystemInstalled(): bool
+    {
+        try {
+            // 检查是否存在任何站点
+            return AdminSite::query()->exists();
+        } catch (\Throwable $e) {
+            // 数据库连接失败或表不存在，视为未安装
+            return false;
+        }
+    }
+
     public function child(RenderInterface $render)
     {
         return $render->render('child',['name' => 'moyi']);

@@ -12,7 +12,7 @@ declare(strict_types=1);
 use Hyperf\Session\Handler;
 
 return [
-    'handler' => Handler\FileHandler::class,
+    'handler' => Hyperf\Session\Handler\RedisHandler::class,
     'options' => [
         'connection' => 'default',
         'path' => BASE_PATH . '/runtime/session',

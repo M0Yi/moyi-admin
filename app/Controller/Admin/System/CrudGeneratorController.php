@@ -6,8 +6,11 @@ namespace App\Controller\Admin\System;
 
 use App\Controller\AbstractController;
 use App\Model\Admin\AdminCrudConfig;
+use App\Model\Admin\AdminPermission;
 use App\Service\Admin\CrudGeneratorService;
 use App\Service\Admin\DatabaseService;
+use App\Service\Admin\PermissionService;
+use Hyperf\DbConnection\Db;
 use Hyperf\Di\Annotation\Inject;
 use Psr\Http\Message\ResponseInterface;
 
@@ -18,6 +21,8 @@ class CrudGeneratorController extends AbstractController
     protected DatabaseService $databaseService;
     #[Inject]
     protected CrudGeneratorService $crudGeneratorService;
+    #[Inject]
+    protected PermissionService $permissionService;
 
 
     /**
@@ -496,6 +501,14 @@ class CrudGeneratorController extends AbstractController
             'icon' => $config?->icon,
         ];
 
+        // 记录用于创建权限的字段的旧值（用于判断是否需要更新权限）
+        $oldPermissionValues = [
+            'route_slug' => $config?->route_slug,
+            'route_prefix' => $config?->route_prefix,
+            'module_name' => $config?->module_name,
+            'icon' => $config?->icon,
+        ];
+
         // 获取菜单同步配置（默认为1，即默认勾选）
         $syncToMenu = isset($data['sync_to_menu']) ? filter_var($data['sync_to_menu'], FILTER_VALIDATE_BOOLEAN) : true;
 
@@ -676,6 +689,21 @@ class CrudGeneratorController extends AbstractController
                 'config_id' => $config->id,
                 'sync_to_menu' => $syncToMenu,
             ]);
+        }
+
+        // 自动管理权限
+        try {
+            // 重新加载配置以获取更新后的值
+            $config->refresh();
+            
+            // 同步权限（如果 route_slug 变化，会先删除旧权限再创建新权限）
+            $this->syncPermissionsForConfig($config, $oldPermissionValues);
+        } catch (\Exception $e) {
+            logger()->error('[CRUD配置保存V2] 同步权限失败', [
+                'config_id' => $config->id,
+                'error' => $e->getMessage(),
+            ]);
+            // 权限同步失败不影响配置保存，只记录日志
         }
 
         return $this->success([
@@ -900,6 +928,16 @@ class CrudGeneratorController extends AbstractController
                     'route_slug' => $config->route_slug,
                 ]);
                 $this->deleteMenuForConfig($config);
+            }
+            // 删除关联的权限
+            try {
+                $this->deletePermissionsForConfig($config);
+            } catch (\Exception $e) {
+                logger()->error('[CRUD配置删除] 删除权限失败', [
+                    'config_id' => $config->id,
+                    'error' => $e->getMessage(),
+                ]);
+                // 权限删除失败不影响配置删除，只记录日志
             }
             $config->delete();
             return $this->success([], '删除成功');
@@ -1379,6 +1417,388 @@ class CrudGeneratorController extends AbstractController
         }
 
         return $tableName;
+    }
+
+    /**
+     * 为 CRUD 配置同步权限
+     *
+     * @param AdminCrudConfig $config CRUD 配置
+     * @param array|null $oldValues 旧的权限相关字段值（用于检测变化）
+     * @throws \Exception
+     */
+    protected function syncPermissionsForConfig(AdminCrudConfig $config, ?array $oldValues = null): void
+    {
+        $siteId = $config->site_id;
+        $moduleName = $config->module_name;
+        $routePrefix = $config->route_prefix ?: $config->route_slug;
+        $routeSlug = $config->route_slug;
+
+        // 权限路径使用业务路径（不包含 /admin/{adminPath} 前缀）
+        // 权限中间件会自动去掉 /admin/{adminPath} 前缀进行匹配
+        $basePath = "/{$routePrefix}";
+
+        // 如果 route_slug 发生变化，需要先删除旧权限
+        $oldRouteSlug = $oldValues['route_slug'] ?? null;
+        if ($oldRouteSlug && $oldRouteSlug !== $routeSlug) {
+            logger()->info('[CRUD权限同步] 检测到 route_slug 变化，删除旧权限', [
+                'config_id' => $config->id,
+                'old_route_slug' => $oldRouteSlug,
+                'new_route_slug' => $routeSlug,
+            ]);
+
+            // 查找旧的父级权限
+            $oldParentSlug = "crud.{$oldRouteSlug}";
+            $oldParentPermission = AdminPermission::where('slug', $oldParentSlug)->first();
+
+            if ($oldParentPermission) {
+                // 删除所有子权限
+                $oldChildPermissions = AdminPermission::where('parent_id', $oldParentPermission->id)->get();
+                foreach ($oldChildPermissions as $child) {
+                    try {
+                        // 先解除角色关联
+                        if ($child->roles()->exists()) {
+                            $child->roles()->detach();
+                        }
+                        $this->permissionService->delete($child->id);
+                        logger()->info('[CRUD权限同步] 删除旧子权限', [
+                            'permission_id' => $child->id,
+                            'slug' => $child->slug,
+                        ]);
+                    } catch (\Exception $e) {
+                        logger()->warning('[CRUD权限同步] 删除旧子权限失败', [
+                            'permission_id' => $child->id,
+                            'slug' => $child->slug,
+                            'error' => $e->getMessage(),
+                        ]);
+                    }
+                }
+
+                // 删除旧的父级权限
+                try {
+                    // 先解除角色关联
+                    if ($oldParentPermission->roles()->exists()) {
+                        $oldParentPermission->roles()->detach();
+                    }
+                    $this->permissionService->delete($oldParentPermission->id);
+                    logger()->info('[CRUD权限同步] 删除旧父级权限', [
+                        'permission_id' => $oldParentPermission->id,
+                        'slug' => $oldParentSlug,
+                    ]);
+                } catch (\Exception $e) {
+                    logger()->warning('[CRUD权限同步] 删除旧父级权限失败', [
+                        'permission_id' => $oldParentPermission->id,
+                        'slug' => $oldParentSlug,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            }
+        }
+
+        // 获取功能开关
+        $features = $config->options['features'] ?? [];
+        $featureList = $features['search'] ?? $config->feature_search ?? true;
+        $featureAdd = $features['add'] ?? $config->feature_add ?? true;
+        $featureEdit = $features['edit'] ?? $config->feature_edit ?? true;
+        $featureDelete = $features['delete'] ?? $config->feature_delete ?? true;
+
+        logger()->info('[CRUD权限同步] 开始同步权限', [
+            'config_id' => $config->id,
+            'site_id' => $siteId,
+            'module_name' => $moduleName,
+            'route_prefix' => $routePrefix,
+            'route_slug' => $routeSlug,
+            'base_path' => $basePath,
+            'features' => [
+                'list' => $featureList,
+                'add' => $featureAdd,
+                'edit' => $featureEdit,
+                'delete' => $featureDelete,
+            ],
+        ]);
+
+        // 查找或创建父级权限（菜单类型）
+        $parentSlug = "crud.{$routeSlug}";
+        $parentPermission = AdminPermission::where('slug', $parentSlug)->first();
+
+        if (!$parentPermission) {
+            $parentPermission = $this->permissionService->create([
+                'site_id' => null, // 权限全局共享，不绑定站点
+                'parent_id' => 0,
+                'name' => $moduleName,
+                'slug' => $parentSlug,
+                'type' => 'menu',
+                'icon' => $config->icon ?? 'bi bi-table',
+                'path' => $basePath,
+                'method' => '*',
+                'component' => null,
+                'description' => "{$moduleName}管理权限组",
+                'status' => 1,
+                'sort' => 100,
+            ]);
+
+            logger()->info('[CRUD权限同步] 创建父级权限', [
+                'permission_id' => $parentPermission->id,
+                'slug' => $parentSlug,
+            ]);
+        } else {
+            // 更新父级权限信息
+            $updateData = [];
+            if ($parentPermission->name !== $moduleName) {
+                $updateData['name'] = $moduleName;
+            }
+            if ($parentPermission->path !== $basePath) {
+                $updateData['path'] = $basePath;
+            }
+            if ($config->icon && $parentPermission->icon !== $config->icon) {
+                $updateData['icon'] = $config->icon;
+            }
+
+            if (!empty($updateData)) {
+                $this->permissionService->update($parentPermission->id, $updateData);
+                logger()->info('[CRUD权限同步] 更新父级权限', [
+                    'permission_id' => $parentPermission->id,
+                    'updated_fields' => array_keys($updateData),
+                ]);
+            }
+        }
+
+        $parentId = $parentPermission->id;
+        $sort = 0;
+
+        // 定义需要创建的权限列表
+        $permissions = [];
+
+        // 列表权限
+        if ($featureList) {
+            $permissions[] = [
+                'slug' => "{$parentSlug}.list",
+                'name' => "{$moduleName}列表",
+                'path' => $basePath,
+                'method' => 'GET',
+                'description' => "查看{$moduleName}列表",
+                'sort' => $sort++,
+            ];
+        }
+
+        // 创建权限
+        if ($featureAdd) {
+            $permissions[] = [
+                'slug' => "{$parentSlug}.create",
+                'name' => "{$moduleName}创建",
+                'path' => "{$basePath}/create",
+                'method' => 'GET',
+                'description' => "访问{$moduleName}创建页面",
+                'sort' => $sort++,
+            ];
+            $permissions[] = [
+                'slug' => "{$parentSlug}.store",
+                'name' => "{$moduleName}保存",
+                'path' => $basePath,
+                'method' => 'POST',
+                'description' => "保存{$moduleName}数据",
+                'sort' => $sort++,
+            ];
+        }
+
+        // 编辑权限
+        if ($featureEdit) {
+            $permissions[] = [
+                'slug' => "{$parentSlug}.edit",
+                'name' => "{$moduleName}编辑",
+                'path' => "{$basePath}/*/edit",
+                'method' => 'GET',
+                'description' => "访问{$moduleName}编辑页面",
+                'sort' => $sort++,
+            ];
+            $permissions[] = [
+                'slug' => "{$parentSlug}.update",
+                'name' => "{$moduleName}更新",
+                'path' => "{$basePath}/*",
+                'method' => 'POST',
+                'description' => "更新{$moduleName}数据",
+                'sort' => $sort++,
+            ];
+        }
+
+        // 删除权限
+        if ($featureDelete) {
+            $permissions[] = [
+                'slug' => "{$parentSlug}.delete",
+                'name' => "{$moduleName}删除",
+                'path' => "{$basePath}/*",
+                'method' => 'DELETE',
+                'description' => "删除{$moduleName}数据",
+                'sort' => $sort++,
+            ];
+        }
+
+        // 创建或更新每个权限
+        foreach ($permissions as $permData) {
+            $existing = AdminPermission::where('slug', $permData['slug'])->first();
+
+            if ($existing) {
+                // 更新现有权限
+                $updateData = [
+                    'name' => $permData['name'],
+                    'path' => $permData['path'],
+                    'method' => $permData['method'],
+                    'description' => $permData['description'],
+                    'sort' => $permData['sort'],
+                ];
+
+                // 如果父级ID变化，更新
+                if ($existing->parent_id !== $parentId) {
+                    $updateData['parent_id'] = $parentId;
+                }
+
+                $this->permissionService->update($existing->id, $updateData);
+
+                logger()->info('[CRUD权限同步] 更新权限', [
+                    'permission_id' => $existing->id,
+                    'slug' => $permData['slug'],
+                ]);
+            } else {
+                // 创建新权限
+                $this->permissionService->create([
+                    'site_id' => null, // 权限全局共享
+                    'parent_id' => $parentId,
+                    'name' => $permData['name'],
+                    'slug' => $permData['slug'],
+                    'type' => 'button',
+                    'icon' => null,
+                    'path' => $permData['path'],
+                    'method' => $permData['method'],
+                    'component' => null,
+                    'description' => $permData['description'],
+                    'status' => 1,
+                    'sort' => $permData['sort'],
+                ]);
+
+                logger()->info('[CRUD权限同步] 创建权限', [
+                    'slug' => $permData['slug'],
+                ]);
+            }
+        }
+
+        // 删除不再需要的权限（如果功能被关闭）
+        $allChildPermissions = AdminPermission::where('parent_id', $parentId)->get();
+        $requiredSlugs = array_column($permissions, 'slug');
+
+        foreach ($allChildPermissions as $child) {
+            if (!in_array($child->slug, $requiredSlugs)) {
+                try {
+                    $this->permissionService->delete($child->id);
+                    logger()->info('[CRUD权限同步] 删除不需要的权限', [
+                        'permission_id' => $child->id,
+                        'slug' => $child->slug,
+                    ]);
+                } catch (\Exception $e) {
+                    logger()->warning('[CRUD权限同步] 删除权限失败', [
+                        'permission_id' => $child->id,
+                        'slug' => $child->slug,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            }
+        }
+
+        logger()->info('[CRUD权限同步] 权限同步完成', [
+            'config_id' => $config->id,
+            'parent_permission_id' => $parentId,
+            'permissions_count' => count($permissions),
+        ]);
+    }
+
+    /**
+     * 删除 CRUD 配置对应的权限
+     *
+     * @param AdminCrudConfig $config CRUD 配置
+     * @throws \Exception
+     */
+    protected function deletePermissionsForConfig(AdminCrudConfig $config): void
+    {
+        $routeSlug = $config->route_slug;
+        $parentSlug = "crud.{$routeSlug}";
+
+        logger()->info('[CRUD权限删除] 开始删除权限', [
+            'config_id' => $config->id,
+            'route_slug' => $routeSlug,
+            'parent_slug' => $parentSlug,
+        ]);
+
+        // 查找父级权限
+        $parentPermission = AdminPermission::where('slug', $parentSlug)->first();
+
+        if (!$parentPermission) {
+            logger()->info('[CRUD权限删除] 未找到父级权限，无需删除', [
+                'parent_slug' => $parentSlug,
+            ]);
+            return;
+        }
+
+        // 查找所有子权限
+        $childPermissions = AdminPermission::where('parent_id', $parentPermission->id)->get();
+
+        // 删除所有子权限（先删除子权限，再删除父权限）
+        $deletedCount = 0;
+        foreach ($childPermissions as $child) {
+            try {
+                // 检查是否被角色使用
+                if ($child->roles()->exists()) {
+                    // 先解除角色关联
+                    $child->roles()->detach();
+                    logger()->info('[CRUD权限删除] 解除子权限的角色关联', [
+                        'permission_id' => $child->id,
+                        'slug' => $child->slug,
+                    ]);
+                }
+
+                $this->permissionService->delete($child->id);
+                $deletedCount++;
+                logger()->info('[CRUD权限删除] 删除子权限', [
+                    'permission_id' => $child->id,
+                    'slug' => $child->slug,
+                ]);
+            } catch (\Exception $e) {
+                logger()->warning('[CRUD权限删除] 删除子权限失败', [
+                    'permission_id' => $child->id,
+                    'slug' => $child->slug,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        // 删除父级权限
+        try {
+            // 检查是否被角色使用
+            if ($parentPermission->roles()->exists()) {
+                // 先解除角色关联
+                $parentPermission->roles()->detach();
+                logger()->info('[CRUD权限删除] 解除父级权限的角色关联', [
+                    'permission_id' => $parentPermission->id,
+                    'slug' => $parentSlug,
+                ]);
+            }
+
+            $this->permissionService->delete($parentPermission->id);
+            $deletedCount++;
+            logger()->info('[CRUD权限删除] 删除父级权限', [
+                'permission_id' => $parentPermission->id,
+                'slug' => $parentSlug,
+            ]);
+        } catch (\Exception $e) {
+            logger()->warning('[CRUD权限删除] 删除父级权限失败', [
+                'permission_id' => $parentPermission->id,
+                'slug' => $parentSlug,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        logger()->info('[CRUD权限删除] 权限删除完成', [
+            'config_id' => $config->id,
+            'total_permissions' => $childPermissions->count() + 1,
+            'deleted_count' => $deletedCount,
+        ]);
     }
 }
 
