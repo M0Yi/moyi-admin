@@ -317,6 +317,9 @@ class CrudService
             throw new \InvalidArgumentException('过滤后的创建数据为空，请检查 fillable 配置');
         }
 
+        // 先将数组/对象等复杂类型转换成 JSON 字符串，避免 DB 绑定时报错
+        $data = $this->normalizeComplexColumnValues($data);
+
         // 将空字符串转换为 null
         $data = $this->convertEmptyStringsToNull($data);
 
@@ -395,6 +398,9 @@ class CrudService
         if (empty($data)) {
             throw new \InvalidArgumentException('过滤后的更新数据为空，请检查 fillable 配置');
         }
+
+        // 将数组/对象等复杂类型转换为 JSON 字符串
+        $data = $this->normalizeComplexColumnValues($data);
 
         // 将空字符串转换为 null
         $data = $this->convertEmptyStringsToNull($data);
@@ -671,6 +677,35 @@ class CrudService
             // 如果是数组，递归处理（但数组本身不为空时不转换）
             elseif (is_array($value) && !empty($value)) {
                 $data[$key] = $this->convertEmptyStringsToNull($value);
+            }
+        }
+
+        return $data;
+    }
+
+    /**
+     * 将数组、可 JSON 序列化的对象统一转换为字符串，避免 SQL 构建阶段出现 "Array to string conversion"
+     */
+    protected function normalizeComplexColumnValues(array $data): array
+    {
+        foreach ($data as $key => $value) {
+            if (is_array($value)) {
+                $data[$key] = json_encode($value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+                continue;
+            }
+
+            if ($value instanceof \JsonSerializable) {
+                $data[$key] = json_encode($value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+                continue;
+            }
+
+            if ($value instanceof \Stringable) {
+                $data[$key] = (string) $value;
+                continue;
+            }
+
+            if (is_object($value)) {
+                $data[$key] = json_encode($value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
             }
         }
 

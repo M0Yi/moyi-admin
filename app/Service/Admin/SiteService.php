@@ -342,6 +342,47 @@ class SiteService
 
         return $fields;
     }
+
+    /**
+     * 获取站点选择组件可用的选项
+     */
+    public function getSiteSelectorOptions(?string $keyword = null): array
+    {
+        $query = AdminSite::query()
+            ->select(['id', 'name', 'title', 'domain', 'status', 'admin_entry_path', 'slogan', 'created_at'])
+            ->orderBy('sort', 'asc')
+            ->orderBy('id', 'asc');
+
+        if ($keyword) {
+            $query->where(function ($sub) use ($keyword) {
+                $like = '%' . $keyword . '%';
+                $sub->where('name', 'like', $like)
+                    ->orWhere('domain', 'like', $like)
+                    ->orWhere('title', 'like', $like);
+            });
+        }
+
+        $currentSiteId = site_id();
+        $statusMap = AdminSite::getStatuses();
+
+        return $query->get()->map(static function (AdminSite $site) use ($currentSiteId, $statusMap) {
+            $id = (int) $site->id;
+
+            return [
+                'value' => (string) $id,
+                'label' => $site->name ?: ('站点 #' . $id),
+                'name' => $site->name,
+                'title' => $site->title,
+                'domain' => $site->domain,
+                'status' => (int) $site->status,
+                'status_text' => $statusMap[$site->status] ?? '未知',
+                'entry_path' => $site->admin_entry_path,
+                'slogan' => $site->slogan,
+                'created_at' => $site->created_at?->toDateTimeString(),
+                'is_current' => $currentSiteId !== null && $id === $currentSiteId,
+            ];
+        })->toArray();
+    }
 }
 
 

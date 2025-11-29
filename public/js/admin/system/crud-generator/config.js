@@ -673,6 +673,11 @@ function guessFormType(column) {
     const type = (column.type || '').toLowerCase();
     const comment = (column.comment || '').toLowerCase();
     
+    // site_id 使用专用站点选择组件
+    if (fieldName === 'site_id') {
+        return 'site_select';
+    }
+    
     // 1. 字段名以 _id 或 _ids 结尾：关联选择
     if (fieldName.endsWith('_id') || fieldName.endsWith('_ids')) {
         return 'relation';
@@ -1286,7 +1291,7 @@ function inferDefaultSearchType(column) {
     }
     
     // 选择类型（select、radio、switch、relation）：使用下拉选择搜索
-    if (['select', 'radio', 'switch', 'relation'].includes(formType)) {
+    if (['select', 'radio', 'switch', 'relation', 'site_select'].includes(formType)) {
         return 'select';
     }
     
@@ -1489,6 +1494,7 @@ function renderFieldsConfig(columns) {
                         <option value="checkbox" ${column.form_type === 'checkbox' ? 'selected' : ''}>复选框</option>
                         <option value="select" ${column.form_type === 'select' ? 'selected' : ''}>下拉选择</option>
                         <option value="relation" ${column.form_type === 'relation' ? 'selected' : ''}>关联选择</option>
+                        <option value="site_select" ${column.form_type === 'site_select' ? 'selected' : ''}>站点选择</option>
                         <option value="icon" ${column.form_type === 'icon' ? 'selected' : ''}>图标选择</option>
                         <option value="image" ${column.form_type === 'image' ? 'selected' : ''}>单图上传</option>
                         <option value="images" ${column.form_type === 'images' ? 'selected' : ''}>多图上传</option>
@@ -1617,6 +1623,15 @@ function renderFieldsConfig(columns) {
                                     <label class="form-label">列宽（col）</label>
                                     ${(() => {
                                         let colValue = column.col || '';
+                                        if (!colValue && column.form_type === 'switch') {
+                                            colValue = 'col-12 col-md-3';
+                                        }
+                                        if (!colValue && (column.form_type === 'image' || column.form_type === 'images')) {
+                                            colValue = 'col-12 col-md-6';
+                                        }
+                                        if (!colValue && column.form_type === 'site_select') {
+                                            colValue = 'col-12';
+                                        }
                                         const presetCols = ['col-12', 'col-12 col-md-6', 'col-12 col-md-4', 'col-12 col-md-3', 'col-12 col-md-8', 'col-12 col-md-9', 'col-6 col-md-2'];
                                         const isCustom = colValue && !presetCols.includes(colValue);
                                         const selectedValue = isCustom ? 'custom' : colValue;

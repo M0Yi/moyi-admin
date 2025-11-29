@@ -1138,6 +1138,7 @@ class CrudGeneratorController extends AbstractController
         $siteId = $config->site_id;
         $moduleName = $config->module_name;
         $routeSlug = $config->route_slug;
+        $permissionSlug = $this->buildCrudPermissionSlug($config);
 
         // 直接从 icon 字段获取，如果没有则使用默认图标
         $icon = $config->icon ?? 'bi bi-table';
@@ -1264,6 +1265,7 @@ class CrudGeneratorController extends AbstractController
                 'visible' => 1,
                 'status' => 1,
                 'sort' => 100,
+                'permission' => $permissionSlug,
             ]);
 
             logger()->info('[CRUD菜单同步] 菜单创建成功', [
@@ -1295,6 +1297,10 @@ class CrudGeneratorController extends AbstractController
             $newMenuPath = "/u/{$routeSlug}";
             if ($parentMenu->path !== $newMenuPath) {
                 $updateData['path'] = $newMenuPath;
+            }
+
+            if ($parentMenu->permission !== $permissionSlug) {
+                $updateData['permission'] = $permissionSlug;
             }
 
             // 如果有需要更新的字段，执行更新
@@ -1431,11 +1437,12 @@ class CrudGeneratorController extends AbstractController
         $siteId = $config->site_id;
         $moduleName = $config->module_name;
         $routePrefix = $config->route_prefix ?: $config->route_slug;
+        $routePrefix = ltrim($routePrefix, '/');
         $routeSlug = $config->route_slug;
 
-        // 权限路径使用业务路径（不包含 /admin/{adminPath} 前缀）
+        // 权限路径使用前台业务路径（需要带 /u 前缀，但不包含 /admin/{adminPath}）
         // 权限中间件会自动去掉 /admin/{adminPath} 前缀进行匹配
-        $basePath = "/{$routePrefix}";
+        $basePath = "/u/{$routePrefix}";
 
         // 如果 route_slug 发生变化，需要先删除旧权限
         $oldRouteSlug = $oldValues['route_slug'] ?? null;
@@ -1447,7 +1454,7 @@ class CrudGeneratorController extends AbstractController
             ]);
 
             // 查找旧的父级权限
-            $oldParentSlug = "crud.{$oldRouteSlug}";
+            $oldParentSlug = $this->buildCrudPermissionSlugFromRoute($oldRouteSlug);
             $oldParentPermission = AdminPermission::where('slug', $oldParentSlug)->first();
 
             if ($oldParentPermission) {
@@ -1500,6 +1507,8 @@ class CrudGeneratorController extends AbstractController
         $featureAdd = $features['add'] ?? $config->feature_add ?? true;
         $featureEdit = $features['edit'] ?? $config->feature_edit ?? true;
         $featureDelete = $features['delete'] ?? $config->feature_delete ?? true;
+        $featureExport = $features['export'] ?? $config->feature_export ?? true;
+        $featureSoftDelete = $features['soft_delete'] ?? $config->soft_delete ?? false;
 
         logger()->info('[CRUD权限同步] 开始同步权限', [
             'config_id' => $config->id,
@@ -1512,12 +1521,14 @@ class CrudGeneratorController extends AbstractController
                 'list' => $featureList,
                 'add' => $featureAdd,
                 'edit' => $featureEdit,
-                'delete' => $featureDelete,
+                    'delete' => $featureDelete,
+                    'export' => $featureExport,
+                    'soft_delete' => $featureSoftDelete,
             ],
         ]);
 
         // 查找或创建父级权限（菜单类型）
-        $parentSlug = "crud.{$routeSlug}";
+        $parentSlug = $this->buildCrudPermissionSlug($config);
         $parentPermission = AdminPermission::where('slug', $parentSlug)->first();
 
         if (!$parentPermission) {
@@ -1614,7 +1625,7 @@ class CrudGeneratorController extends AbstractController
                 'slug' => "{$parentSlug}.update",
                 'name' => "{$moduleName}更新",
                 'path' => "{$basePath}/*",
-                'method' => 'POST',
+                'method' => 'PUT',
                 'description' => "更新{$moduleName}数据",
                 'sort' => $sort++,
             ];
@@ -1628,6 +1639,70 @@ class CrudGeneratorController extends AbstractController
                 'path' => "{$basePath}/*",
                 'method' => 'DELETE',
                 'description' => "删除{$moduleName}数据",
+                'sort' => $sort++,
+            ];
+        }
+
+        // 导出权限
+        if ($featureExport) {
+            $permissions[] = [
+                'slug' => "{$parentSlug}.export",
+                'name' => "{$moduleName}导出",
+                'path' => "{$basePath}/export",
+                'method' => 'GET',
+                'description' => "导出{$moduleName}数据",
+                'sort' => $sort++,
+            ];
+        }
+
+        // 回收站相关权限（需要启用软删除）
+        if ($featureSoftDelete) {
+            $permissions[] = [
+                'slug' => "{$parentSlug}.trash",
+                'name' => "{$moduleName}回收站",
+                'path' => "{$basePath}/trash",
+                'method' => 'GET',
+                'description' => "查看{$moduleName}回收站",
+                'sort' => $sort++,
+            ];
+            $permissions[] = [
+                'slug' => "{$parentSlug}.restore",
+                'name' => "{$moduleName}恢复",
+                'path' => "{$basePath}/*/restore",
+                'method' => 'POST',
+                'description' => "恢复{$moduleName}记录",
+                'sort' => $sort++,
+            ];
+            $permissions[] = [
+                'slug' => "{$parentSlug}.force_delete",
+                'name' => "{$moduleName}永久删除",
+                'path' => "{$basePath}/*/force-delete",
+                'method' => 'DELETE',
+                'description' => "永久删除{$moduleName}记录",
+                'sort' => $sort++,
+            ];
+            $permissions[] = [
+                'slug' => "{$parentSlug}.batch_restore",
+                'name' => "{$moduleName}批量恢复",
+                'path' => "{$basePath}/batch-restore",
+                'method' => 'POST',
+                'description' => "批量恢复{$moduleName}记录",
+                'sort' => $sort++,
+            ];
+            $permissions[] = [
+                'slug' => "{$parentSlug}.batch_force_delete",
+                'name' => "{$moduleName}批量永久删除",
+                'path' => "{$basePath}/batch-force-delete",
+                'method' => 'POST',
+                'description' => "批量永久删除{$moduleName}记录",
+                'sort' => $sort++,
+            ];
+            $permissions[] = [
+                'slug' => "{$parentSlug}.clear_trash",
+                'name' => "{$moduleName}清空回收站",
+                'path' => "{$basePath}/clear-trash",
+                'method' => 'POST',
+                'description' => "清空{$moduleName}回收站",
                 'sort' => $sort++,
             ];
         }
@@ -1707,6 +1782,27 @@ class CrudGeneratorController extends AbstractController
             'parent_permission_id' => $parentId,
             'permissions_count' => count($permissions),
         ]);
+    }
+
+    /**
+     * 生成 CRUD 对应的权限标识（父级）
+     */
+    protected function buildCrudPermissionSlug(AdminCrudConfig $config): string
+    {
+        return $this->buildCrudPermissionSlugFromRoute($config->route_slug);
+    }
+
+    /**
+     * 根据给定的 route slug 生成权限标识
+     */
+    protected function buildCrudPermissionSlugFromRoute(?string $routeSlug): string
+    {
+        $slug = trim((string) $routeSlug);
+        if ($slug === '') {
+            return 'crud';
+        }
+
+        return "crud.{$slug}";
     }
 
     /**

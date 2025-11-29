@@ -62,6 +62,7 @@ Router::addGroup('/admin/{adminPath:[a-zA-Z0-9\-_]+}', function () {
     }, [
         'middleware' => [
             \App\Middleware\AdminAuthMiddleware::class,
+            \App\Middleware\PermissionMiddleware::class,
             \App\Middleware\SuperAdminMiddleware::class,
         ]
     ]);
@@ -147,6 +148,7 @@ Router::addGroup('/admin/{adminPath:[a-zA-Z0-9\-_]+}', function () {
         Router::addGroup('/system/sites', function () {
             Router::get('', 'App\Controller\Admin\System\SiteController@edit');
             Router::put('', 'App\Controller\Admin\System\SiteController@update');
+            Router::get('/options', 'App\Controller\Admin\System\SiteController@options');
         });
 
         // ========================================
@@ -202,6 +204,7 @@ Router::addGroup('/admin/{adminPath:[a-zA-Z0-9\-_]+}', function () {
     }, [
         'middleware' => [
             \App\Middleware\AdminAuthMiddleware::class,
+            \App\Middleware\PermissionMiddleware::class,
         ]
     ]);
 

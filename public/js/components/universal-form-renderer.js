@@ -22,6 +22,7 @@
 
             this.submitButton = document.getElementById(this.submitButtonId);
             this.endpoints = this.schema.endpoints || {};
+        this.siteOptionsCache = new Map();
 
             this.renderFields();
             this.attachFormSubmit();
@@ -206,9 +207,75 @@
                 data[key] = arrayBuffer[key];
             });
 
+            const multiImageValues = this.collectMultiImageValues();
+            Object.keys(multiImageValues).forEach((key) => {
+                data[key] = multiImageValues[key];
+            });
+
+            const permissionTreeValues = this.collectPermissionTreeValues();
+            Object.keys(permissionTreeValues).forEach((key) => {
+                data[key] = permissionTreeValues[key];
+            });
+
             // 这里不再对 *_ids 字段进行 JSON 字符串化，保持为原始数组，
             // 以便后端（如角色权限 permission_ids）可以按数组类型接收和验证。
             return data;
+        }
+
+        collectMultiImageValues() {
+            if (!this.form) {
+                return {};
+            }
+
+            const result = {};
+            const wrappers = this.form.querySelectorAll('[data-universal-images]');
+
+            wrappers.forEach((wrapper) => {
+                const hiddenInput = wrapper.querySelector('input[type="hidden"][name]');
+                if (!hiddenInput || !hiddenInput.name) {
+                    return;
+                }
+
+                result[hiddenInput.name] = this.normalizeArrayValue(hiddenInput.value);
+            });
+
+            return result;
+        }
+
+        collectPermissionTreeValues() {
+            if (!this.form) {
+                return {};
+            }
+
+            const result = {};
+            const wrappers = this.form.querySelectorAll('[data-permission-tree]');
+
+            wrappers.forEach((wrapper) => {
+                const fieldName = wrapper.dataset.permissionTree;
+                if (!fieldName) {
+                    return;
+                }
+
+                const checkboxes = wrapper.querySelectorAll('input.permission-tree-checkbox');
+                const values = [];
+                const valueSet = new Set();
+
+                checkboxes.forEach((checkbox) => {
+                    if (!(checkbox.checked || checkbox.indeterminate)) {
+                        return;
+                    }
+                    const { value } = checkbox;
+                    if (!value || valueSet.has(value)) {
+                        return;
+                    }
+                    valueSet.add(value);
+                    values.push(value);
+                });
+
+                result[fieldName] = values;
+            });
+
+            return result;
         }
 
         toggleSubmitState(isLoading) {
@@ -415,6 +482,8 @@
                 case 'select':
                 case 'relation':
                     return this.renderSelect(field);
+                case 'site_select':
+                    return this.renderSiteSelector(field);
                 case 'radio':
                     return this.renderRadioGroup(field);
                 case 'checkbox':
@@ -681,6 +750,84 @@
                 >
                     ${optionsHtml}
                 </select>
+            `;
+        }
+
+        renderSiteSelector(field) {
+            const id = this.getFieldId(field);
+            const value = this.getFieldValue(field);
+            const placeholder = field.placeholder || '输入站点名称或域名搜索';
+            const disabled = Boolean(field.disabled || field.readonly);
+            const allowClear = !field.required && !disabled;
+            const summary = value ? `当前选择：站点 #${value}` : '尚未选择站点';
+
+            if (!this.endpoints.siteOptions) {
+                return `
+                    <div class="alert alert-warning mb-2">
+                        <i class="bi bi-shield-lock me-1"></i> 当前账号无权选择站点
+                    </div>
+                    <input
+                        type="hidden"
+                        id="${id}"
+                        name="${this.escapeAttr(field.name)}"
+                        value="${this.escapeAttr(value)}"
+                        ${field.required ? 'required' : ''}
+                    >
+                    <div class="text-muted small">
+                        ${value ? `已绑定站点 ID：${this.escape(value)}` : '将使用当前登录站点'}
+                    </div>
+                `;
+            }
+
+            return `
+                <div class="site-selector-wrapper border rounded p-3" data-site-selector="${this.escapeAttr(field.name)}" data-site-selector-disabled="${disabled ? '1' : '0'}">
+                    <input
+                        type="hidden"
+                        id="${id}"
+                        name="${this.escapeAttr(field.name)}"
+                        value="${this.escapeAttr(value)}"
+                        ${field.required ? 'required' : ''}
+                        ${disabled ? 'disabled' : ''}
+                    >
+                    <div class="d-flex flex-wrap gap-2 align-items-center mb-3">
+                        <div class="flex-grow-1">
+                            <div class="input-group input-group-sm">
+                                <span class="input-group-text"><i class="bi bi-search"></i></span>
+                                <input
+                                    type="search"
+                                    class="form-control"
+                                    placeholder="${this.escapeAttr(placeholder)}"
+                                    data-site-selector-search
+                                    ${disabled ? 'disabled' : ''}
+                                >
+                            </div>
+                        </div>
+                        <button
+                            type="button"
+                            class="btn btn-outline-secondary btn-sm"
+                            data-site-selector-refresh
+                            ${disabled ? 'disabled' : ''}
+                        >
+                            <i class="bi bi-arrow-repeat me-1"></i>刷新
+                        </button>
+                    </div>
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <small class="text-muted" data-site-selector-summary>${this.escape(summary)}</small>
+                        ${allowClear ? `<button type="button" class="btn btn-link btn-sm p-0" data-site-selector-clear ${value ? '' : 'disabled'}>清空</button>` : ''}
+                    </div>
+                    <div class="site-selector-list row g-3" data-site-selector-list>
+                        ${this.buildSiteSelectorLoading()}
+                    </div>
+                </div>
+            `;
+        }
+
+        buildSiteSelectorLoading() {
+            return `
+                <div class="col-12 text-center text-muted py-4" data-site-selector-loading>
+                    <div class="spinner-border spinner-border-sm mb-2" role="status"></div>
+                    <div>加载站点列表...</div>
+                </div>
             `;
         }
 
@@ -983,6 +1130,7 @@
             this.initializeMultiImageFields();
             this.initializeDateInputs();
             this.initializePermissionTreeFields();
+            this.initializeSiteSelectors();
         }
         
         initializeGroups() {
@@ -1521,7 +1669,7 @@
             }
 
             // 全宽字段类型
-            const fullWidthTypes = ['textarea', 'rich_text', 'number_range', 'permission_tree'];
+            const fullWidthTypes = ['textarea', 'rich_text', 'number_range', 'permission_tree', 'site_select'];
             if (fullWidthTypes.includes(fieldType)) {
                 return 'col-12';
             }
@@ -1714,19 +1862,19 @@
 
                 const updateSummaryAndSelectedList = () => {
                     const allCbs = getAllCheckboxes();
-                    const checkedCbs = allCbs.filter((cb) => cb.checked);
+                    const selectedCbs = allCbs.filter((cb) => cb.checked || cb.indeterminate);
 
                     if (summaryEl) {
-                        summaryEl.textContent = `已选 ${checkedCbs.length} / ${allCbs.length} 项`;
+                        summaryEl.textContent = `已选 ${selectedCbs.length} / ${allCbs.length} 项`;
                     }
 
                     if (selectedListEl) {
-                        if (!checkedCbs.length) {
+                        if (!selectedCbs.length) {
                             selectedListEl.innerHTML = '<div class="text-muted small">暂无已选权限</div>';
                             return;
                         }
 
-                        const itemsHtml = checkedCbs
+                        const itemsHtml = selectedCbs
                             .map((cb) => {
                                 const label = cb.dataset.label || cb.value;
                                 return `<span class="badge permission-tree-selected-badge" title="${this.escapeAttr(label)}">
@@ -1867,6 +2015,352 @@
                     updateAncestors(node);
                 });
             });
+        }
+
+        initializeSiteSelectors() {
+            const wrappers = this.form.querySelectorAll('[data-site-selector]');
+            if (!wrappers.length) {
+                return;
+            }
+
+            if (!this.endpoints.siteOptions) {
+                wrappers.forEach((wrapper) => {
+                    this.renderSiteSelectorError(wrapper, '未配置站点接口');
+                });
+                return;
+            }
+
+            wrappers.forEach((wrapper) => this.setupSiteSelector(wrapper));
+        }
+
+        setupSiteSelector(wrapper) {
+            const hiddenInput = wrapper.querySelector('input[type="hidden"][name]');
+            const summaryEl = wrapper.querySelector('[data-site-selector-summary]');
+            const searchInput = wrapper.querySelector('[data-site-selector-search]');
+            const refreshBtn = wrapper.querySelector('[data-site-selector-refresh]');
+            const clearBtn = wrapper.querySelector('[data-site-selector-clear]');
+            const listEl = wrapper.querySelector('[data-site-selector-list]');
+            const disabled = wrapper.dataset.siteSelectorDisabled === '1';
+
+            if (!hiddenInput || !listEl) {
+                return;
+            }
+
+            let requestToken = 0;
+            let searchTimer = null;
+
+            const applySelection = (optionElement) => {
+                const selectedValue = optionElement ? (optionElement.dataset.siteOptionValue || '') : '';
+                hiddenInput.value = selectedValue;
+                this.highlightSiteSelection(wrapper, selectedValue);
+                this.updateSiteSelectorSummary(summaryEl, optionElement ? optionElement.dataset : null, selectedValue);
+                if (clearBtn) {
+                    clearBtn.disabled = selectedValue === '';
+                }
+            };
+
+            const loadOptions = (keyword = '') => {
+                requestToken += 1;
+                const currentToken = requestToken;
+                this.toggleSiteSelectorLoading(wrapper, true);
+                this.fetchSiteOptions(keyword)
+                    .then((payload) => {
+                        if (currentToken !== requestToken) {
+                            return;
+                        }
+                        this.renderSiteSelectorOptions(wrapper, payload, hiddenInput.value);
+                    })
+                    .catch((error) => {
+                        if (currentToken !== requestToken) {
+                            return;
+                        }
+                        this.renderSiteSelectorError(wrapper, error.message || '加载站点失败');
+                    })
+                    .finally(() => {
+                        if (currentToken === requestToken) {
+                            this.toggleSiteSelectorLoading(wrapper, false);
+                        }
+                    });
+            };
+
+            if (!disabled) {
+                wrapper.addEventListener('click', (event) => {
+                    const option = event.target.closest('[data-site-option-value]');
+                    if (!option || !wrapper.contains(option)) {
+                        return;
+                    }
+
+                    if (hiddenInput.value === (option.dataset.siteOptionValue || '')) {
+                        return;
+                    }
+
+                    applySelection(option);
+                });
+
+                wrapper.addEventListener('keydown', (event) => {
+                    if (event.key !== 'Enter' && event.key !== ' ') {
+                        return;
+                    }
+                    const option = event.target.closest('[data-site-option-value]');
+                    if (!option || !wrapper.contains(option)) {
+                        return;
+                    }
+                    event.preventDefault();
+                    applySelection(option);
+                });
+            }
+
+            if (clearBtn && !disabled) {
+                clearBtn.addEventListener('click', () => {
+                    hiddenInput.value = '';
+                    this.highlightSiteSelection(wrapper, '');
+                    this.updateSiteSelectorSummary(summaryEl, null, '');
+                    clearBtn.disabled = true;
+                });
+            }
+
+            if (searchInput && !disabled) {
+                const triggerSearch = () => {
+                    const keyword = searchInput.value || '';
+                    loadOptions(keyword);
+                };
+
+                searchInput.addEventListener('input', () => {
+                    clearTimeout(searchTimer);
+                    searchTimer = setTimeout(triggerSearch, 400);
+                });
+
+                searchInput.addEventListener('keydown', (event) => {
+                    if (event.key === 'Enter') {
+                        event.preventDefault();
+                        clearTimeout(searchTimer);
+                        triggerSearch();
+                    }
+                });
+            }
+
+            if (refreshBtn && !disabled) {
+                refreshBtn.addEventListener('click', () => {
+                    const keyword = searchInput ? (searchInput.value || '') : '';
+                    loadOptions(keyword);
+                });
+            }
+
+            loadOptions('');
+        }
+
+        fetchSiteOptions(keyword = '') {
+            if (!this.endpoints.siteOptions) {
+                return Promise.reject(new Error('未配置站点接口'));
+            }
+
+            const normalizedKeyword = (keyword || '').trim();
+            const cacheKey = normalizedKeyword === '' ? '__all__' : null;
+            if (cacheKey && this.siteOptionsCache.has(cacheKey)) {
+                return this.siteOptionsCache.get(cacheKey);
+            }
+
+            let requestUrl;
+            try {
+                requestUrl = new URL(this.endpoints.siteOptions, window.location.origin);
+            } catch (error) {
+                requestUrl = null;
+            }
+
+            if (requestUrl) {
+                if (normalizedKeyword) {
+                    requestUrl.searchParams.set('keyword', normalizedKeyword);
+                }
+            }
+
+            let finalUrl = this.endpoints.siteOptions;
+            if (requestUrl) {
+                finalUrl = requestUrl.toString();
+            } else if (normalizedKeyword) {
+                const separator = this.endpoints.siteOptions.includes('?') ? '&' : '?';
+                finalUrl = `${this.endpoints.siteOptions}${separator}keyword=${encodeURIComponent(normalizedKeyword)}`;
+            }
+
+            const request = fetch(finalUrl)
+                .then((response) => response.json())
+                .then((result) => {
+                    if (result.code === 200 && result.data) {
+                        return result.data;
+                    }
+                    throw new Error(result.msg || '加载站点失败');
+                });
+
+            if (cacheKey) {
+                this.siteOptionsCache.set(cacheKey, request);
+            }
+
+            return request;
+        }
+
+        renderSiteSelectorOptions(wrapper, payload, selectedValue) {
+            const listEl = wrapper.querySelector('[data-site-selector-list]');
+            const summaryEl = wrapper.querySelector('[data-site-selector-summary]');
+            if (!listEl) {
+                return;
+            }
+
+            const options = Array.isArray(payload?.options) ? payload.options : [];
+            const normalizedSelected = selectedValue === null || typeof selectedValue === 'undefined'
+                ? ''
+                : String(selectedValue);
+
+            if (!options.length) {
+                listEl.innerHTML = `
+                    <div class="col-12 text-center text-muted py-4">
+                        <i class="bi bi-inbox me-1"></i> 暂无可用站点
+                    </div>
+                `;
+                this.updateSiteSelectorSummary(summaryEl, null, normalizedSelected);
+                this.highlightSiteSelection(wrapper, normalizedSelected);
+                return;
+            }
+
+            listEl.innerHTML = options
+                .map((option) => this.buildSiteOptionCard(option, normalizedSelected))
+                .join('');
+
+            const selectedCard = Array.from(wrapper.querySelectorAll('[data-site-option-value]'))
+                .find((el) => String(el.dataset.siteOptionValue) === normalizedSelected);
+
+            this.updateSiteSelectorSummary(summaryEl, selectedCard ? selectedCard.dataset : null, normalizedSelected);
+            this.highlightSiteSelection(wrapper, normalizedSelected);
+        }
+
+        renderSiteSelectorError(wrapper, message) {
+            const listEl = wrapper.querySelector('[data-site-selector-list]');
+            if (!listEl) {
+                return;
+            }
+
+            listEl.innerHTML = `
+                <div class="col-12">
+                    <div class="alert alert-danger mb-0">
+                        <i class="bi bi-exclamation-triangle me-1"></i>${this.escape(message)}
+                    </div>
+                </div>
+            `;
+        }
+
+        highlightSiteSelection(wrapper, selectedValue) {
+            const normalized = selectedValue === null || typeof selectedValue === 'undefined'
+                ? ''
+                : String(selectedValue);
+            const options = wrapper.querySelectorAll('[data-site-option-value]');
+
+            options.forEach((option) => {
+                const isActive = normalized !== '' && String(option.dataset.siteOptionValue) === normalized;
+                option.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+                const card = option.querySelector('.card');
+                if (card) {
+                    if (isActive) {
+                        card.classList.add('border-primary', 'shadow-sm');
+                        card.classList.remove('border-light');
+                    } else {
+                        card.classList.remove('border-primary', 'shadow-sm');
+                        card.classList.add('border-light');
+                    }
+                }
+            });
+        }
+
+        updateSiteSelectorSummary(summaryEl, dataset, fallbackValue) {
+            if (!summaryEl) {
+                return;
+            }
+
+            const normalized = fallbackValue === null || typeof fallbackValue === 'undefined'
+                ? ''
+                : String(fallbackValue);
+
+            if (dataset && (dataset.siteOptionName || dataset.siteOptionTitle || dataset.siteOptionDomain)) {
+                const name = dataset.siteOptionName || dataset.siteOptionTitle || (normalized ? `站点 #${normalized}` : '站点');
+                const domain = dataset.siteOptionDomain ? `（${dataset.siteOptionDomain}）` : '';
+                summaryEl.textContent = `当前选择：${name}${domain}`;
+                summaryEl.classList.remove('text-muted');
+                summaryEl.classList.add('text-success');
+                return;
+            }
+
+            if (normalized) {
+                summaryEl.textContent = `当前选择：站点 #${normalized}`;
+                summaryEl.classList.remove('text-muted');
+                summaryEl.classList.add('text-success');
+                return;
+            }
+
+            summaryEl.textContent = '尚未选择站点';
+            summaryEl.classList.add('text-muted');
+            summaryEl.classList.remove('text-success');
+        }
+
+        toggleSiteSelectorLoading(wrapper, isLoading) {
+            if (!wrapper) {
+                return;
+            }
+
+            wrapper.dataset.siteSelectorLoading = isLoading ? '1' : '0';
+            if (isLoading) {
+                const listEl = wrapper.querySelector('[data-site-selector-list]');
+                if (listEl) {
+                    listEl.innerHTML = this.buildSiteSelectorLoading();
+                }
+            }
+        }
+
+        buildSiteOptionCard(option, selectedValue) {
+            const value = String(option?.value ?? '');
+            const normalizedSelected = selectedValue === null || typeof selectedValue === 'undefined'
+                ? ''
+                : String(selectedValue);
+            const name = option?.name || option?.label || '';
+            const title = option?.title || '';
+            const domain = option?.domain || '';
+            const entryPath = option?.entry_path || '';
+            const slogan = option?.slogan || '';
+            const createdAt = option?.created_at || '';
+            const status = typeof option?.status === 'number' ? option.status : null;
+            const statusText = option?.status_text || (status === 1 ? '启用' : '禁用');
+            const isCurrent = Boolean(option?.is_current);
+            const isSelected = normalizedSelected !== '' && normalizedSelected === value;
+            const badgeClass = status === 1 ? 'bg-success' : 'bg-secondary';
+            const displayName = name || title || (value ? `站点 #${value}` : '站点');
+
+            return `
+                <div
+                    class="col-12 col-md-6 mb-2"
+                    data-site-option-value="${this.escapeAttr(value)}"
+                    data-site-option-name="${this.escapeAttr(displayName)}"
+                    data-site-option-domain="${this.escapeAttr(domain)}"
+                    data-site-option-title="${this.escapeAttr(title)}"
+                    role="button"
+                    tabindex="0"
+                    aria-pressed="${isSelected ? 'true' : 'false'}"
+                >
+                    <div class="card site-option-card border ${isSelected ? 'border-primary shadow-sm' : 'border-light'} h-100">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between align-items-start mb-2">
+                                <div>
+                                    <div class="fw-semibold">${this.escape(displayName)}</div>
+                                    ${title && title !== displayName ? `<div class="text-muted small">${this.escape(title)}</div>` : ''}
+                                </div>
+                                <div class="text-end">
+                                    <span class="badge ${badgeClass}">${this.escape(statusText)}</span>
+                                    ${isCurrent ? '<span class="badge bg-info ms-1">当前站点</span>' : ''}
+                                </div>
+                            </div>
+                            ${domain ? `<div class="text-muted small mb-1"><i class="bi bi-globe me-1"></i>${this.escape(domain)}</div>` : ''}
+                            ${entryPath ? `<div class="text-muted small mb-1"><i class="bi bi-box-arrow-in-right me-1"></i>${this.escape(entryPath)}</div>` : ''}
+                            ${slogan ? `<div class="text-muted small mb-1"><i class="bi bi-chat-quote me-1"></i>${this.escape(slogan)}</div>` : ''}
+                            ${createdAt ? `<div class="text-muted small"><i class="bi bi-clock me-1"></i>${this.escape(createdAt)}</div>` : ''}
+                        </div>
+                    </div>
+                </div>
+            `;
         }
 
         escape(value) {

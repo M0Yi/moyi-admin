@@ -8,6 +8,7 @@ use App\Exception\BusinessException;
 use App\Model\Admin\AdminPermission;
 use App\Model\Admin\AdminUser;
 use Hyperf\Context\Context;
+use Hyperf\Contract\StdoutLoggerInterface;
 use Hyperf\HttpServer\Contract\ResponseInterface as HttpResponse;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
@@ -30,7 +31,8 @@ use Psr\Http\Server\RequestHandlerInterface;
 class PermissionMiddleware implements MiddlewareInterface
 {
     public function __construct(
-        private readonly HttpResponse $response
+        private readonly HttpResponse $response,
+        private readonly StdoutLoggerInterface $logger
     ) {
     }
 
@@ -55,8 +57,17 @@ class PermissionMiddleware implements MiddlewareInterface
         // 计算业务路径（去掉 /admin/{adminPath} 前缀）
         $businessPath = $this->normalizeBusinessPath($rawPath);
 
+        $this->logger->debug('Permission check start', [
+            'user_id' => $user->id ?? null,
+            'username' => $user->username ?? null,
+            'method' => $method,
+            'raw_path' => $rawPath,
+            'business_path' => $businessPath,
+        ]);
+
         // 如果业务路径为空（极端情况），直接放行
         if ($businessPath === '') {
+            $this->logger->debug('Permission check skipped: empty business path');
             return $handler->handle($request);
         }
 
@@ -73,6 +84,7 @@ class PermissionMiddleware implements MiddlewareInterface
 
         if ($permissions->isEmpty()) {
             // 宽松模式：如果没有配置任何匹配当前 method 的权限规则，则认为该请求不做权限控制
+            $this->logger->debug('Permission check skipped: no permission configured for method');
             return $handler->handle($request);
         }
 
@@ -93,6 +105,7 @@ class PermissionMiddleware implements MiddlewareInterface
 
         // 如果没有任何规则匹配当前路径，同样采用宽松模式直接放行
         if ($matchedSlugs === []) {
+            $this->logger->debug('Permission check skipped: no permission matched path');
             return $handler->handle($request);
         }
 
@@ -102,11 +115,22 @@ class PermissionMiddleware implements MiddlewareInterface
         // 检查当前用户是否拥有其中任意一个权限
         foreach ($matchedSlugs as $slug) {
             if ($user->hasPermission($slug)) {
+                $this->logger->debug('Permission check passed', [
+                    'user_id' => $user->id,
+                    'slug' => $slug,
+                ]);
                 return $handler->handle($request);
             }
         }
 
         // 无匹配权限：根据请求类型返回 JSON 或抛出业务异常
+        $this->logger->warning('Permission denied', [
+            'user_id' => $user->id ?? null,
+            'username' => $user->username ?? null,
+            'method' => $method,
+            'path' => $businessPath,
+            'matched_slugs' => $matchedSlugs,
+        ]);
         if ($this->isApiRequest($request)) {
             return $this->response->json([
                 'code' => 403,

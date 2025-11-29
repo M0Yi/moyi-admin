@@ -228,6 +228,15 @@ class UniversalCrudController extends AbstractController
             $this->service->getRelationOptions($model)
         );
 
+        $endpoints = [
+            'relationSearch' => admin_route("u/{$model}/search-relation-options"),
+            'uploadToken' => admin_route('api/admin/upload/token'),
+        ];
+
+        if (is_super_admin()) {
+            $endpoints['siteOptions'] = admin_route('system/sites/options');
+        }
+
         $formSchema = [
             'model' => $model,
             'title' => $config['title'] ?? $model,
@@ -237,10 +246,7 @@ class UniversalCrudController extends AbstractController
             'validation' => $config['validation']['create'] ?? [],
             'submitUrl' => admin_route("u/{$model}"),
             'redirectUrl' => admin_route("u/{$model}"),
-            'endpoints' => [
-                'relationSearch' => admin_route("u/{$model}/search-relation-options"),
-                'uploadToken' => admin_route('api/admin/upload/token'),
-            ],
+            'endpoints' => $endpoints,
         ];
 
         $configJson = $this->encodeToJson($config);
@@ -545,6 +551,15 @@ class UniversalCrudController extends AbstractController
         $fields = $this->populateFieldDefaults($fields, $record, $relationOptions);
 
         // 构建表单 Schema（类似 create 方法）
+        $endpoints = [
+            'relationSearch' => admin_route("u/{$model}/search-relation-options"),
+            'uploadToken' => admin_route('api/admin/upload/token'),
+        ];
+
+        if (is_super_admin()) {
+            $endpoints['siteOptions'] = admin_route('system/sites/options');
+        }
+
         $formSchema = [
             'model' => $model,
             'title' => $config['title'] ?? $model,
@@ -554,10 +569,7 @@ class UniversalCrudController extends AbstractController
             'validation' => $config['validation']['update'] ?? [],
             'submitUrl' => admin_route("u/{$model}") . '/' . $id,
             'redirectUrl' => admin_route("u/{$model}"),
-            'endpoints' => [
-                'relationSearch' => admin_route("u/{$model}/search-relation-options"),
-                'uploadToken' => admin_route('api/admin/upload/token'),
-            ],
+            'endpoints' => $endpoints,
             'method' => 'PUT', // 编辑使用 PUT 方法
             'recordId' => $id, // 传递记录 ID
         ];
@@ -698,31 +710,62 @@ class UniversalCrudController extends AbstractController
         }
     }
 //
-//    /**
-//     * 批量删除
-//     */
-//    public function batchDestroy(RequestInterface $request): PsrResponseInterface
-//    {
-//        $model = $request->route('model');
-//
-//        // 验证模型
-//        if (!$this->service->isAllowedModel($model)) {
-//            return $this->error('不允许访问的模型', 403);
-//        }
-//
-//        try {
-//            $ids = $request->input('ids', []);
-//            if (empty($ids)) {
-//                return $this->error('请选择要删除的记录');
-//            }
-//
-//            $this->service->batchDelete($model, $ids);
-//
-//            return $this->success([], '批量删除成功');
-//        } catch (\Throwable $e) {
-//            return $this->error($e->getMessage());
-//        }
-//    }
+    /**
+     * 批量删除
+     */
+    public function batchDestroy(RequestInterface $request): PsrResponseInterface
+    {
+        $model = $request->route('model');
+
+        // 验证模型
+        if (!$this->service->isAllowedModel($model)) {
+            return $this->error('不允许访问的模型', code:403);
+        }
+
+        // 解析 ID 列表
+        $ids = $request->input('ids', []);
+        if (is_string($ids) && $ids !== '') {
+            $decoded = json_decode($ids, true);
+            if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
+                $ids = $decoded;
+            } else {
+                $ids = array_filter(array_map('intval', explode(',', $ids)));
+            }
+        }
+
+        if (!is_array($ids)) {
+            return $this->error('请选择要删除的记录');
+        }
+
+        // 过滤无效 ID
+        $ids = array_values(array_filter(array_map(static fn($id) => (int)$id, $ids), static fn($id) => $id > 0));
+        if (empty($ids)) {
+            return $this->error('请选择要删除的记录');
+        }
+
+        try {
+            $config = $this->service->getModelConfig($model);
+            $deletedCount = $this->service->batchDelete($model, $ids);
+
+            $message = !empty($config['soft_delete'])
+                ? "成功删除 {$deletedCount} 条记录（已移至回收站）"
+                : "成功删除 {$deletedCount} 条记录";
+
+            return $this->success([
+                'count' => $deletedCount,
+                'ids' => $ids,
+            ], $message);
+        } catch (\Throwable $e) {
+            $this->rethrowIfDatabaseException($e);
+            logger()->error('[UniversalCrudController] 批量删除失败', [
+                'model' => $model,
+                'ids' => $ids,
+                'error' => $e->getMessage(),
+            ]);
+            $errorMessage = $e->getMessage() ?: '批量删除失败';
+            return $this->error($errorMessage);
+        }
+    }
 
     /**
      * 更新状态（通用切换字段）

@@ -722,6 +722,12 @@ class DatabaseService
             'comment' => $column->comment ?? '',
         ]);
 
+        // 站点字段优先识别为专用组件
+        if ($name === 'site_id') {
+            logger('crud_generator')->debug("字段 {$column->name} 识别为 site_select（站点选择组件）");
+            return 'site_select';
+        }
+
         // ========== 优先级 1：关联字段识别（最优先） ==========
 
         // 外键字段：*_id（数字类型） 或 *_ids（LONGTEXT类型）

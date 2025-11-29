@@ -131,5 +131,23 @@ class SiteController extends AbstractController
 
         return $this->success(null, '保存成功');
     }
+
+    /**
+     * 获取站点选择组件的选项列表
+     */
+    public function options(RequestInterface $request): ResponseInterface
+    {
+        if (! is_super_admin()) {
+            throw new BusinessException(403, '仅超级管理员可操作');
+        }
+
+        $keyword = trim((string) $request->query('keyword', ''));
+        $options = $this->siteService->getSiteSelectorOptions($keyword ?: null);
+
+        return $this->success([
+            'options' => $options,
+            'current_site_id' => site_id(),
+        ]);
+    }
 }
 

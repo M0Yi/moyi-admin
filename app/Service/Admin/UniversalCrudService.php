@@ -419,9 +419,20 @@ class UniversalCrudService
                 continue;
             }
 
-            // 跳过不需要在表单中显示的字段
+            $fieldName = $field['name'];
+            $formType = $field['form_type'] ?? $this->guessFormFieldTypeFromDbType($field['db_type'] ?? 'string');
+            $isSiteSelector = $fieldName === 'site_id'
+                && $formType === 'site_select'
+                && is_super_admin();
+
+            // 非超级管理员：完全移除 site_id 字段，防止在前端表单中渲染
+            if (! is_super_admin() && $fieldName === 'site_id') {
+                continue;
+            }
+
+            // 跳过不需要在表单中显示的字段（站点选择类型除外）
             $skipFields = ['id', 'site_id', 'created_at', 'updated_at', 'deleted_at'];
-            if (in_array($field['name'], $skipFields)) {
+            if (!$isSiteSelector && in_array($fieldName, $skipFields, true)) {
                 continue;
             }
 
@@ -438,10 +449,8 @@ class UniversalCrudService
                 }
             }
             if (empty($label)) {
-                $label = $field['name'];
+                $label = $fieldName;
             }
-
-            $formType = $field['form_type'] ?? $this->guessFormFieldTypeFromDbType($field['db_type'] ?? 'string');
             
             // 规范化 editable 字段值：统一转换为布尔值或 null
             $editable = $field['editable'] ?? null;
@@ -465,9 +474,12 @@ class UniversalCrudService
             if ($defaultValue === 'NULL' || $defaultValue === 'null') {
                 $defaultValue = null;
             }
+            if ($isSiteSelector && $defaultValue === null && site_id() !== null) {
+                $defaultValue = (string) site_id();
+            }
             
             $fieldConfig = [
-                'name' => $field['name'],
+                'name' => $fieldName,
                 'label' => $label,
                 'type' => $formType,
                 'required' => !($field['nullable'] ?? false),
@@ -565,6 +577,18 @@ class UniversalCrudService
                 }
             }
             
+            if ($isSiteSelector) {
+                if (empty($fieldConfig['col'])) {
+                    $fieldConfig['col'] = 'col-12';
+                }
+                if (empty($fieldConfig['placeholder'])) {
+                    $fieldConfig['placeholder'] = '输入站点名称或域名搜索';
+                }
+                if (empty($fieldConfig['help'])) {
+                    $fieldConfig['help'] = '仅超级管理员可选择数据所属站点';
+                }
+            }
+
             $fields[] = $fieldConfig;
         }
 
@@ -608,9 +632,20 @@ class UniversalCrudService
                 continue;
             }
 
-            // 跳过不需要验证的字段
+            $fieldName = $field['name'];
+            $formType = $field['form_type'] ?? '';
+            $isSiteSelector = $fieldName === 'site_id'
+                && $formType === 'site_select'
+                && is_super_admin();
+
+            // 非超级管理员：不输出 site_id 的验证规则，防止前端携带该字段
+            if (! is_super_admin() && $fieldName === 'site_id') {
+                continue;
+            }
+
+            // 跳过不需要验证的字段（站点选择类型除外）
             $skipFields = ['id', 'site_id', 'created_at', 'updated_at', 'deleted_at'];
-            if (in_array($field['name'], $skipFields)) {
+            if (!$isSiteSelector && in_array($fieldName, $skipFields, true)) {
                 continue;
             }
 
@@ -643,9 +678,13 @@ class UniversalCrudService
                 $fieldRules[] = 'max:' . $field['length'];
             }
 
+            if ($isSiteSelector) {
+                $fieldRules[] = 'exists:admin_sites,id';
+            }
+
             if (!empty($fieldRules)) {
-                $rules['create'][$field['name']] = implode('|', $fieldRules);
-                $rules['update'][$field['name']] = implode('|', $fieldRules);
+                $rules['create'][$fieldName] = implode('|', array_unique($fieldRules));
+                $rules['update'][$fieldName] = implode('|', array_unique($fieldRules));
             }
         }
 
@@ -664,8 +703,11 @@ class UniversalCrudService
                 continue;
             }
 
-            // 检查是否是关联类型字段（form_type 为 relation）
-            $isRelationType = ($field['form_type'] ?? '') === 'relation';
+            // 检查是否是关联类型字段：
+            // - 标准关联选择：form_type 为 relation
+            // - 站点选择：form_type 为 site_select（与关联选择在列表展示中保持一致）
+            $formType = $field['form_type'] ?? '';
+            $isRelationType = in_array($formType, ['relation', 'site_select'], true);
             
             // 获取关联表名（支持两种格式：relation['table'] 或 relation_table）
             $relationTable = null;
@@ -678,13 +720,18 @@ class UniversalCrudService
             }
             
             // 检查是否是 JSON 字段（model_type 为 array 或 json）
-            $isJsonField = in_array($field['model_type'] ?? '', ['array', 'json']);
+            $isJsonField = in_array($field['model_type'] ?? '', ['array', 'json'], true);
             
-            // 只有当 form_type 明确为 'relation' 时才进行关联查询
+            // 只有当 form_type 明确为 'relation' 或 'site_select' 时才进行关联查询
             // 如果 form_type 是其他类型（如 number），即使有 relation_table 配置，也不进行关联查询
             if ($isRelationType) {
                 $fieldName = $field['name'];
-                
+
+                // 站点选择：固定映射到 admin_sites 表，使用 name 作为展示字段
+                if ($formType === 'site_select') {
+                    $relationTable = 'admin_sites';
+                    $isJsonField = false;
+                }
                 // 如果没有配置关联表，跳过（避免错误）
                 if (empty($relationTable)) {
                     logger()->warning('[UniversalCrudService] 字段配置为 relation 类型但缺少 relation_table', [
@@ -702,7 +749,15 @@ class UniversalCrudService
                 
                 // 获取关联配置（优先使用嵌套格式，否则使用平铺格式）
                 $relationConfig = $field['relation'] ?? [];
-                
+
+                // 站点选择：站点本身是全局表，不需要 site_id 过滤
+                $hasSiteId = $relationConfig['has_site_id'] ??
+                             $field['relation_has_site_id'] ??
+                             true;
+                if ($formType === 'site_select') {
+                    $hasSiteId = false;
+                }
+
                 $relations[$fieldName] = [
                     'table' => $relationTable ?? '',
                     'label_field' => $relationConfig['label_column'] ?? 
@@ -714,9 +769,7 @@ class UniversalCrudService
                                     $relationConfig['value_field'] ?? 
                                     $field['relation_value_field'] ?? 
                                     'id',
-                    'has_site_id' => $relationConfig['has_site_id'] ?? 
-                                    $field['relation_has_site_id'] ?? 
-                                    true,
+                    'has_site_id' => $hasSiteId,
                     'multiple' => $isMultiple,
                     'is_json' => $isJsonField, // 标记是否为 JSON 字段
                 ];
