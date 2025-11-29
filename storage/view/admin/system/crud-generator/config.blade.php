@@ -170,6 +170,7 @@
     padding-top: 0;
     margin-top: 0;
 }
+
 </style>
 @endpush
 
@@ -177,8 +178,7 @@
 {{-- 已禁用：拖动功能BUG太多，暂时禁用，待后续优化 --}}
 {{-- @include('components.plugin.sortable-js') --}}
 
-@push('admin-scripts')
-@endpush
+@include('components.form-col-visualizer-js')
 
 @section('content')
 @include('admin.common.styles')
@@ -407,9 +407,14 @@
         <div class="card mb-3">
             <div class="card-header bg-light d-flex justify-content-between align-items-center">
                 <h6 class="mb-0"><i class="bi bi-list-ul"></i> 字段配置</h6>
-                <button type="button" class="btn btn-sm btn-outline-primary" id="reloadFieldsBtn" style="display: none;">
-                    <i class="bi bi-arrow-clockwise"></i> 重新加载
-                </button>
+                <div class="d-flex gap-2">
+                    <button type="button" class="btn btn-sm btn-outline-secondary" id="openColVisualizerBtn">
+                        <i class="bi bi-layout-three-columns"></i> 表单列宽可视化
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-primary" id="reloadFieldsBtn" style="display: none;">
+                        <i class="bi bi-arrow-clockwise"></i> 重新加载
+                    </button>
+                </div>
             </div>
             <div class="card-body">
                 <!-- 加载状态 -->
@@ -437,6 +442,35 @@
         </div>
 
     </form>
+</div>
+
+<!-- 列宽可视化编辑模态框 -->
+<div class="modal fade" id="colVisualizerModal" tabindex="-1" aria-labelledby="colVisualizerModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="colVisualizerModalLabel">
+                    <i class="bi bi-layout-three-columns me-1"></i> 表单列宽可视化编辑
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+            </div>
+            <div class="modal-body">
+                <p class="text-muted small mb-3">
+                    仅展示启用「编辑」的字段，可在一处统一调整表单列宽；保存配置后会应用到生成的创建/编辑表单。
+                </p>
+                <div id="colVisualizerContent"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" id="colVisualizerResetBtn">
+                    <i class="bi bi-arrow-counterclockwise"></i> 重置全部
+                </button>
+                <button type="button" class="btn btn-primary" id="colVisualizerSaveBtn">
+                    <i class="bi bi-check-circle"></i> 保存列宽设置
+                </button>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
+            </div>
+        </div>
+    </div>
 </div>
 
 <!-- 固定在底部的操作栏 -->
@@ -881,9 +915,20 @@ document.addEventListener('DOMContentLoaded', function() {
     loadFieldsConfig();
     
     // 重新加载按钮
-    document.getElementById('reloadFieldsBtn').addEventListener('click', function() {
-        loadFieldsConfig();
-    });
+    const reloadBtn = document.getElementById('reloadFieldsBtn');
+    if (reloadBtn) {
+        reloadBtn.addEventListener('click', function() {
+            loadFieldsConfig();
+        });
+    }
+    
+    // 打开列宽可视化编辑器
+    const colBtn = document.getElementById('openColVisualizerBtn');
+    if (colBtn) {
+        colBtn.addEventListener('click', function() {
+            openColVisualizer();
+        });
+    }
     
     // 表单提交
     document.getElementById('configForm').addEventListener('submit', function(e) {
@@ -2632,6 +2677,405 @@ function showFieldDetails(index) {
         const bsCollapse = new bootstrap.Collapse(collapseElement, {
             toggle: true
         });
+    }
+}
+
+// ==================== 列宽可视化编辑 ====================
+
+/**
+ * 将 col 字符串解析为 md 断点下的列宽（1-12）
+ * @param {string} colValue
+ * @returns {number}
+ */
+function parseColToMdSpan(colValue) {
+    if (!colValue || typeof colValue !== 'string') {
+        return 12;
+    }
+    const mdMatch = colValue.match(/col-md-(\d+)/);
+    if (mdMatch) {
+        const span = parseInt(mdMatch[1], 10);
+        return Number.isNaN(span) ? 12 : Math.max(1, Math.min(12, span));
+    }
+    const baseMatch = colValue.match(/col-(\d+)/);
+    if (baseMatch) {
+        const span = parseInt(baseMatch[1], 10);
+        return Number.isNaN(span) ? 12 : Math.max(1, Math.min(12, span));
+    }
+    return 12;
+}
+
+/**
+ * 将 md 断点列宽转换为 col 预设值
+ * @param {number} span
+ * @returns {string}
+ */
+function getPresetColFromSpan(span) {
+    const md = Math.max(1, Math.min(12, span || 12));
+    switch (md) {
+        case 12: return 'col-12';
+        case 9: return 'col-12 col-md-9';
+        case 8: return 'col-12 col-md-8';
+        case 6: return 'col-12 col-md-6';
+        case 4: return 'col-12 col-md-4';
+        case 3: return 'col-12 col-md-3';
+        case 2: return 'col-6 col-md-2';
+        default:
+            return `col-12 col-md-${md}`;
+    }
+}
+
+/**
+ * 将列宽更新同步到主表单中的 col / col_custom 控件
+ * @param {number} index
+ * @param {string} colValue
+ */
+function syncColToMainForm(index, colValue) {
+    console.log(`[同步列宽] 同步索引 ${index} 的列宽为: ${colValue}`);
+    
+    const form = document.getElementById('configForm');
+    if (!form) {
+        console.warn('[同步列宽] 找不到表单 #configForm');
+        return;
+    }
+    
+    // 查找下拉框（可能在详细配置面板中，即使未展开也能找到，因为 DOM 元素存在）
+    // 使用更精确的选择器：通过 data-index 属性查找字段行，然后在其内部查找下拉框
+    const fieldRow = form.querySelector(`tr.field-row[data-index="${index}"]`);
+    if (!fieldRow) {
+        console.warn(`[同步列宽] 找不到索引 ${index} 的字段行`);
+        return;
+    }
+    
+    // 在字段行所在的表格中查找下拉框（可能在详细配置面板中）
+    const select = form.querySelector(`select[name="fields_config[${index}][col]"]`);
+    const customInput = form.querySelector(`input[name="fields_config[${index}][col_custom]"]`);
+    
+    if (!select) {
+        console.warn(`[同步列宽] 找不到索引 ${index} 的列宽下拉框`);
+        return;
+    }
+    
+    console.log(`[同步列宽] 找到下拉框，当前值: ${select.value}`);
+    
+    const presetValues = [
+        '',
+        'col-12',
+        'col-12 col-md-6',
+        'col-12 col-md-4',
+        'col-12 col-md-3',
+        'col-12 col-md-8',
+        'col-12 col-md-9',
+        'col-6 col-md-2',
+    ];
+    
+    if (!colValue) {
+        select.value = '';
+        if (customInput) {
+            customInput.value = '';
+            customInput.style.display = 'none';
+        }
+        console.log(`[同步列宽] 设置为默认值（空）`);
+    } else if (presetValues.includes(colValue)) {
+        select.value = colValue;
+        if (customInput) {
+            customInput.value = '';
+            customInput.style.display = 'none';
+        }
+        console.log(`[同步列宽] 设置为预设值: ${colValue}`);
+    } else {
+        // 自定义列宽
+        select.value = 'custom';
+        if (customInput) {
+            customInput.value = colValue;
+            customInput.style.display = 'block';
+        }
+        console.log(`[同步列宽] 设置为自定义值: ${colValue}`);
+    }
+    
+    // 触发展开面板内已有的联动逻辑
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    
+    console.log(`[同步列宽] 同步完成，下拉框新值: ${select.value}`);
+}
+
+/**
+ * 构建单个字段的列宽可视化行 HTML
+ * @param {number} index
+ * @param {string} displayName
+ * @param {string} colValue
+ * @returns {string}
+ */
+function buildColVisualizerRow(index, displayName, colValue) {
+    const span = parseColToMdSpan(colValue);
+    const widthPercent = Math.round((span / 12) * 100);
+    const safeName = displayName || `字段 ${index + 1}`;
+    
+    return `
+        <div class="mb-3" data-col-index="${index}">
+            <div class="d-flex justify-content-between align-items-center mb-1">
+                <div class="small text-muted">
+                    <code>${escapeHtml(safeName)}</code>
+                </div>
+                <div class="btn-group btn-group-sm" role="group" aria-label="列宽预设">
+                    <button type="button" class="btn btn-outline-secondary col-preset-btn" data-index="${index}" data-col="">
+                        默认
+                    </button>
+                    <button type="button" class="btn btn-outline-secondary col-preset-btn" data-index="${index}" data-col="col-12">
+                        全宽 1/1
+                    </button>
+                    <button type="button" class="btn btn-outline-secondary col-preset-btn" data-index="${index}" data-col="col-12 col-md-6">
+                        1/2
+                    </button>
+                    <button type="button" class="btn btn-outline-secondary col-preset-btn" data-index="${index}" data-col="col-12 col-md-4">
+                        1/3
+                    </button>
+                    <button type="button" class="btn btn-outline-secondary col-preset-btn" data-index="${index}" data-col="col-12 col-md-3">
+                        1/4
+                    </button>
+                    <button type="button" class="btn btn-outline-secondary col-preset-btn" data-index="${index}" data-col="col-12 col-md-8">
+                        2/3
+                    </button>
+                </div>
+            </div>
+            <div class="bg-light border rounded position-relative" style="height: 26px; overflow: hidden;">
+                <div class="bg-primary bg-opacity-75 text-white small d-flex align-items-center justify-content-center col-width-preview-bar"
+                     data-index="${index}"
+                     style="height: 100%; width: ${widthPercent}%; transition: width 0.15s;">
+                    <span>${span}/12</span>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+/**
+ * 打开列宽可视化编辑器
+ */
+let colVisualizerInstance = null;
+
+function openColVisualizer() {
+    const modalEl = document.getElementById('colVisualizerModal');
+    const contentEl = document.getElementById('colVisualizerContent');
+    const form = document.getElementById('configForm');
+    
+    if (!modalEl || !contentEl || !form) {
+        console.error('列宽可视化编辑器：找不到必要的 DOM 元素');
+        return;
+    }
+    
+    // 检查 FormColVisualizer 类是否已加载
+    if (typeof window.FormColVisualizer === 'undefined') {
+        console.error('列宽可视化编辑器：FormColVisualizer 类库未加载，请检查 /js/components/form-col-visualizer.js 是否正确引入');
+        contentEl.innerHTML = '<div class="alert alert-danger">列宽可视化编辑器类库未加载，请刷新页面重试。</div>';
+        const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+        modal.show();
+        return;
+    }
+    
+    // 检查 fieldsData 是否已加载
+    if (!fieldsData || fieldsData.length === 0) {
+        console.warn('列宽可视化编辑器：字段数据未加载，请等待字段配置加载完成');
+        contentEl.innerHTML = '<div class="alert alert-warning">字段配置尚未加载，请稍候再试。</div>';
+        const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+        modal.show();
+        return;
+    }
+    
+    // 从 fieldsData 全局变量和表单中提取字段数据
+    // 优先使用 fieldsData（这是提交时的数据源），同时从表单中读取 col 值
+    const editableFields = [];
+    
+    fieldsData.forEach((column, index) => {
+        // 检查字段是否可编辑
+        // editable 字段的判断：如果明确设置为 false，则不可编辑；否则默认为可编辑
+        const editable = column.editable !== undefined ? column.editable : guessEditable(column);
+        
+        if (!editable) {
+            return; // 跳过不可编辑的字段
+        }
+        
+        // 从表单中读取当前的 col 值（因为用户可能在详细配置中修改过）
+        let currentCol = column.col || '';
+        
+        // 尝试从表单中读取最新的 col 值
+        const rows = form.querySelectorAll('tr.field-row');
+        rows.forEach(row => {
+            const rowIndexAttr = row.getAttribute('data-index');
+            const rowIndex = parseInt(rowIndexAttr, 10);
+            if (Number.isNaN(rowIndex) || rowIndex !== index) {
+                return;
+            }
+            
+            // 获取当前 col 值
+            const colSelect = row.querySelector(`select[name="fields_config[${rowIndex}][col]"]`);
+            if (colSelect) {
+                let colValue = colSelect.value || '';
+                if (colValue === 'custom') {
+                    const customInput = form.querySelector(`input[name="fields_config[${rowIndex}][col_custom]"]`);
+                    if (customInput && customInput.value.trim()) {
+                        colValue = customInput.value.trim();
+                    } else {
+                        colValue = '';
+                    }
+                }
+                currentCol = colValue;
+            }
+        });
+        
+        editableFields.push({
+            name: column.name,
+            field_name: column.field_name || column.comment || column.name,
+            comment: column.comment || '',
+            form_type: column.form_type || 'text',
+            editable: true, // 已经过滤了不可编辑的字段
+            col: currentCol
+        });
+    });
+    
+    console.log('[列宽可视化编辑器] 可编辑字段数量:', editableFields.length);
+    console.log('[列宽可视化编辑器] 字段列表:', editableFields.map(f => f.name));
+    
+    // 创建可视化编辑器实例
+    colVisualizerInstance = new window.FormColVisualizer({
+        container: contentEl,
+        fields: editableFields,
+        modal: modalEl, // 传入模态框元素，用于保存成功后关闭
+        onUpdate: (fieldName, colValue) => {
+            // 同步更新表单中的 col 值
+            syncColToMainFormByFieldName(fieldName, colValue);
+        }
+    });
+    
+    // 渲染编辑器
+    colVisualizerInstance.render();
+    
+    // 显示模态框
+    const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+    
+    // 在模态框显示后绑定 footer 中的按钮事件
+    modalEl.addEventListener('shown.bs.modal', function onModalShown() {
+        // 只绑定一次，然后移除监听器
+        modalEl.removeEventListener('shown.bs.modal', onModalShown);
+        
+        // 绑定保存按钮
+        const saveBtn = document.getElementById('colVisualizerSaveBtn');
+        if (saveBtn) {
+            // 移除旧的事件监听器
+            const newSaveBtn = saveBtn.cloneNode(true);
+            saveBtn.parentNode.replaceChild(newSaveBtn, saveBtn);
+            
+            newSaveBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                console.log('[列宽可视化编辑器] 点击保存按钮');
+                if (colVisualizerInstance) {
+                    colVisualizerInstance.saveCols();
+                }
+            });
+        }
+        
+        // 绑定重置按钮
+        const resetBtn = document.getElementById('colVisualizerResetBtn');
+        if (resetBtn) {
+            // 移除旧的事件监听器
+            const newResetBtn = resetBtn.cloneNode(true);
+            resetBtn.parentNode.replaceChild(newResetBtn, resetBtn);
+            
+            newResetBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (confirm('确定要重置所有字段的列宽为默认值吗？')) {
+                    if (colVisualizerInstance) {
+                        colVisualizerInstance.resetAllCols();
+                    }
+                }
+            });
+        }
+    }, { once: true });
+    
+    modal.show();
+}
+
+/**
+ * 根据字段名同步 col 值到主表单
+ */
+function syncColToMainFormByFieldName(fieldName, colValue) {
+    console.log(`[同步列宽] 开始同步字段 ${fieldName} 的列宽为: ${colValue}`);
+    
+    const form = document.getElementById('configForm');
+    if (!form) {
+        console.warn('[同步列宽] 找不到表单 #configForm');
+        return;
+    }
+    
+    // 方法1：直接使用 data-field-name 属性查找（更可靠）
+    const fieldRow = form.querySelector(`tr.field-row[data-field-name="${fieldName}"]`);
+    
+    if (fieldRow) {
+        const indexAttr = fieldRow.getAttribute('data-index');
+        const index = parseInt(indexAttr, 10);
+        
+        if (!Number.isNaN(index)) {
+            console.log(`[同步列宽] 通过 data-field-name 找到字段 ${fieldName}，索引: ${index}，更新列宽为: ${colValue}`);
+            
+            // 找到对应的字段，更新 col 值
+            syncColToMainForm(index, colValue);
+            
+            // 同时更新 fieldsData 全局变量
+            if (window.fieldsData && window.fieldsData[index]) {
+                window.fieldsData[index].col = colValue;
+                console.log(`[同步列宽] 已更新 fieldsData[${index}].col = ${colValue}`);
+            }
+            
+            return;
+        }
+    }
+    
+    // 方法2：如果方法1失败，尝试通过隐藏的 name input 查找（备用方案）
+    console.log(`[同步列宽] 方法1未找到，尝试方法2：通过 name input 查找`);
+    const rows = form.querySelectorAll('tr.field-row');
+    let found = false;
+    
+    rows.forEach(row => {
+        const indexAttr = row.getAttribute('data-index');
+        const index = parseInt(indexAttr, 10);
+        if (Number.isNaN(index)) return;
+        
+        const nameInput = row.querySelector(`input[name="fields_config[${index}][name]"]`);
+        if (!nameInput) return;
+        
+        // 检查字段名是否匹配
+        if (nameInput.value !== fieldName) return;
+        
+        console.log(`[同步列宽] 通过 name input 找到字段 ${fieldName}，索引: ${index}，更新列宽为: ${colValue}`);
+        
+        // 找到对应的字段，更新 col 值
+        syncColToMainForm(index, colValue);
+        
+        // 同时更新 fieldsData 全局变量
+        if (window.fieldsData && window.fieldsData[index]) {
+            window.fieldsData[index].col = colValue;
+            console.log(`[同步列宽] 已更新 fieldsData[${index}].col = ${colValue}`);
+        }
+        
+        found = true;
+    });
+    
+    if (!found) {
+        console.warn(`[同步列宽] 未找到字段名为 ${fieldName} 的字段行`);
+        console.warn(`[同步列宽] 调试信息：当前表单中有 ${rows.length} 个字段行`);
+        // 输出所有字段名用于调试
+        const allFieldNames = Array.from(rows).map(row => {
+            const dataFieldName = row.getAttribute('data-field-name');
+            const indexAttr = row.getAttribute('data-index');
+            const nameInput = row.querySelector(`input[name="fields_config[${indexAttr}][name]"]`);
+            return {
+                dataFieldName: dataFieldName,
+                nameInputValue: nameInput ? nameInput.value : null,
+                index: indexAttr
+            };
+        });
+        console.warn(`[同步列宽] 所有字段行信息:`, allFieldNames);
     }
 }
 

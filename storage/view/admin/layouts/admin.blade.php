@@ -50,7 +50,6 @@
             --warning-color: #f59e0b;
             --danger-color: #ef4444;
             --info-color: #3b82f6;
-            --secondary-color: #6c757d;
             --light-color: #f8f9fa;
             --dark-color: #1f2937;
             --border-color: #e5e7eb;

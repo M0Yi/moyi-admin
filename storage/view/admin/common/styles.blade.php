@@ -2,13 +2,11 @@
 <style>
 /* ==================== 通用样式 ==================== */
 :root {
-    --primary-color: #667eea;
     --primary-hover: #764ba2;
     --success-color: #10b981;
     --warning-color: #f59e0b;
     --danger-color: #ef4444;
     --info-color: #3b82f6;
-    --secondary-color: #6c757d;
     --light-color: #f8f9fa;
     --dark-color: #1f2937;
     --border-color: #e5e7eb;
