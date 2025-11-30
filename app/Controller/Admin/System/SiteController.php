@@ -75,6 +75,37 @@ class SiteController extends AbstractController
 
         $data = $request->all();
 
+        // 处理主题配置：将 theme_ 前缀的字段转换为 config.theme JSON 结构
+        $themeConfig = [];
+        $themeFields = [
+            'primary_color',
+            'secondary_color',
+            'primary_gradient',
+            'primary_hover',
+            'success_color',
+            'warning_color',
+            'danger_color',
+            'info_color',
+            'light_color',
+            'dark_color',
+            'border_color',
+        ];
+
+        foreach ($themeFields as $field) {
+            $themeKey = 'theme_' . $field;
+            if (isset($data[$themeKey])) {
+                $themeConfig[$field] = $data[$themeKey];
+                unset($data[$themeKey]); // 移除原始字段
+            }
+        }
+
+        // 如果有主题配置，保存到 config.theme
+        if (!empty($themeConfig)) {
+            $config = $site->config ?? [];
+            $config['theme'] = $themeConfig;
+            $data['config'] = $config;
+        }
+
         // 验证规则
         $rules = [
             'name' => 'required|string|max:100',
@@ -82,8 +113,6 @@ class SiteController extends AbstractController
             'slogan' => 'nullable|string|max:200',
             'logo' => 'nullable|string|max:255',
             'favicon' => 'nullable|string|max:255',
-            'primary_color' => 'nullable|string|max:20',
-            'secondary_color' => 'nullable|string|max:20',
             'description' => 'nullable|string',
             'keywords' => 'nullable|string|max:255',
             'contact_email' => 'nullable|email|max:100',
@@ -96,6 +125,7 @@ class SiteController extends AbstractController
             'resource_cdn' => 'nullable|string|max:255',
             'upload_driver' => 'nullable|string|in:local,s3',
             'upload_config' => 'nullable|array',
+            'config' => 'nullable|array',
         ];
 
         // 验证数据

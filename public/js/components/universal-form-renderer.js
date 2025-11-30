@@ -507,6 +507,8 @@
                     return this.renderPermissionTreeField(field);
                 case 'color':
                     return this.renderColorField(field);
+                case 'gradient':
+                    return this.renderGradientField(field);
                 default:
                     return this.renderTextInput(field, 'text');
             }
@@ -1118,6 +1120,54 @@
                             <i class="bi bi-palette2 me-1"></i>选择颜色
                         </button>
                     </div>
+                </div>
+            `;
+        }
+
+        renderGradientField(field) {
+            const id = this.getFieldId(field);
+            const value = this.getFieldValue(field);
+            const previewId = `${id}_preview`;
+            // 默认渐变值
+            const defaultGradient = 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)';
+            const gradientValue = value || defaultGradient;
+
+            return `
+                <div class="gradient-input-group">
+                    <div class="input-group">
+                        <span class="input-group-text p-0" style="width: 60px; border-right: none;">
+                            <span
+                                id="${this.escapeAttr(previewId)}"
+                                class="gradient-preview-swatch d-inline-block w-100 h-100"
+                                style="background: ${this.escapeAttr(gradientValue)}; border-radius: 0.375rem 0 0 0.375rem; border: 1px solid #e5e7eb;"
+                            ></span>
+                        </span>
+                        <input
+                            type="text"
+                            class="form-control"
+                            id="${this.escapeAttr(id)}"
+                            name="${this.escapeAttr(field.name)}"
+                            placeholder="${this.escapeAttr(field.placeholder ?? '例如：linear-gradient(135deg, #667eea 0%, #764ba2 100%)')}"
+                            value="${this.escapeAttr(value)}"
+                            data-gradient-input="true"
+                            data-gradient-preview="${this.escapeAttr(previewId)}"
+                            ${field.required ? 'required' : ''}
+                            ${field.disabled ? 'disabled' : ''}
+                            ${field.readonly ? 'readonly' : ''}
+                        >
+                        <button
+                            class="btn btn-outline-secondary"
+                            type="button"
+                            data-bs-toggle="modal"
+                            data-bs-target="#gradientPickerModal"
+                            data-target-input="${this.escapeAttr(id)}"
+                            data-preview-target="${this.escapeAttr(previewId)}"
+                            ${field.disabled || field.readonly ? 'disabled' : ''}
+                        >
+                            <i class="bi bi-palette2 me-1"></i>选择渐变
+                        </button>
+                    </div>
+                    ${field.help ? `<div class="form-text">${this.escape(field.help)}</div>` : ''}
                 </div>
             `;
         }

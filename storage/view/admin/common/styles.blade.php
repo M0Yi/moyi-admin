@@ -1,15 +1,13 @@
 {{-- 后台管理系统统一样式 --}}
 <style>
 /* ==================== 通用样式 ==================== */
+{{-- 
+注意：颜色变量现在从站点配置中获取，定义在 admin/layouts/admin.blade.php 中
+如果此文件被单独使用，需要确保颜色变量已定义，或使用默认值
+--}}
 :root {
-    --primary-hover: #764ba2;
-    --success-color: #10b981;
-    --warning-color: #f59e0b;
-    --danger-color: #ef4444;
-    --info-color: #3b82f6;
-    --light-color: #f8f9fa;
-    --dark-color: #1f2937;
-    --border-color: #e5e7eb;
+    {{-- 这些颜色变量现在从站点配置中获取，定义在 admin/layouts/admin.blade.php --}}
+    {{-- 如果此文件被单独使用，请确保在引入此文件前已定义这些变量 --}}
     --border-radius: 8px;
     --border-radius-lg: 12px;
     --box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);

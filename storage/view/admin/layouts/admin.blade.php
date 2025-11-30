@@ -38,21 +38,23 @@
               页面级样式建议通过 @push('admin-styles') 进行扩展或覆盖 --}}
     <style>
         :root {
-            --primary-color: {{ site()?->primary_color ?? '#6366f1' }}; /* 主色（品牌色） */
-            --secondary-color: {{ site()?->secondary_color ?? '#8b5cf6' }}; /* 辅助色 */
-            --primary-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            --success-color: #10b981;
-
+            @php
+                $theme = site()?->getThemeConfig() ?? [];
+            @endphp
+            --primary-color: {{ $theme['primary_color'] ?? '#6366f1' }}; /* 主色（品牌色） */
+            --secondary-color: {{ $theme['secondary_color'] ?? '#8b5cf6' }}; /* 辅助色 */
+            --primary-gradient: {{ $theme['primary_gradient'] ?? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' }};
+            --success-color: {{ $theme['success_color'] ?? '#10b981' }};
             --sidebar-width: 260px; /* 侧边栏展开宽度 */
             --sidebar-collapsed-width: 80px; /* 侧边栏收起宽度 */
             --header-height: 60px; /* 顶部导航高度 */
-            --primary-hover: #764ba2;
-            --warning-color: #f59e0b;
-            --danger-color: #ef4444;
-            --info-color: #3b82f6;
-            --light-color: #f8f9fa;
-            --dark-color: #1f2937;
-            --border-color: #e5e7eb;
+            --primary-hover: {{ $theme['primary_hover'] ?? '#764ba2' }};
+            --warning-color: {{ $theme['warning_color'] ?? '#f59e0b' }};
+            --danger-color: {{ $theme['danger_color'] ?? '#ef4444' }};
+            --info-color: {{ $theme['info_color'] ?? '#3b82f6' }};
+            --light-color: {{ $theme['light_color'] ?? '#f8f9fa' }};
+            --dark-color: {{ $theme['dark_color'] ?? '#1f2937' }};
+            --border-color: {{ $theme['border_color'] ?? '#e5e7eb' }};
             --border-radius: 8px;
             --border-radius-lg: 12px;
             --box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);

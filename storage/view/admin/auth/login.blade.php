@@ -7,8 +7,9 @@
         $siteTitle = $site?->title ?? $siteName;
         $siteSlogan = $site?->slogan ?? '欢迎登录';
         $siteLogo = $site?->logo;
-        $primaryColor = $site?->primary_color ?: '#6366f1';
-        $primaryHover = $site?->secondary_color ?: '#575bf0';
+        $theme = $site?->getThemeConfig() ?? [];
+        $primaryColor = $theme['primary_color'] ?? '#6366f1';
+        $primaryHover = $theme['primary_hover'] ?? '#575bf0';
         $initialSource = $siteName !== '' ? $siteName : 'A';
         if (function_exists('mb_substr')) {
             $initialSource = mb_substr($initialSource, 0, 1);

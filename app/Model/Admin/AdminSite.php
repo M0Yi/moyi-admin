@@ -19,8 +19,6 @@ use Hyperf\Database\Model\SoftDeletes;
  * @property string|null $slogan 站点口号
  * @property string|null $logo Logo路径
  * @property string|null $favicon Favicon路径
- * @property string $primary_color 主题色
- * @property string|null $secondary_color 辅助色
  * @property string|null $description 站点描述
  * @property string|null $keywords SEO关键词
  * @property string|null $contact_email 联系邮箱
@@ -77,8 +75,6 @@ class AdminSite extends Model
         'slogan',
         'logo',
         'favicon',
-        'primary_color',
-        'secondary_color',
         'description',
         'keywords',
         'contact_email',
@@ -327,6 +323,62 @@ class AdminSite extends Model
     public function hasUploadConfig(): bool
     {
         return $this->upload_driver !== null || $this->upload_config !== null;
+    }
+
+    /**
+     * 获取主题配置
+     * 主题配置存储在 config JSON 字段的 theme 键中
+     *
+     * @return array
+     */
+    public function getThemeConfig(): array
+    {
+        $config = $this->config ?? [];
+        $theme = $config['theme'] ?? [];
+
+        // 默认主题配置
+        $defaults = [
+            'primary_color' => '#6366f1',
+            'secondary_color' => '#8b5cf6',
+            'primary_gradient' => 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+            'primary_hover' => '#764ba2',
+            'success_color' => '#10b981',
+            'warning_color' => '#f59e0b',
+            'danger_color' => '#ef4444',
+            'info_color' => '#3b82f6',
+            'light_color' => '#f8f9fa',
+            'dark_color' => '#1f2937',
+            'border_color' => '#e5e7eb',
+        ];
+
+        // 合并用户配置和默认值
+        return array_merge($defaults, $theme);
+    }
+
+    /**
+     * 获取主题颜色值
+     *
+     * @param string $key 颜色键名
+     * @param string|null $default 默认值
+     * @return string
+     */
+    public function getThemeColor(string $key, ?string $default = null): string
+    {
+        $theme = $this->getThemeConfig();
+        return $theme[$key] ?? $default ?? '';
+    }
+
+    /**
+     * 设置主题配置
+     *
+     * @param array $themeConfig 主题配置数组
+     * @return void
+     */
+    public function setThemeConfig(array $themeConfig): void
+    {
+        $config = $this->config ?? [];
+        $config['theme'] = $themeConfig;
+        $this->config = $config;
     }
 }
 

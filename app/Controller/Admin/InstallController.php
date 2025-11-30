@@ -230,7 +230,11 @@ class InstallController extends AbstractController
             'admin_entry_path' => $adminPath,
             'name' => $data['site_name'],
             'title' => $data['site_title'] ?? $data['site_name'],
-            'primary_color' => '#007bff',
+            'config' => [
+                'theme' => [
+                    'primary_color' => '#007bff',
+                ],
+            ],
             'status' => AdminSite::STATUS_ENABLED,
             'sort' => 0,
         ]);
@@ -824,8 +828,6 @@ class InstallController extends AbstractController
                 $table->string('slogan', 200)->nullable()->comment('站点口号');
                 $table->string('logo', 255)->nullable()->comment('Logo路径');
                 $table->string('favicon', 255)->nullable()->comment('Favicon路径');
-                $table->string('primary_color', 20)->default('#FAD709')->comment('主题色');
-                $table->string('secondary_color', 20)->nullable()->comment('辅助色');
                 $table->text('description')->nullable()->comment('站点描述');
                 $table->string('keywords', 255)->nullable()->comment('SEO关键词');
                 $table->string('contact_email', 100)->nullable()->comment('联系邮箱');

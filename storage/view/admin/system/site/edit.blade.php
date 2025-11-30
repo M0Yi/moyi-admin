@@ -222,6 +222,7 @@
 
 @push('admin_scripts')
 @include('components.color-picker')
+@include('components.gradient-picker')
 
 <!-- 引入通用表单渲染器 -->
 @php
