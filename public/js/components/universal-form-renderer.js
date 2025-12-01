@@ -509,6 +509,8 @@
                     return this.renderColorField(field);
                 case 'gradient':
                     return this.renderGradientField(field);
+                case 'key_value':
+                    return this.renderKeyValueField(field);
                 default:
                     return this.renderTextInput(field, 'text');
             }
@@ -1172,6 +1174,97 @@
             `;
         }
 
+        renderKeyValueField(field) {
+            const id = this.getFieldId(field);
+            const fieldName = field.name || 'key_value';
+            const value = this.getFieldValue(field);
+            
+            // 解析键值对数据：支持对象格式 {key1: value1, key2: value2} 或数组格式 [{key: 'k1', value: 'v1'}, ...]
+            let keyValuePairs = [];
+            if (value) {
+                try {
+                    const parsed = typeof value === 'string' ? JSON.parse(value) : value;
+                    if (Array.isArray(parsed)) {
+                        keyValuePairs = parsed;
+                    } else if (typeof parsed === 'object' && parsed !== null) {
+                        // 对象格式转换为数组格式
+                        keyValuePairs = Object.entries(parsed).map(([key, val]) => ({
+                            key: key,
+                            value: val
+                        }));
+                    }
+                } catch (e) {
+                    // 解析失败，使用空数组
+                    keyValuePairs = [];
+                }
+            }
+            
+            // 如果没有数据，至少显示一行空行
+            if (keyValuePairs.length === 0) {
+                keyValuePairs = [{ key: '', value: '' }];
+            }
+
+            const pairsHtml = keyValuePairs.map((pair, index) => {
+                const pairId = `${id}_pair_${index}`;
+                return `
+                    <div class="key-value-pair mb-2" data-pair-index="${index}">
+                        <div class="row g-2">
+                            <div class="col-5">
+                                <input
+                                    type="text"
+                                    class="form-control form-control-sm key-input"
+                                    placeholder="键"
+                                    value="${this.escapeAttr(pair.key || '')}"
+                                    data-key-value-key
+                                >
+                            </div>
+                            <div class="col-5">
+                                <input
+                                    type="text"
+                                    class="form-control form-control-sm value-input"
+                                    placeholder="值"
+                                    value="${this.escapeAttr(pair.value || '')}"
+                                    data-key-value-value
+                                >
+                            </div>
+                            <div class="col-2">
+                                <button
+                                    type="button"
+                                    class="btn btn-sm btn-outline-danger w-100 remove-pair-btn"
+                                    ${keyValuePairs.length === 1 ? 'disabled' : ''}
+                                    title="删除"
+                                >
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            return `
+                <div class="key-value-field-wrapper" data-key-value-field="${this.escapeAttr(fieldName)}">
+                    <div class="key-value-pairs-container">
+                        ${pairsHtml}
+                    </div>
+                    <button
+                        type="button"
+                        class="btn btn-sm btn-outline-primary add-pair-btn"
+                        ${field.disabled || field.readonly ? 'disabled' : ''}
+                    >
+                        <i class="bi bi-plus-circle me-1"></i>添加键值对
+                    </button>
+                    <input
+                        type="hidden"
+                        id="${id}"
+                        name="${this.escapeAttr(fieldName)}"
+                        value="${this.escapeAttr(JSON.stringify(keyValuePairs))}"
+                        data-key-value-hidden
+                    >
+                </div>
+            `;
+        }
+
         initializeEnhancements() {
             this.initializeSelects();
             this.initializeSwitches();
@@ -1181,6 +1274,7 @@
             this.initializeDateInputs();
             this.initializePermissionTreeFields();
             this.initializeSiteSelectors();
+            this.initializeKeyValueFields();
         }
         
         initializeGroups() {
@@ -2081,6 +2175,163 @@
             }
 
             wrappers.forEach((wrapper) => this.setupSiteSelector(wrapper));
+        }
+
+        initializeKeyValueFields() {
+            const wrappers = this.form.querySelectorAll('[data-key-value-field]');
+            if (!wrappers.length) {
+                return;
+            }
+
+            wrappers.forEach((wrapper) => this.setupKeyValueField(wrapper));
+        }
+
+        setupKeyValueField(wrapper) {
+            const fieldName = wrapper.dataset.keyValueField;
+            const hiddenInput = wrapper.querySelector('input[type="hidden"][data-key-value-hidden]');
+            const pairsContainer = wrapper.querySelector('.key-value-pairs-container');
+            const addBtn = wrapper.querySelector('.add-pair-btn');
+            const removeBtns = wrapper.querySelectorAll('.remove-pair-btn');
+
+            if (!hiddenInput || !pairsContainer || !addBtn) {
+                return;
+            }
+
+            // 更新隐藏字段的值
+            const updateHiddenValue = () => {
+                const pairs = [];
+                const pairElements = pairsContainer.querySelectorAll('.key-value-pair');
+                
+                pairElements.forEach((pairEl) => {
+                    const keyInput = pairEl.querySelector('[data-key-value-key]');
+                    const valueInput = pairEl.querySelector('[data-key-value-value]');
+                    
+                    if (keyInput && valueInput) {
+                        const key = keyInput.value.trim();
+                        const value = valueInput.value.trim();
+                        
+                        // 只添加非空的键值对
+                        if (key || value) {
+                            pairs.push({ key: key, value: value });
+                        }
+                    }
+                });
+
+                // 如果没有键值对，至少保留一个空对象
+                if (pairs.length === 0) {
+                    pairs.push({ key: '', value: '' });
+                }
+
+                hiddenInput.value = JSON.stringify(pairs);
+            };
+
+            // 添加键值对
+            addBtn.addEventListener('click', () => {
+                const pairIndex = pairsContainer.querySelectorAll('.key-value-pair').length;
+                const pairHtml = `
+                    <div class="key-value-pair mb-2" data-pair-index="${pairIndex}">
+                        <div class="row g-2">
+                            <div class="col-5">
+                                <input
+                                    type="text"
+                                    class="form-control form-control-sm key-input"
+                                    placeholder="键"
+                                    value=""
+                                    data-key-value-key
+                                >
+                            </div>
+                            <div class="col-5">
+                                <input
+                                    type="text"
+                                    class="form-control form-control-sm value-input"
+                                    placeholder="值"
+                                    value=""
+                                    data-key-value-value
+                                >
+                            </div>
+                            <div class="col-2">
+                                <button
+                                    type="button"
+                                    class="btn btn-sm btn-outline-danger w-100 remove-pair-btn"
+                                    title="删除"
+                                >
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                
+                const tempDiv = document.createElement('div');
+                tempDiv.innerHTML = pairHtml;
+                const newPair = tempDiv.firstElementChild;
+                pairsContainer.appendChild(newPair);
+                
+                // 更新删除按钮状态
+                updateRemoveButtonsState();
+                
+                // 绑定新行的删除按钮事件
+                const newRemoveBtn = newPair.querySelector('.remove-pair-btn');
+                if (newRemoveBtn) {
+                    newRemoveBtn.addEventListener('click', () => {
+                        newPair.remove();
+                        updateRemoveButtonsState();
+                        updateHiddenValue();
+                    });
+                }
+                
+                // 绑定新行的输入事件
+                const keyInput = newPair.querySelector('[data-key-value-key]');
+                const valueInput = newPair.querySelector('[data-key-value-value]');
+                if (keyInput) {
+                    keyInput.addEventListener('input', updateHiddenValue);
+                }
+                if (valueInput) {
+                    valueInput.addEventListener('input', updateHiddenValue);
+                }
+                
+                updateHiddenValue();
+            });
+
+            // 更新删除按钮状态（至少保留一行）
+            const updateRemoveButtonsState = () => {
+                const pairElements = pairsContainer.querySelectorAll('.key-value-pair');
+                const removeBtns = pairsContainer.querySelectorAll('.remove-pair-btn');
+                
+                removeBtns.forEach((btn) => {
+                    btn.disabled = pairElements.length <= 1;
+                });
+            };
+
+            // 绑定删除按钮事件
+            removeBtns.forEach((btn) => {
+                btn.addEventListener('click', () => {
+                    const pairEl = btn.closest('.key-value-pair');
+                    if (pairEl) {
+                        const pairElements = pairsContainer.querySelectorAll('.key-value-pair');
+                        if (pairElements.length > 1) {
+                            pairEl.remove();
+                            updateRemoveButtonsState();
+                            updateHiddenValue();
+                        }
+                    }
+                });
+            });
+
+            // 绑定输入事件
+            const keyInputs = pairsContainer.querySelectorAll('[data-key-value-key]');
+            const valueInputs = pairsContainer.querySelectorAll('[data-key-value-value]');
+            
+            keyInputs.forEach((input) => {
+                input.addEventListener('input', updateHiddenValue);
+            });
+            
+            valueInputs.forEach((input) => {
+                input.addEventListener('input', updateHiddenValue);
+            });
+
+            // 初始化删除按钮状态
+            updateRemoveButtonsState();
         }
 
         setupSiteSelector(wrapper) {

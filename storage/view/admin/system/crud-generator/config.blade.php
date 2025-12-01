@@ -570,7 +570,8 @@ const FORM_TYPES = [
     { value: 'icon', label: '图标选择' },
     { value: 'image', label: '单图上传' },
     { value: 'images', label: '多图上传' },
-    { value: 'file', label: '文件上传' }
+    { value: 'file', label: '文件上传' },
+    { value: 'key_value', label: '键值类型', modelType: 'array' } // 仅在模型类型为array时可用
 ];
 
 const COLUMN_TYPES = [
@@ -585,6 +586,7 @@ const COLUMN_TYPES = [
     { value: 'code', label: '代码' },
     { value: 'link', label: '链接' },
     { value: 'relation', label: '关联' },
+    { value: 'key_value', label: '键值' },
     { value: 'columns', label: '列组' },
     { value: 'custom', label: '自定义' }
 ];
@@ -1149,21 +1151,35 @@ function loadFieldsConfig() {
  *   - 如果不包含冒号，例如："用户名"，返回整个注释："用户名"
  * @returns {string} 字段名
  */
+function truncateByDelimiters(text, delimiters) {
+    if (!text || typeof text !== 'string') {
+        return '';
+    }
+    
+    let result = text.trim();
+    let nearestIndex = -1;
+    
+    delimiters.forEach(delimiter => {
+        const index = result.indexOf(delimiter);
+        if (index > -1 && (nearestIndex === -1 || index < nearestIndex)) {
+            nearestIndex = index;
+        }
+    });
+    
+    if (nearestIndex > -1) {
+        result = result.substring(0, nearestIndex).trim();
+    }
+    
+    return result;
+}
+
 function extractFieldNameFromComment(comment) {
     if (!comment || typeof comment !== 'string') {
         return '';
     }
     
-    // 查找第一个冒号的位置
-    const colonIndex = comment.indexOf(':');
-    
-    // 如果找到冒号，返回冒号前的部分（去除首尾空格）
-    if (colonIndex > 0) {
-        return comment.substring(0, colonIndex).trim();
-    }
-    
-    // 如果没有冒号，整个注释都是字段名称（去除首尾空格）
-    return comment.trim();
+    const delimiters = [':', '：', '(', '（'];
+    return truncateByDelimiters(comment, delimiters);
 }
 
 /**
@@ -1178,6 +1194,11 @@ function guessFormType(column) {
     const dataType = (column.data_type || '').toLowerCase();
     const type = (column.type || '').toLowerCase();
     const comment = (column.comment || '').toLowerCase();
+    
+    // *_config + longtext 默认使用键值类型
+    if (fieldName.endsWith('_config') && (dataType === 'longtext' || dataType === 'text' || dataType === 'mediumtext')) {
+        return 'key_value';
+    }
     
     // 0. 特殊字段：site_id 使用站点选择组件
     if (fieldName === 'site_id') {
@@ -1312,6 +1333,11 @@ function guessModelType(column) {
         return 'array';
     }
     
+    // *_config + longtext → array（键值配置字段）
+    if (fieldName.endsWith('_config') && (dataType === 'longtext' || dataType === 'text' || dataType === 'mediumtext')) {
+        return 'array';
+    }
+    
     // 整数类型
     if (['int', 'integer', 'tinyint', 'smallint', 'mediumint', 'bigint'].includes(dataType)) {
         return 'integer';
@@ -1356,6 +1382,11 @@ function guessRenderType(column) {
     const dataType = (column.data_type || '').toLowerCase();
     const type = (column.type || '').toLowerCase();
     const comment = (column.comment || '').toLowerCase();
+    
+    // *_config + longtext 默认使用键值渲染
+    if (fieldName.endsWith('_config') && (dataType === 'longtext' || dataType === 'text' || dataType === 'mediumtext')) {
+        return 'key_value';
+    }
     
     // 1. 字段名以 _id 或 _ids 结尾：关联渲染
     if (fieldName.endsWith('_id') || fieldName.endsWith('_ids')) {
@@ -2010,6 +2041,7 @@ function renderFieldsConfig(columns) {
                         <option value="image" ${column.form_type === 'image' ? 'selected' : ''}>单图上传</option>
                         <option value="images" ${column.form_type === 'images' ? 'selected' : ''}>多图上传</option>
                         <option value="file" ${column.form_type === 'file' ? 'selected' : ''}>文件上传</option>
+                        ${modelType === 'array' ? `<option value="key_value" ${column.form_type === 'key_value' ? 'selected' : ''}>键值类型</option>` : ''}
                     </select>
                 </td>
                 <td>
@@ -2026,6 +2058,7 @@ function renderFieldsConfig(columns) {
                         <option value="code" ${columnType === 'code' ? 'selected' : ''}>代码</option>
                         <option value="link" ${columnType === 'link' ? 'selected' : ''}>链接</option>
                         <option value="relation" ${columnType === 'relation' ? 'selected' : ''}>关联</option>
+                        <option value="key_value" ${columnType === 'key_value' ? 'selected' : ''}>键值</option>
                         <option value="columns" ${columnType === 'columns' ? 'selected' : ''}>列组</option>
                         <option value="custom" ${columnType === 'custom' ? 'selected' : ''}>自定义</option>
                     </select>

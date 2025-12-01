@@ -1220,6 +1220,7 @@ class InstallController extends AbstractController
                 $table->string('title', 200)->comment('标题');
                 $table->longText('content')->comment('内容');
                 $table->integer('view_count')->default(0)->comment('浏览次数');
+                $table->longText('setting_config')->nullable()->comment('设置配置（键值测试字段）');
                 $table->dateTime('published_at')->nullable()->comment('发布时间');
                 $table->dateTime('created_at')->nullable()->comment('创建时间');
                 $table->dateTime('updated_at')->nullable()->comment('更新时间');
@@ -1286,9 +1287,13 @@ class InstallController extends AbstractController
                 'images' => '["https://inkakofenghui.oss-cn-shenzhen.aliyuncs.com/inkako/meeting/images/user-1/1763287317-f02bf714faed7258.jpg","https://inkakofenghui.oss-cn-shenzhen.aliyuncs.com/inkako/meeting/images/user-1/1763287318-4d1ca3f323f43571.jpg"]',
                 'is_show' => 0,
                 'status' => 'active',
-                'title' => '厉害',
-                'content' => '',
+                'title' => '测试文章：云端后台发布体验',
+                'content' => '一段瞎编的文章文案，介绍后台 CRUD 配置如何一键生成表单、列表和权限。',
                 'view_count' => 222,
+                'setting_config' => json_encode([
+                    'banner_title' => '首页横幅',
+                    'banner_enabled' => true,
+                ], JSON_UNESCAPED_UNICODE),
                 'published_at' => '2025-11-06 18:01:38',
                 'created_at' => '2025-11-05 10:03:34',
                 'updated_at' => '2025-11-16 10:02:55',
@@ -1303,13 +1308,38 @@ class InstallController extends AbstractController
                 'images' => '["https://inkakofenghui.oss-cn-shenzhen.aliyuncs.com/inkako/meeting/images/user-1/1763287318-aa76a192cc466b58.jpg","https://inkakofenghui.oss-cn-shenzhen.aliyuncs.com/inkako/meeting/images/user-1/1763287318-b6d5cb42c70c57e4.jpg"]',
                 'is_show' => 1,
                 'status' => 'active',
-                'title' => '哈哈',
-                'content' => '',
+                'title' => '测试文章：运营活动即时上线',
+                'content' => '这段文案描述了一个虚构的活动专题，强调 CRUD 流程中键值配置字段的实用性。',
                 'view_count' => 555,
+                'setting_config' => json_encode([
+                    'banner_title' => '专题页横幅',
+                    'banner_enabled' => false,
+                ], JSON_UNESCAPED_UNICODE),
                 'published_at' => '2025-11-06 18:01:38',
                 'created_at' => '2025-11-05 10:03:34',
                 'updated_at' => '2025-11-16 10:03:11',
                 'deleted_at' => null,
+            ],
+            [
+                'id' => 3,
+                'site_id' => $siteId,
+                'user_id' => $userId,
+                'user_ids' => null,
+                'image' => 'https://inkakofenghui.oss-cn-shenzhen.aliyuncs.com/inkako/meeting/images/user-1/1763287317-229f8e96dc80ae75.jpg',
+                'images' => '["https://inkakofenghui.oss-cn-shenzhen.aliyuncs.com/inkako/meeting/images/user-1/1763287318-aa76a192cc466b58.jpg","https://inkakofenghui.oss-cn-shenzhen.aliyuncs.com/inkako/meeting/images/user-1/1763287318-b6d5cb42c70c57e4.jpg"]',
+                'is_show' => 0,
+                'status' => 'inactive',
+                'title' => '测试文章：已删除的历史稿件',
+                'content' => '这是一篇模拟被删除的文章，用于验证 CRUD 生成的回收站或软删除流程。',
+                'view_count' => 12,
+                'setting_config' => json_encode([
+                    'banner_title' => '历史稿件横幅',
+                    'banner_enabled' => false,
+                ], JSON_UNESCAPED_UNICODE),
+                'published_at' => '2025-11-01 09:00:00',
+                'created_at' => '2025-11-01 08:55:00',
+                'updated_at' => '2025-11-10 11:11:11',
+                'deleted_at' => '2025-11-15 07:00:00',
             ],
         ];
 

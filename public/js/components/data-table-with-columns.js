@@ -725,6 +725,60 @@
             return 'primary';
         }
 
+        // HTML转义函数
+        function escapeHtml(text) {
+            if (text === null || text === undefined) {
+                return '';
+            }
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        // 渲染键值类型单元格
+        function renderKeyValueCell(value, column) {
+            if (!value) {
+                return '<span class="text-muted" style="font-size: 0.875rem;">-</span>';
+            }
+            
+            let keyValuePairs = [];
+            try {
+                const parsed = typeof value === 'string' ? JSON.parse(value) : value;
+                if (Array.isArray(parsed)) {
+                    keyValuePairs = parsed;
+                } else if (typeof parsed === 'object' && parsed !== null) {
+                    // 对象格式转换为数组格式
+                    keyValuePairs = Object.entries(parsed).map(([key, val]) => ({
+                        key: key,
+                        value: val
+                    }));
+                }
+            } catch (e) {
+                // 解析失败，返回原始值
+                return `<code class="text-muted small">${escapeHtml(String(value))}</code>`;
+            }
+            
+            if (keyValuePairs.length === 0) {
+                return '<span class="text-muted" style="font-size: 0.875rem;">-</span>';
+            }
+            
+            // 渲染为键值对列表
+            let html = '<div class="key-value-list" style="max-width: 300px;">';
+            keyValuePairs.forEach((pair, index) => {
+                const key = escapeHtml(String(pair.key || ''));
+                const val = escapeHtml(String(pair.value || ''));
+                html += `
+                    <div class="d-flex align-items-start gap-2 mb-1" style="font-size: 0.875rem;">
+                        <span class="badge bg-secondary text-nowrap" style="min-width: 60px;">${key}</span>
+                        <span class="text-break">${val}</span>
+                    </div>
+                `;
+            });
+            html += '</div>';
+            
+            return html;
+        }
+        
         // 所有列类型渲染都在前端 JavaScript 中完成
         function renderCell(value, column, row) {
             const columnType = column.type || 'text';
@@ -754,6 +808,9 @@
                                      title="点击查看大图">`;
                     }
                     return '<span class="text-muted" style="font-size: 0.875rem;">-</span>';
+                
+                case 'key_value':
+                    return renderKeyValueCell(value, column);
                 
                 case 'images':
                     if (value) {
