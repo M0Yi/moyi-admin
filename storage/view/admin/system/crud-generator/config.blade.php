@@ -571,7 +571,8 @@ const FORM_TYPES = [
     { value: 'image', label: '单图上传' },
     { value: 'images', label: '多图上传' },
     { value: 'file', label: '文件上传' },
-    { value: 'key_value', label: '键值类型', modelType: 'array' } // 仅在模型类型为array时可用
+    { value: 'key_value', label: '键值类型', modelType: 'array' }, // 仅在模型类型为array时可用
+    { value: 'multi_key_value', label: '多键值类型', modelType: 'array' } // 仅在模型类型为array时可用
 ];
 
 const COLUMN_TYPES = [
@@ -2042,6 +2043,7 @@ function renderFieldsConfig(columns) {
                         <option value="images" ${column.form_type === 'images' ? 'selected' : ''}>多图上传</option>
                         <option value="file" ${column.form_type === 'file' ? 'selected' : ''}>文件上传</option>
                         ${modelType === 'array' ? `<option value="key_value" ${column.form_type === 'key_value' ? 'selected' : ''}>键值类型</option>` : ''}
+                        ${modelType === 'array' ? `<option value="multi_key_value" ${column.form_type === 'multi_key_value' ? 'selected' : ''}>多键值类型</option>` : ''}
                     </select>
                 </td>
                 <td>
@@ -2059,6 +2061,7 @@ function renderFieldsConfig(columns) {
                         <option value="link" ${columnType === 'link' ? 'selected' : ''}>链接</option>
                         <option value="relation" ${columnType === 'relation' ? 'selected' : ''}>关联</option>
                         <option value="key_value" ${columnType === 'key_value' ? 'selected' : ''}>键值</option>
+                        <option value="multi_key_value" ${columnType === 'multi_key_value' ? 'selected' : ''}>多键值</option>
                         <option value="columns" ${columnType === 'columns' ? 'selected' : ''}>列组</option>
                         <option value="custom" ${columnType === 'custom' ? 'selected' : ''}>自定义</option>
                     </select>
@@ -2605,7 +2608,16 @@ function renderFieldsConfig(columns) {
                     colSelect.value = 'col-12 col-md-6';
                 }
             }
+            
+            // 动态显示/隐藏值类型字段
+            toggleValueTypeFields(index, formType);
         });
+    });
+    
+    // 初始化时也要检查值类型字段的显示状态
+    document.querySelectorAll('.field-form-type').forEach(select => {
+        const index = parseInt(select.getAttribute('data-index'));
+        toggleValueTypeFields(index, select.value);
     });
     
     // 为所有列宽选择框添加事件监听
@@ -2643,38 +2655,42 @@ function parseOptionsData(options) {
     const rawOptions = options || [];
     
     if (Array.isArray(rawOptions)) {
-        // 数组格式：[{key: '1', value: '选项1', color: 'primary'}, ...] 或 ['选项1', '选项2']
+        // 数组格式：[{key: '1', value: '选项1', color: 'primary', value_type: 'text'}, ...] 或 ['选项1', '选项2']
         rawOptions.forEach((opt, optIndex) => {
             if (typeof opt === 'object' && opt !== null) {
                 optionsArray.push({
                     key: opt.key || optIndex.toString(),
                     value: opt.value || opt.label || '',
-                    color: opt.color || ''
+                    color: opt.color || '',
+                    value_type: opt.value_type || 'text' // 包含值类型
                 });
             } else {
                 // 简单值，使用索引作为 key
                 optionsArray.push({
                     key: optIndex.toString(),
                     value: opt.toString(),
-                    color: ''
+                    color: '',
+                    value_type: 'text' // 默认值类型
                 });
             }
         });
     } else if (typeof rawOptions === 'object' && rawOptions !== null) {
-        // 对象格式：{'1': '选项1', '2': '选项2'} 或 {'1': {value: '选项1', color: 'primary'}}
+        // 对象格式：{'1': '选项1', '2': '选项2'} 或 {'1': {value: '选项1', color: 'primary', value_type: 'text'}}
         Object.keys(rawOptions).forEach(key => {
             const value = rawOptions[key];
             if (typeof value === 'object' && value !== null) {
                 optionsArray.push({
                     key: key,
                     value: value.value || value.label || '',
-                    color: value.color || ''
+                    color: value.color || '',
+                    value_type: value.value_type || 'text' // 包含值类型
                 });
             } else {
                 optionsArray.push({
                     key: key,
                     value: value.toString(),
-                    color: ''
+                    color: '',
+                    value_type: 'text' // 默认值类型
                 });
             }
         });
@@ -3851,6 +3867,19 @@ function escapeHtml(text) {
 function renderOptionsList(index, column) {
     // 使用统一的选项解析函数
     const optionsArray = parseOptionsData(column.options);
+    // 检查是否为多键值类型
+    const isMultiKeyValue = column.form_type === 'multi_key_value';
+    // 值类型选项（仅在多键值类型时使用）
+    const VALUE_TYPES = [
+        { value: 'text', label: '文本' },
+        { value: 'number', label: '数字' },
+        { value: 'textarea', label: '文本域' },
+        { value: 'date', label: '日期' },
+        { value: 'datetime', label: '日期时间' },
+        { value: 'email', label: '邮箱' },
+        { value: 'password', label: '密码' }
+    ];
+    
     let html = '';
     
     optionsArray.forEach((option, optIndex) => {
@@ -3880,6 +3909,20 @@ function renderOptionsList(index, column) {
                        data-option-index="${optIndex}"
                        onchange="updateBadgePreview(${index}, ${optIndex})"
                        oninput="updateBadgePreview(${index}, ${optIndex})">
+                ${isMultiKeyValue ? `
+                <span class="input-group-text" title="值类型（仅多键值类型）">
+                    <i class="bi bi-type"></i>
+                </span>
+                <select class="form-select form-select-sm option-value-type-select" 
+                        name="fields_config[${index}][options][${optIndex}][value_type]"
+                        data-index="${index}"
+                        data-option-index="${optIndex}"
+                        title="选择值类型">
+                    ${VALUE_TYPES.map(type => 
+                        `<option value="${type.value}" ${(option.value_type || 'text') === type.value ? 'selected' : ''}>${type.label}</option>`
+                    ).join('')}
+                </select>
+                ` : ''}
                 <span class="input-group-text option-color-wrapper">
                     <i class="bi bi-palette"></i>
                 </span>
@@ -4023,6 +4066,21 @@ function addOption(index) {
     const existingOptions = optionsList.querySelectorAll('.option-item');
     const optIndex = existingOptions.length;
     
+    // 检查是否为多键值类型
+    const formTypeSelect = document.querySelector(`select.field-form-type[data-index="${index}"]`);
+    const isMultiKeyValue = formTypeSelect && formTypeSelect.value === 'multi_key_value';
+    
+    // 值类型选项（仅在多键值类型时使用）
+    const VALUE_TYPES = [
+        { value: 'text', label: '文本' },
+        { value: 'number', label: '数字' },
+        { value: 'textarea', label: '文本域' },
+        { value: 'date', label: '日期' },
+        { value: 'datetime', label: '日期时间' },
+        { value: 'email', label: '邮箱' },
+        { value: 'password', label: '密码' }
+    ];
+    
     // 创建新选项 HTML
     const optionHtml = `
         <div class="input-group input-group-sm mb-2 option-item">
@@ -4050,6 +4108,20 @@ function addOption(index) {
                    data-option-index="${optIndex}"
                    onchange="updateBadgePreview(${index}, ${optIndex})"
                    oninput="updateBadgePreview(${index}, ${optIndex})">
+            ${isMultiKeyValue ? `
+            <span class="input-group-text" title="值类型（仅多键值类型）">
+                <i class="bi bi-type"></i>
+            </span>
+            <select class="form-select form-select-sm option-value-type-select" 
+                    name="fields_config[${index}][options][${optIndex}][value_type]"
+                    data-index="${index}"
+                    data-option-index="${optIndex}"
+                    title="选择值类型">
+                ${VALUE_TYPES.map(type => 
+                    `<option value="${type.value}">${type.label}</option>`
+                ).join('')}
+            </select>
+            ` : ''}
             <span class="input-group-text option-color-wrapper">
                 <i class="bi bi-palette"></i>
             </span>
@@ -4083,6 +4155,25 @@ function addOption(index) {
     
     // 更新徽章预览
     updateBadgePreview(index);
+}
+
+/**
+ * 切换值类型字段的显示/隐藏
+ * @param {number} index - 字段索引
+ * @param {string} formType - 表单类型
+ */
+function toggleValueTypeFields(index, formType) {
+    const isMultiKeyValue = formType === 'multi_key_value';
+    const optionsList = document.querySelector(`.options-list[data-index="${index}"]`);
+    if (!optionsList) return;
+    
+    // 显示/隐藏所有选项中的值类型字段
+    optionsList.querySelectorAll('.option-item').forEach(item => {
+        const valueTypeWrapper = item.querySelector('.option-value-type-select')?.closest('.input-group-text')?.parentElement;
+        if (valueTypeWrapper) {
+            valueTypeWrapper.style.display = isMultiKeyValue ? '' : 'none';
+        }
+    });
 }
 
 /**

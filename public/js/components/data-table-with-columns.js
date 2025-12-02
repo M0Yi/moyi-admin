@@ -778,6 +778,79 @@
             
             return html;
         }
+
+        // 渲染多键值类型单元格
+        function renderMultiKeyValueCell(value, column) {
+            if (!value) {
+                return '<span class="text-muted" style="font-size: 0.875rem;">-</span>';
+            }
+            
+            let multiKeyValuePairs = [];
+            try {
+                const parsed = typeof value === 'string' ? JSON.parse(value) : value;
+                if (Array.isArray(parsed)) {
+                    // 新格式：[{key1: 'v1', key2: 'v2', ...}, {key1: 'v3', key2: 'v4', ...}]
+                    multiKeyValuePairs = parsed;
+                } else if (typeof parsed === 'object' && parsed !== null) {
+                    // 单个对象格式，转换为数组格式
+                    multiKeyValuePairs = [parsed];
+                }
+            } catch (e) {
+                // 解析失败，返回原始值
+                return `<code class="text-muted small">${escapeHtml(String(value))}</code>`;
+            }
+            
+            if (multiKeyValuePairs.length === 0) {
+                return '<span class="text-muted" style="font-size: 0.875rem;">-</span>';
+            }
+            
+            // 获取配置的键值对选项（用于显示标签）
+            const options = column.options || [];
+            const keyLabelMap = {};
+            if (Array.isArray(options)) {
+                options.forEach(opt => {
+                    const key = String(opt.key ?? opt.value ?? '');
+                    const label = String(opt.label ?? opt.value ?? opt.key ?? '');
+                    if (key) {
+                        keyLabelMap[key] = label;
+                    }
+                });
+            }
+            
+            // 渲染为多键值对列表
+            let html = '<div class="multi-key-value-list" style="max-width: 500px;">';
+            multiKeyValuePairs.forEach((pairValues, index) => {
+                const entries = Object.entries(pairValues || {});
+                if (entries.length === 0) {
+                    return;
+                }
+                
+                html += `
+                    <div class="mb-2 p-2 border rounded" style="font-size: 0.875rem;">
+                        <div class="mb-1 fw-bold text-muted" style="font-size: 0.75rem;">组合 ${index + 1}</div>
+                        <div class="d-flex flex-column gap-1">
+                `;
+                
+                entries.forEach(([key, val]) => {
+                    const label = keyLabelMap[key] || key;
+                    const valueStr = escapeHtml(String(val || ''));
+                    html += `
+                        <div class="d-flex align-items-start gap-2">
+                            <span class="badge bg-secondary text-nowrap" style="min-width: 80px; font-size: 0.75rem;">${escapeHtml(label)}</span>
+                            <span class="text-break">${valueStr || '<span class="text-muted">-</span>'}</span>
+                        </div>
+                    `;
+                });
+                
+                html += `
+                        </div>
+                    </div>
+                `;
+            });
+            html += '</div>';
+            
+            return html;
+        }
         
         // 所有列类型渲染都在前端 JavaScript 中完成
         function renderCell(value, column, row) {
@@ -811,6 +884,8 @@
                 
                 case 'key_value':
                     return renderKeyValueCell(value, column);
+                case 'multi_key_value':
+                    return renderMultiKeyValueCell(value, column);
                 
                 case 'images':
                     if (value) {

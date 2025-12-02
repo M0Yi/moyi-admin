@@ -1500,6 +1500,7 @@ function renderFieldsConfig(columns) {
                         <option value="images" ${column.form_type === 'images' ? 'selected' : ''}>多图上传</option>
                         <option value="file" ${column.form_type === 'file' ? 'selected' : ''}>文件上传</option>
                         ${modelType === 'array' ? `<option value="key_value" ${column.form_type === 'key_value' ? 'selected' : ''}>键值类型</option>` : ''}
+                        ${modelType === 'array' ? `<option value="multi_key_value" ${column.form_type === 'multi_key_value' ? 'selected' : ''}>多键值类型</option>` : ''}
                     </select>
                 </td>
                 <td>
@@ -1517,6 +1518,7 @@ function renderFieldsConfig(columns) {
                         <option value="link" ${columnType === 'link' ? 'selected' : ''}>链接</option>
                         <option value="relation" ${columnType === 'relation' ? 'selected' : ''}>关联</option>
                         <option value="key_value" ${columnType === 'key_value' ? 'selected' : ''}>键值</option>
+                        <option value="multi_key_value" ${columnType === 'multi_key_value' ? 'selected' : ''}>多键值</option>
                         <option value="columns" ${columnType === 'columns' ? 'selected' : ''}>列组</option>
                         <option value="custom" ${columnType === 'custom' ? 'selected' : ''}>自定义</option>
                     </select>
@@ -1996,8 +1998,9 @@ function renderFieldsConfig(columns) {
             
             const currentFormType = formTypeSelect.value;
             
-            // 检查是否已有键值类型选项
+            // 检查是否已有键值类型和多键值类型选项
             const keyValueOption = formTypeSelect.querySelector('option[value="key_value"]');
+            const multiKeyValueOption = formTypeSelect.querySelector('option[value="multi_key_value"]');
             
             if (modelType === 'array') {
                 // 如果是array类型，添加键值类型选项（如果不存在）
@@ -2007,14 +2010,28 @@ function renderFieldsConfig(columns) {
                     option.textContent = '键值类型';
                     formTypeSelect.appendChild(option);
                 }
+                // 添加多键值类型选项（如果不存在）
+                if (!multiKeyValueOption) {
+                    const option = document.createElement('option');
+                    option.value = 'multi_key_value';
+                    option.textContent = '多键值类型';
+                    formTypeSelect.appendChild(option);
+                }
             } else {
-                // 如果不是array类型，移除键值类型选项
+                // 如果不是array类型，移除键值类型和多键值类型选项
                 if (keyValueOption) {
                     // 如果当前选中的是键值类型，改为text
                     if (currentFormType === 'key_value') {
                         formTypeSelect.value = 'text';
                     }
                     keyValueOption.remove();
+                }
+                if (multiKeyValueOption) {
+                    // 如果当前选中的是多键值类型，改为text
+                    if (currentFormType === 'multi_key_value') {
+                        formTypeSelect.value = 'text';
+                    }
+                    multiKeyValueOption.remove();
                 }
             }
         });

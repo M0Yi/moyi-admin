@@ -511,6 +511,8 @@
                     return this.renderGradientField(field);
                 case 'key_value':
                     return this.renderKeyValueField(field);
+                case 'multi_key_value':
+                    return this.renderMultiKeyValueField(field);
                 default:
                     return this.renderTextInput(field, 'text');
             }
@@ -1265,6 +1267,227 @@
             `;
         }
 
+        renderMultiKeyValueField(field) {
+            const id = this.getFieldId(field);
+            const fieldName = field.name || 'multi_key_value';
+            const value = this.getFieldValue(field);
+            
+            // 获取配置的键值对选项（固定的键）
+            const rawOptions = field.options || [];
+            const configuredKeys = Array.isArray(rawOptions) 
+                ? rawOptions.map(opt => ({
+                    key: String(opt.key ?? opt.value ?? ''),
+                    label: String(opt.label ?? opt.value ?? opt.key ?? ''),
+                    value_type: opt.value_type || 'text' // 包含值类型
+                }))
+                : [];
+            
+            // 如果没有配置键值对，显示提示
+            if (configuredKeys.length === 0) {
+                return `
+                    <div class="alert alert-warning">
+                        <i class="bi bi-exclamation-triangle me-2"></i>
+                        <strong>提示：</strong>请在字段配置中设置"选项配置（键值对）"，定义固定的键值对选项。
+                    </div>
+                `;
+            }
+            
+            // 解析多键值对数据：格式 [{key1: 'v1', key2: 'v2', ...}, {key1: 'v3', key2: 'v4', ...}]
+            let multiKeyValuePairs = [];
+            if (value) {
+                try {
+                    const parsed = typeof value === 'string' ? JSON.parse(value) : value;
+                    if (Array.isArray(parsed)) {
+                        multiKeyValuePairs = parsed.map(item => {
+                            // 确保每个组合包含所有配置的键
+                            const values = {};
+                            configuredKeys.forEach(opt => {
+                                values[opt.key] = item[opt.key] ?? item.values?.[opt.key] ?? '';
+                            });
+                            return values;
+                        });
+                    } else if (typeof parsed === 'object' && parsed !== null) {
+                        // 单个对象格式，转换为数组格式
+                        const values = {};
+                        configuredKeys.forEach(opt => {
+                            values[opt.key] = parsed[opt.key] ?? '';
+                        });
+                        multiKeyValuePairs = [values];
+                    }
+                } catch (e) {
+                    // 解析失败，使用空数组
+                    multiKeyValuePairs = [];
+                }
+            }
+            
+            // 如果没有数据，至少显示一行空行
+            if (multiKeyValuePairs.length === 0) {
+                const emptyValues = {};
+                configuredKeys.forEach(opt => {
+                    emptyValues[opt.key] = '';
+                });
+                multiKeyValuePairs = [emptyValues];
+            }
+
+            const pairsHtml = multiKeyValuePairs.map((pairValues, pairIndex) => {
+                // 为每个配置的键生成输入框
+                const keysHtml = configuredKeys.map((opt, keyIndex) => {
+                    const keyValue = pairValues[opt.key] ?? '';
+                    const valueType = opt.value_type || 'text';
+                    
+                    // 根据值类型渲染不同的输入控件
+                    let inputHtml = '';
+                    switch (valueType) {
+                        case 'number':
+                            inputHtml = `
+                                <input
+                                    type="number"
+                                    class="form-control form-control-sm"
+                                    placeholder="请输入 ${this.escape(opt.label)} 的值"
+                                    value="${this.escapeAttr(keyValue)}"
+                                    data-multi-key-value-key="${this.escapeAttr(opt.key)}"
+                                    data-value-type="number"
+                                >
+                            `;
+                            break;
+                        case 'textarea':
+                            inputHtml = `
+                                <textarea
+                                    class="form-control form-control-sm"
+                                    rows="3"
+                                    placeholder="请输入 ${this.escape(opt.label)} 的值"
+                                    data-multi-key-value-key="${this.escapeAttr(opt.key)}"
+                                    data-value-type="textarea"
+                                >${this.escape(keyValue)}</textarea>
+                            `;
+                            break;
+                        case 'date':
+                            inputHtml = `
+                                <input
+                                    type="text"
+                                    class="form-control form-control-sm"
+                                    placeholder="请输入 ${this.escape(opt.label)} 的值"
+                                    value="${this.escapeAttr(keyValue)}"
+                                    data-multi-key-value-key="${this.escapeAttr(opt.key)}"
+                                    data-value-type="date"
+                                    data-flatpickr-type="date"
+                                >
+                            `;
+                            break;
+                        case 'datetime':
+                            inputHtml = `
+                                <input
+                                    type="text"
+                                    class="form-control form-control-sm"
+                                    placeholder="请输入 ${this.escape(opt.label)} 的值"
+                                    value="${this.escapeAttr(keyValue)}"
+                                    data-multi-key-value-key="${this.escapeAttr(opt.key)}"
+                                    data-value-type="datetime"
+                                    data-flatpickr-type="datetime"
+                                >
+                            `;
+                            break;
+                        case 'email':
+                            inputHtml = `
+                                <input
+                                    type="email"
+                                    class="form-control form-control-sm"
+                                    placeholder="请输入 ${this.escape(opt.label)} 的值"
+                                    value="${this.escapeAttr(keyValue)}"
+                                    data-multi-key-value-key="${this.escapeAttr(opt.key)}"
+                                    data-value-type="email"
+                                >
+                            `;
+                            break;
+                        case 'password':
+                            inputHtml = `
+                                <input
+                                    type="password"
+                                    class="form-control form-control-sm"
+                                    placeholder="请输入 ${this.escape(opt.label)} 的值"
+                                    value="${this.escapeAttr(keyValue)}"
+                                    data-multi-key-value-key="${this.escapeAttr(opt.key)}"
+                                    data-value-type="password"
+                                >
+                            `;
+                            break;
+                        default: // text
+                            inputHtml = `
+                                <input
+                                    type="text"
+                                    class="form-control form-control-sm"
+                                    placeholder="请输入 ${this.escape(opt.label)} 的值"
+                                    value="${this.escapeAttr(keyValue)}"
+                                    data-multi-key-value-key="${this.escapeAttr(opt.key)}"
+                                    data-value-type="text"
+                                >
+                            `;
+                            break;
+                    }
+                    
+                    return `
+                        <div class="mb-2">
+                            <label class="form-label small text-muted mb-1">${this.escape(opt.label)}：</label>
+                            ${inputHtml}
+                        </div>
+                    `;
+                }).join('');
+
+                return `
+                    <div class="multi-key-value-pair mb-3 p-3 border rounded" data-pair-index="${pairIndex}">
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <small class="text-muted fw-bold">组合 ${pairIndex + 1}</small>
+                            <button
+                                type="button"
+                                class="btn btn-sm btn-outline-danger remove-pair-btn"
+                                ${multiKeyValuePairs.length === 1 ? 'disabled' : ''}
+                                title="删除组合"
+                            >
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </div>
+                        <div class="multi-keys-container">
+                            ${keysHtml}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            // 将配置的键值对存储为 JSON 字符串，供初始化时使用
+            const configuredKeysJson = JSON.stringify(configuredKeys);
+
+            return `
+                <div class="multi-key-value-field-wrapper" 
+                     data-multi-key-value-field="${this.escapeAttr(fieldName)}"
+                     data-configured-keys="${this.escapeAttr(configuredKeysJson)}">
+                    <div class="alert alert-info mb-3">
+                        <i class="bi bi-info-circle me-2"></i>
+                        <strong>说明：</strong>每个组合必须包含以下 ${configuredKeys.length} 个键值对：
+                        <div class="mt-2">
+                            ${configuredKeys.map(opt => `<span class="badge bg-secondary me-1">${this.escape(opt.label)}</span>`).join('')}
+                        </div>
+                    </div>
+                    <div class="multi-key-value-pairs-container">
+                        ${pairsHtml}
+                    </div>
+                    <button
+                        type="button"
+                        class="btn btn-sm btn-outline-primary add-pair-btn"
+                        ${field.disabled || field.readonly ? 'disabled' : ''}
+                    >
+                        <i class="bi bi-plus-circle me-1"></i>添加组合键值对
+                    </button>
+                    <input
+                        type="hidden"
+                        id="${id}"
+                        name="${this.escapeAttr(fieldName)}"
+                        value="${this.escapeAttr(JSON.stringify(multiKeyValuePairs))}"
+                        data-multi-key-value-hidden
+                    >
+                </div>
+            `;
+        }
+
         initializeEnhancements() {
             this.initializeSelects();
             this.initializeSwitches();
@@ -1275,6 +1498,7 @@
             this.initializePermissionTreeFields();
             this.initializeSiteSelectors();
             this.initializeKeyValueFields();
+            this.initializeMultiKeyValueFields();
         }
         
         initializeGroups() {
@@ -2328,6 +2552,347 @@
             
             valueInputs.forEach((input) => {
                 input.addEventListener('input', updateHiddenValue);
+            });
+
+            // 初始化删除按钮状态
+            updateRemoveButtonsState();
+        }
+
+        initializeMultiKeyValueFields() {
+            const wrappers = this.form.querySelectorAll('[data-multi-key-value-field]');
+            if (!wrappers.length) {
+                return;
+            }
+
+            wrappers.forEach((wrapper) => this.setupMultiKeyValueField(wrapper));
+        }
+
+        setupMultiKeyValueField(wrapper) {
+            const fieldName = wrapper.dataset.multiKeyValueField;
+            const hiddenInput = wrapper.querySelector('input[type="hidden"][data-multi-key-value-hidden]');
+            const pairsContainer = wrapper.querySelector('.multi-key-value-pairs-container');
+            const addPairBtn = wrapper.querySelector('.add-pair-btn');
+
+            if (!hiddenInput || !pairsContainer || !addPairBtn) {
+                return;
+            }
+
+            // 从 data 属性中获取配置的键值对选项
+            const configuredKeysJson = wrapper.dataset.configuredKeys;
+            if (!configuredKeysJson) {
+                return; // 没有配置键值对，不初始化
+            }
+
+            let configuredKeys = [];
+            try {
+                configuredKeys = JSON.parse(configuredKeysJson);
+            } catch (e) {
+                console.error('[MultiKeyValueField] 解析配置的键值对失败:', e);
+                return;
+            }
+
+            if (!Array.isArray(configuredKeys) || configuredKeys.length === 0) {
+                return; // 没有配置键值对，不初始化
+            }
+
+            // 更新隐藏字段的值
+            const updateHiddenValue = () => {
+                const pairs = [];
+                const pairElements = pairsContainer.querySelectorAll('.multi-key-value-pair');
+                
+                pairElements.forEach((pairEl) => {
+                    const values = {};
+                    let hasValue = false;
+                    
+                    // 收集所有配置键的值
+                    configuredKeys.forEach(opt => {
+                        const input = pairEl.querySelector(`[data-multi-key-value-key="${this.escapeAttr(opt.key)}"]`);
+                        if (input) {
+                            // 对于 textarea，使用 value 或 textContent
+                            const val = input.tagName === 'TEXTAREA' 
+                                ? (input.value || input.textContent || '').trim()
+                                : input.value.trim();
+                            values[opt.key] = val;
+                            if (val) {
+                                hasValue = true;
+                            }
+                        } else {
+                            values[opt.key] = '';
+                        }
+                    });
+                    
+                    // 只要有值，就添加
+                    if (hasValue) {
+                        pairs.push(values);
+                    }
+                });
+
+                // 如果没有键值对，至少保留一个空对象
+                if (pairs.length === 0) {
+                    const emptyValues = {};
+                    configuredKeys.forEach(opt => {
+                        emptyValues[opt.key] = '';
+                    });
+                    pairs.push(emptyValues);
+                }
+
+                hiddenInput.value = JSON.stringify(pairs);
+            };
+
+            // 渲染单个键的输入控件
+            const renderKeyInput = (opt, value = '') => {
+                const valueType = opt.value_type || 'text';
+                let inputHtml = '';
+                
+                switch (valueType) {
+                    case 'number':
+                        inputHtml = `
+                            <input
+                                type="number"
+                                class="form-control form-control-sm"
+                                placeholder="请输入 ${this.escape(opt.label)} 的值"
+                                value="${this.escapeAttr(value)}"
+                                data-multi-key-value-key="${this.escapeAttr(opt.key)}"
+                                data-value-type="number"
+                            >
+                        `;
+                        break;
+                    case 'textarea':
+                        inputHtml = `
+                            <textarea
+                                class="form-control form-control-sm"
+                                rows="3"
+                                placeholder="请输入 ${this.escape(opt.label)} 的值"
+                                data-multi-key-value-key="${this.escapeAttr(opt.key)}"
+                                data-value-type="textarea"
+                            >${this.escape(value)}</textarea>
+                        `;
+                        break;
+                    case 'date':
+                        inputHtml = `
+                            <input
+                                type="text"
+                                class="form-control form-control-sm"
+                                placeholder="请输入 ${this.escape(opt.label)} 的值"
+                                value="${this.escapeAttr(value)}"
+                                data-multi-key-value-key="${this.escapeAttr(opt.key)}"
+                                data-value-type="date"
+                                data-flatpickr-type="date"
+                            >
+                        `;
+                        break;
+                    case 'datetime':
+                        inputHtml = `
+                            <input
+                                type="text"
+                                class="form-control form-control-sm"
+                                placeholder="请输入 ${this.escape(opt.label)} 的值"
+                                value="${this.escapeAttr(value)}"
+                                data-multi-key-value-key="${this.escapeAttr(opt.key)}"
+                                data-value-type="datetime"
+                                data-flatpickr-type="datetime"
+                            >
+                        `;
+                        break;
+                    case 'email':
+                        inputHtml = `
+                            <input
+                                type="email"
+                                class="form-control form-control-sm"
+                                placeholder="请输入 ${this.escape(opt.label)} 的值"
+                                value="${this.escapeAttr(value)}"
+                                data-multi-key-value-key="${this.escapeAttr(opt.key)}"
+                                data-value-type="email"
+                            >
+                        `;
+                        break;
+                    case 'password':
+                        inputHtml = `
+                            <input
+                                type="password"
+                                class="form-control form-control-sm"
+                                placeholder="请输入 ${this.escape(opt.label)} 的值"
+                                value="${this.escapeAttr(value)}"
+                                data-multi-key-value-key="${this.escapeAttr(opt.key)}"
+                                data-value-type="password"
+                            >
+                        `;
+                        break;
+                    default: // text
+                        inputHtml = `
+                            <input
+                                type="text"
+                                class="form-control form-control-sm"
+                                placeholder="请输入 ${this.escape(opt.label)} 的值"
+                                value="${this.escapeAttr(value)}"
+                                data-multi-key-value-key="${this.escapeAttr(opt.key)}"
+                                data-value-type="text"
+                            >
+                        `;
+                        break;
+                }
+                
+                return `
+                    <div class="mb-2">
+                        <label class="form-label small text-muted mb-1">${this.escape(opt.label)}：</label>
+                        ${inputHtml}
+                    </div>
+                `;
+            };
+
+            // 添加组合键值对
+            addPairBtn.addEventListener('click', () => {
+                const pairIndex = pairsContainer.querySelectorAll('.multi-key-value-pair').length;
+                
+                // 为每个配置的键生成输入框
+                const keysHtml = configuredKeys.map((opt, keyIndex) => {
+                    return renderKeyInput(opt, '');
+                }).join('');
+
+                const pairHtml = `
+                    <div class="multi-key-value-pair mb-3 p-3 border rounded" data-pair-index="${pairIndex}">
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <small class="text-muted fw-bold">组合 ${pairIndex + 1}</small>
+                            <button
+                                type="button"
+                                class="btn btn-sm btn-outline-danger remove-pair-btn"
+                                title="删除组合"
+                            >
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </div>
+                        <div class="multi-keys-container">
+                            ${keysHtml}
+                        </div>
+                    </div>
+                `;
+                
+                const tempDiv = document.createElement('div');
+                tempDiv.innerHTML = pairHtml;
+                const newPair = tempDiv.firstElementChild;
+                pairsContainer.appendChild(newPair);
+                
+                // 绑定新组合的输入事件
+                const keyInputs = newPair.querySelectorAll('[data-multi-key-value-key]');
+                keyInputs.forEach((input) => {
+                    input.addEventListener('input', updateHiddenValue);
+                });
+                
+                // 初始化日期选择器（如果有）
+                const dateInputs = newPair.querySelectorAll('[data-flatpickr-type]');
+                if (dateInputs.length > 0 && typeof window.flatpickr === 'function') {
+                    dateInputs.forEach((dateInput) => {
+                        const dateType = dateInput.dataset.flatpickrType || 'date';
+                        // 检查中文语言包是否已加载
+                        const hasZhLocale = window.flatpickr && window.flatpickr.l10ns && window.flatpickr.l10ns.zh;
+                        
+                        const config = {
+                            locale: hasZhLocale ? 'zh' : 'default',
+                            allowInput: true,
+                            clickOpens: true,
+                            disableMobile: false,
+                        };
+                        
+                        if (dateType === 'datetime') {
+                            config.enableTime = true;
+                            config.dateFormat = 'Y-m-d H:i:S';
+                        } else {
+                            config.enableTime = false;
+                            config.dateFormat = 'Y-m-d';
+                        }
+                        
+                        try {
+                            window.flatpickr(dateInput, config);
+                        } catch (error) {
+                            console.error('[MultiKeyValueField] 初始化日期选择器失败:', error);
+                        }
+                    });
+                }
+                
+                // 绑定删除按钮事件
+                const removeBtn = newPair.querySelector('.remove-pair-btn');
+                if (removeBtn) {
+                    removeBtn.addEventListener('click', () => {
+                        const pairElements = pairsContainer.querySelectorAll('.multi-key-value-pair');
+                        if (pairElements.length > 1) {
+                            newPair.remove();
+                            updateRemoveButtonsState();
+                            updateHiddenValue();
+                        }
+                    });
+                }
+                
+                // 更新删除按钮状态
+                updateRemoveButtonsState();
+                updateHiddenValue();
+            });
+
+            // 更新删除组合按钮状态（至少保留一个组合）
+            const updateRemoveButtonsState = () => {
+                const pairElements = pairsContainer.querySelectorAll('.multi-key-value-pair');
+                const removePairBtns = pairsContainer.querySelectorAll('.remove-pair-btn');
+                
+                removePairBtns.forEach((btn) => {
+                    btn.disabled = pairElements.length <= 1;
+                });
+            };
+
+            // 初始化所有现有组合的事件
+            const pairElements = pairsContainer.querySelectorAll('.multi-key-value-pair');
+            pairElements.forEach((pairEl) => {
+                // 绑定所有键的输入事件
+                const keyInputs = pairEl.querySelectorAll('[data-multi-key-value-key]');
+                keyInputs.forEach((keyInput) => {
+                    keyInput.addEventListener('input', updateHiddenValue);
+                });
+
+                // 初始化日期选择器（如果有）
+                const dateInputs = pairEl.querySelectorAll('[data-flatpickr-type]');
+                if (dateInputs.length > 0 && typeof window.flatpickr === 'function') {
+                    dateInputs.forEach((dateInput) => {
+                        // 如果已经初始化过，跳过
+                        if (dateInput._flatpickr) {
+                            return;
+                        }
+                        const dateType = dateInput.dataset.flatpickrType || 'date';
+                        // 检查中文语言包是否已加载
+                        const hasZhLocale = window.flatpickr && window.flatpickr.l10ns && window.flatpickr.l10ns.zh;
+                        
+                        const config = {
+                            locale: hasZhLocale ? 'zh' : 'default',
+                            allowInput: true,
+                            clickOpens: true,
+                            disableMobile: false,
+                        };
+                        
+                        if (dateType === 'datetime') {
+                            config.enableTime = true;
+                            config.dateFormat = 'Y-m-d H:i:S';
+                        } else {
+                            config.enableTime = false;
+                            config.dateFormat = 'Y-m-d';
+                        }
+                        
+                        try {
+                            window.flatpickr(dateInput, config);
+                        } catch (error) {
+                            console.error('[MultiKeyValueField] 初始化日期选择器失败:', error);
+                        }
+                    });
+                }
+
+                // 绑定删除按钮事件
+                const removeBtn = pairEl.querySelector('.remove-pair-btn');
+                if (removeBtn) {
+                    removeBtn.addEventListener('click', () => {
+                        const pairElements = pairsContainer.querySelectorAll('.multi-key-value-pair');
+                        if (pairElements.length > 1) {
+                            pairEl.remove();
+                            updateRemoveButtonsState();
+                            updateHiddenValue();
+                        }
+                    });
+                }
             });
 
             // 初始化删除按钮状态
