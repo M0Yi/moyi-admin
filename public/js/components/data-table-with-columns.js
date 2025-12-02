@@ -852,6 +852,63 @@
             return html;
         }
         
+        function renderObjectKeyValueCell(value, column) {
+            if (!value) {
+                return '<span class="text-muted" style="font-size: 0.875rem;">-</span>';
+            }
+            
+            let objectKeyValue = {};
+            try {
+                const parsed = typeof value === 'string' ? JSON.parse(value) : value;
+                if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+                    objectKeyValue = parsed;
+                } else if (Array.isArray(parsed) && parsed.length > 0) {
+                    // 如果是数组，取第一个元素
+                    objectKeyValue = parsed[0];
+                }
+            } catch (e) {
+                // 解析失败，返回原始值
+                return `<code class="text-muted small">${escapeHtml(String(value))}</code>`;
+            }
+            
+            if (Object.keys(objectKeyValue).length === 0) {
+                return '<span class="text-muted" style="font-size: 0.875rem;">-</span>';
+            }
+            
+            // 获取配置的键值对选项（用于显示标签）
+            const options = column.options || [];
+            const keyLabelMap = {};
+            if (Array.isArray(options)) {
+                options.forEach(opt => {
+                    const key = String(opt.key ?? opt.value ?? '');
+                    const label = String(opt.label ?? opt.value ?? opt.key ?? '');
+                    if (key) {
+                        keyLabelMap[key] = label;
+                    }
+                });
+            }
+            
+            // 渲染为键值对列表
+            let html = '<div class="object-key-value-list" style="max-width: 500px;">';
+            html += '<div class="p-2 border rounded" style="font-size: 0.875rem;">';
+            html += '<div class="d-flex flex-column gap-1">';
+            
+            Object.entries(objectKeyValue).forEach(([key, val]) => {
+                const label = keyLabelMap[key] || key;
+                const valueStr = escapeHtml(String(val || ''));
+                html += `
+                    <div class="d-flex align-items-start gap-2">
+                        <span class="badge bg-secondary text-nowrap" style="min-width: 80px; font-size: 0.75rem;">${escapeHtml(label)}</span>
+                        <span class="text-break">${valueStr || '<span class="text-muted">-</span>'}</span>
+                    </div>
+                `;
+            });
+            
+            html += '</div></div></div>';
+            
+            return html;
+        }
+        
         // 所有列类型渲染都在前端 JavaScript 中完成
         function renderCell(value, column, row) {
             const columnType = column.type || 'text';
@@ -886,6 +943,39 @@
                     return renderKeyValueCell(value, column);
                 case 'multi_key_value':
                     return renderMultiKeyValueCell(value, column);
+                
+                case 'object_key_value':
+                    return renderObjectKeyValueCell(value, column);
+                
+                case 'color':
+                    if (!value) {
+                        return '<span class="text-muted" style="font-size: 0.875rem;">-</span>';
+                    }
+                    // 规范化颜色值
+                    let normalizedColor = value.startsWith('#') ? value : `#${value}`;
+                    // 验证是否为有效的 HEX 颜色值
+                    if (!/^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{4}|[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/.test(normalizedColor)) {
+                        normalizedColor = value; // 如果不是有效的 HEX，使用原始值
+                    }
+                    return `
+                        <div class="d-flex align-items-center gap-2">
+                            <span class="color-swatch d-inline-block" 
+                                  style="width: 24px; height: 24px; background-color: ${escapeHtml(normalizedColor)}; border: 1px solid #dee2e6; border-radius: 4px;"></span>
+                            <code class="small">${escapeHtml(value)}</code>
+                        </div>
+                    `;
+                
+                case 'gradient':
+                    if (!value) {
+                        return '<span class="text-muted" style="font-size: 0.875rem;">-</span>';
+                    }
+                    return `
+                        <div class="d-flex align-items-center gap-2">
+                            <span class="gradient-swatch d-inline-block" 
+                                  style="width: 60px; height: 24px; background: ${escapeHtml(value)}; border: 1px solid #dee2e6; border-radius: 4px;"></span>
+                            <code class="small text-break" style="max-width: 200px;">${escapeHtml(value)}</code>
+                        </div>
+                    `;
                 
                 case 'images':
                     if (value) {

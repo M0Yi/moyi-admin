@@ -513,6 +513,8 @@
                     return this.renderKeyValueField(field);
                 case 'multi_key_value':
                     return this.renderMultiKeyValueField(field);
+                case 'object_key_value':
+                    return this.renderObjectKeyValueField(field);
                 default:
                     return this.renderTextInput(field, 'text');
             }
@@ -1411,6 +1413,85 @@
                                 >
                             `;
                             break;
+                        case 'color':
+                            // 规范化颜色值
+                            let normalizedColor = keyValue || '#f8f9fa';
+                            if (normalizedColor && !normalizedColor.startsWith('#')) {
+                                normalizedColor = `#${normalizedColor}`;
+                            }
+                            const colorPreviewId = `${id}_color_${opt.key}_preview`;
+                            inputHtml = `
+                                <div class="color-input-group">
+                                    <div class="input-group input-group-sm">
+                                        <span class="input-group-text p-0" style="width: 40px; border-right: none;">
+                                            <span
+                                                id="${this.escapeAttr(colorPreviewId)}"
+                                                class="color-preview-swatch d-inline-block w-100 h-100"
+                                                style="background-color: ${this.escapeAttr(normalizedColor)}; border-radius: 0.375rem 0 0 0.375rem;"
+                                            ></span>
+                                        </span>
+                                        <input
+                                            type="text"
+                                            class="form-control form-control-sm"
+                                            placeholder="例如：#667eea"
+                                            value="${this.escapeAttr(keyValue)}"
+                                            data-multi-key-value-key="${this.escapeAttr(opt.key)}"
+                                            data-value-type="color"
+                                            data-color-input="true"
+                                            data-color-preview="${this.escapeAttr(colorPreviewId)}"
+                                        >
+                                        <button
+                                            class="btn btn-outline-secondary btn-sm"
+                                            type="button"
+                                            data-bs-toggle="modal"
+                                            data-bs-target="#colorPickerModal"
+                                            data-target-input="${this.escapeAttr(id)}_color_${this.escapeAttr(opt.key)}"
+                                            data-preview-target="${this.escapeAttr(colorPreviewId)}"
+                                        >
+                                            <i class="bi bi-palette2"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                            `;
+                            break;
+                        case 'gradient':
+                            const gradientPreviewId = `${id}_gradient_${opt.key}_preview`;
+                            const defaultGradient = 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)';
+                            const gradientValue = keyValue || defaultGradient;
+                            inputHtml = `
+                                <div class="gradient-input-group">
+                                    <div class="input-group input-group-sm">
+                                        <span class="input-group-text p-0" style="width: 60px; border-right: none;">
+                                            <span
+                                                id="${this.escapeAttr(gradientPreviewId)}"
+                                                class="gradient-preview-swatch d-inline-block w-100 h-100"
+                                                style="background: ${this.escapeAttr(gradientValue)}; border-radius: 0.375rem 0 0 0.375rem; border: 1px solid #e5e7eb;"
+                                            ></span>
+                                        </span>
+                                        <input
+                                            type="text"
+                                            class="form-control form-control-sm"
+                                            placeholder="例如：linear-gradient(135deg, #667eea 0%, #764ba2 100%)"
+                                            value="${this.escapeAttr(keyValue)}"
+                                            data-multi-key-value-key="${this.escapeAttr(opt.key)}"
+                                            data-value-type="gradient"
+                                            data-gradient-input="true"
+                                            data-gradient-preview="${this.escapeAttr(gradientPreviewId)}"
+                                        >
+                                        <button
+                                            class="btn btn-outline-secondary btn-sm"
+                                            type="button"
+                                            data-bs-toggle="modal"
+                                            data-bs-target="#gradientPickerModal"
+                                            data-target-input="${this.escapeAttr(id)}_gradient_${this.escapeAttr(opt.key)}"
+                                            data-preview-target="${this.escapeAttr(gradientPreviewId)}"
+                                        >
+                                            <i class="bi bi-palette"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                            `;
+                            break;
                         default: // text
                             inputHtml = `
                                 <input
@@ -1488,6 +1569,270 @@
             `;
         }
 
+        renderObjectKeyValueField(field) {
+            const id = this.getFieldId(field);
+            const fieldName = field.name || 'object_key_value';
+            const value = this.getFieldValue(field);
+            
+            // 获取配置的键值对选项（固定的键）
+            const rawOptions = field.options || [];
+            const configuredKeys = Array.isArray(rawOptions) 
+                ? rawOptions.map(opt => ({
+                    key: String(opt.key ?? opt.value ?? ''),
+                    label: String(opt.label ?? opt.value ?? opt.key ?? ''),
+                    value_type: opt.value_type || 'text' // 包含值类型
+                }))
+                : [];
+            
+            // 如果没有配置键值对，显示提示
+            if (configuredKeys.length === 0) {
+                return `
+                    <div class="alert alert-warning">
+                        <i class="bi bi-exclamation-triangle me-2"></i>
+                        <strong>提示：</strong>请在字段配置中设置"选项配置（键值对）"，定义固定的键值对选项。
+                    </div>
+                `;
+            }
+            
+            // 解析对象键值对数据：格式 {key1: 'v1', key2: 'v2', ...}
+            let objectKeyValue = {};
+            if (value) {
+                try {
+                    const parsed = typeof value === 'string' ? JSON.parse(value) : value;
+                    if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+                        // 确保包含所有配置的键
+                        configuredKeys.forEach(opt => {
+                            objectKeyValue[opt.key] = parsed[opt.key] ?? '';
+                        });
+                    } else if (Array.isArray(parsed) && parsed.length > 0) {
+                        // 如果是数组，取第一个元素
+                        const firstItem = parsed[0];
+                        configuredKeys.forEach(opt => {
+                            objectKeyValue[opt.key] = firstItem[opt.key] ?? firstItem.values?.[opt.key] ?? '';
+                        });
+                    }
+                } catch (e) {
+                    // 解析失败，使用空对象
+                    objectKeyValue = {};
+                }
+            }
+            
+            // 确保所有键都有值（即使是空字符串）
+            configuredKeys.forEach(opt => {
+                if (!(opt.key in objectKeyValue)) {
+                    objectKeyValue[opt.key] = '';
+                }
+            });
+
+            // 为每个配置的键生成输入框
+            const keysHtml = configuredKeys.map((opt, keyIndex) => {
+                const keyValue = objectKeyValue[opt.key] ?? '';
+                const valueType = opt.value_type || 'text';
+                
+                // 根据值类型渲染不同的输入控件（复用 multi_key_value 的逻辑）
+                let inputHtml = '';
+                switch (valueType) {
+                    case 'number':
+                        inputHtml = `
+                            <input
+                                type="number"
+                                class="form-control form-control-sm"
+                                placeholder="请输入 ${this.escape(opt.label)} 的值"
+                                value="${this.escapeAttr(keyValue)}"
+                                data-object-key-value-key="${this.escapeAttr(opt.key)}"
+                                data-value-type="number"
+                            >
+                        `;
+                        break;
+                    case 'textarea':
+                        inputHtml = `
+                            <textarea
+                                class="form-control form-control-sm"
+                                rows="3"
+                                placeholder="请输入 ${this.escape(opt.label)} 的值"
+                                data-object-key-value-key="${this.escapeAttr(opt.key)}"
+                                data-value-type="textarea"
+                            >${this.escape(keyValue)}</textarea>
+                        `;
+                        break;
+                    case 'date':
+                        inputHtml = `
+                            <input
+                                type="text"
+                                class="form-control form-control-sm"
+                                placeholder="请输入 ${this.escape(opt.label)} 的值"
+                                value="${this.escapeAttr(keyValue)}"
+                                data-object-key-value-key="${this.escapeAttr(opt.key)}"
+                                data-value-type="date"
+                                data-flatpickr-type="date"
+                            >
+                        `;
+                        break;
+                    case 'datetime':
+                        inputHtml = `
+                            <input
+                                type="text"
+                                class="form-control form-control-sm"
+                                placeholder="请输入 ${this.escape(opt.label)} 的值"
+                                value="${this.escapeAttr(keyValue)}"
+                                data-object-key-value-key="${this.escapeAttr(opt.key)}"
+                                data-value-type="datetime"
+                                data-flatpickr-type="datetime"
+                            >
+                        `;
+                        break;
+                    case 'email':
+                        inputHtml = `
+                            <input
+                                type="email"
+                                class="form-control form-control-sm"
+                                placeholder="请输入 ${this.escape(opt.label)} 的值"
+                                value="${this.escapeAttr(keyValue)}"
+                                data-object-key-value-key="${this.escapeAttr(opt.key)}"
+                                data-value-type="email"
+                            >
+                        `;
+                        break;
+                    case 'password':
+                        inputHtml = `
+                            <input
+                                type="password"
+                                class="form-control form-control-sm"
+                                placeholder="请输入 ${this.escape(opt.label)} 的值"
+                                value="${this.escapeAttr(keyValue)}"
+                                data-object-key-value-key="${this.escapeAttr(opt.key)}"
+                                data-value-type="password"
+                            >
+                        `;
+                        break;
+                    case 'color':
+                        let normalizedColor = keyValue || '#f8f9fa';
+                        if (normalizedColor && !normalizedColor.startsWith('#')) {
+                            normalizedColor = `#${normalizedColor}`;
+                        }
+                        const colorPreviewId = `${id}_color_${opt.key}_preview`;
+                        inputHtml = `
+                            <div class="color-input-group">
+                                <div class="input-group input-group-sm">
+                                    <span class="input-group-text p-0" style="width: 40px; border-right: none;">
+                                        <span
+                                            id="${this.escapeAttr(colorPreviewId)}"
+                                            class="color-preview-swatch d-inline-block w-100 h-100"
+                                            style="background-color: ${this.escapeAttr(normalizedColor)}; border-radius: 0.375rem 0 0 0.375rem;"
+                                        ></span>
+                                    </span>
+                                    <input
+                                        type="text"
+                                        class="form-control form-control-sm"
+                                        placeholder="例如：#667eea"
+                                        value="${this.escapeAttr(keyValue)}"
+                                        data-object-key-value-key="${this.escapeAttr(opt.key)}"
+                                        data-value-type="color"
+                                        data-color-input="true"
+                                        data-color-preview="${this.escapeAttr(colorPreviewId)}"
+                                    >
+                                    <button
+                                        class="btn btn-outline-secondary btn-sm"
+                                        type="button"
+                                        data-bs-toggle="modal"
+                                        data-bs-target="#colorPickerModal"
+                                        data-target-input="${this.escapeAttr(id)}_color_${this.escapeAttr(opt.key)}"
+                                        data-preview-target="${this.escapeAttr(colorPreviewId)}"
+                                    >
+                                        <i class="bi bi-palette2"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        `;
+                        break;
+                    case 'gradient':
+                        const gradientPreviewId = `${id}_gradient_${opt.key}_preview`;
+                        const defaultGradient = 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)';
+                        const gradientValue = keyValue || defaultGradient;
+                        inputHtml = `
+                            <div class="gradient-input-group">
+                                <div class="input-group input-group-sm">
+                                    <span class="input-group-text p-0" style="width: 60px; border-right: none;">
+                                        <span
+                                            id="${this.escapeAttr(gradientPreviewId)}"
+                                            class="gradient-preview-swatch d-inline-block w-100 h-100"
+                                            style="background: ${this.escapeAttr(gradientValue)}; border-radius: 0.375rem 0 0 0.375rem; border: 1px solid #e5e7eb;"
+                                        ></span>
+                                    </span>
+                                    <input
+                                        type="text"
+                                        class="form-control form-control-sm"
+                                        placeholder="例如：linear-gradient(135deg, #667eea 0%, #764ba2 100%)"
+                                        value="${this.escapeAttr(keyValue)}"
+                                        data-object-key-value-key="${this.escapeAttr(opt.key)}"
+                                        data-value-type="gradient"
+                                        data-gradient-input="true"
+                                        data-gradient-preview="${this.escapeAttr(gradientPreviewId)}"
+                                    >
+                                    <button
+                                        class="btn btn-outline-secondary btn-sm"
+                                        type="button"
+                                        data-bs-toggle="modal"
+                                        data-bs-target="#gradientPickerModal"
+                                        data-target-input="${this.escapeAttr(id)}_gradient_${this.escapeAttr(opt.key)}"
+                                        data-preview-target="${this.escapeAttr(gradientPreviewId)}"
+                                    >
+                                        <i class="bi bi-palette"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        `;
+                        break;
+                    default: // text
+                        inputHtml = `
+                            <input
+                                type="text"
+                                class="form-control form-control-sm"
+                                placeholder="请输入 ${this.escape(opt.label)} 的值"
+                                value="${this.escapeAttr(keyValue)}"
+                                data-object-key-value-key="${this.escapeAttr(opt.key)}"
+                                data-value-type="text"
+                            >
+                        `;
+                        break;
+                }
+                
+                return `
+                    <div class="mb-2">
+                        <label class="form-label small text-muted mb-1">${this.escape(opt.label)}：</label>
+                        ${inputHtml}
+                    </div>
+                `;
+            }).join('');
+
+            // 将配置的键值对存储为 JSON 字符串，供初始化时使用
+            const configuredKeysJson = JSON.stringify(configuredKeys);
+
+            return `
+                <div class="object-key-value-field-wrapper" 
+                     data-object-key-value-field="${this.escapeAttr(fieldName)}"
+                     data-configured-keys="${this.escapeAttr(configuredKeysJson)}">
+                    <div class="alert alert-info mb-3">
+                        <i class="bi bi-info-circle me-2"></i>
+                        <strong>说明：</strong>此字段包含以下 ${configuredKeys.length} 个键值对：
+                        <div class="mt-2">
+                            ${configuredKeys.map(opt => `<span class="badge bg-secondary me-1">${this.escape(opt.label)}</span>`).join('')}
+                        </div>
+                    </div>
+                    <div class="object-key-value-container p-3 border rounded">
+                        ${keysHtml}
+                    </div>
+                    <input
+                        type="hidden"
+                        id="${id}"
+                        name="${this.escapeAttr(fieldName)}"
+                        value="${this.escapeAttr(JSON.stringify(objectKeyValue))}"
+                        data-object-key-value-hidden
+                    >
+                </div>
+            `;
+        }
+
         initializeEnhancements() {
             this.initializeSelects();
             this.initializeSwitches();
@@ -1499,6 +1844,138 @@
             this.initializeSiteSelectors();
             this.initializeKeyValueFields();
             this.initializeMultiKeyValueFields();
+            this.initializeObjectKeyValueFields();
+        }
+
+        initializeObjectKeyValueFields() {
+            const wrappers = this.form.querySelectorAll('[data-object-key-value-field]');
+            if (!wrappers.length) {
+                return;
+            }
+
+            wrappers.forEach((wrapper) => this.setupObjectKeyValueField(wrapper));
+        }
+
+        setupObjectKeyValueField(wrapper) {
+            const fieldName = wrapper.dataset.objectKeyValueField;
+            const hiddenInput = wrapper.querySelector('input[type="hidden"][data-object-key-value-hidden]');
+            const container = wrapper.querySelector('.object-key-value-container');
+            
+            if (!hiddenInput || !container) {
+                console.warn('[ObjectKeyValueField] 缺少必要的 DOM 元素');
+                return;
+            }
+
+            // 读取配置的键值对
+            let configuredKeys = [];
+            try {
+                const keysJson = wrapper.dataset.configuredKeys;
+                if (keysJson) {
+                    configuredKeys = JSON.parse(keysJson);
+                }
+            } catch (e) {
+                console.error('[ObjectKeyValueField] 解析配置的键值对失败:', e);
+                return;
+            }
+
+            // 更新隐藏输入框的值
+            const updateHiddenValue = () => {
+                const values = {};
+                configuredKeys.forEach(opt => {
+                    const input = container.querySelector(`[data-object-key-value-key="${this.escapeAttr(opt.key)}"]`);
+                    if (input) {
+                        if (input.tagName === 'TEXTAREA') {
+                            values[opt.key] = input.value;
+                        } else {
+                            values[opt.key] = input.value;
+                        }
+                    } else {
+                        values[opt.key] = '';
+                    }
+                });
+
+                hiddenInput.value = JSON.stringify(values);
+            };
+
+            // 绑定所有键的输入事件
+            const keyInputs = container.querySelectorAll('[data-object-key-value-key]');
+            keyInputs.forEach((keyInput) => {
+                keyInput.addEventListener('input', updateHiddenValue);
+            });
+
+            // 初始化日期选择器（如果有）
+            const dateInputs = container.querySelectorAll('[data-flatpickr-type]');
+            if (dateInputs.length > 0 && typeof window.flatpickr === 'function') {
+                dateInputs.forEach((dateInput) => {
+                    // 如果已经初始化过，跳过
+                    if (dateInput._flatpickr) {
+                        return;
+                    }
+                    const dateType = dateInput.dataset.flatpickrType || 'date';
+                    // 检查中文语言包是否已加载
+                    const hasZhLocale = window.flatpickr && window.flatpickr.l10ns && window.flatpickr.l10ns.zh;
+                    
+                    const config = {
+                        locale: hasZhLocale ? 'zh' : 'default',
+                        allowInput: true,
+                        clickOpens: true,
+                        disableMobile: false,
+                    };
+                    
+                    if (dateType === 'datetime') {
+                        config.enableTime = true;
+                        config.dateFormat = 'Y-m-d H:i:S';
+                    } else {
+                        config.enableTime = false;
+                        config.dateFormat = 'Y-m-d';
+                    }
+                    
+                    try {
+                        window.flatpickr(dateInput, config);
+                    } catch (error) {
+                        console.error('[ObjectKeyValueField] 初始化日期选择器失败:', error);
+                    }
+                });
+            }
+            
+            // 初始化颜色选择器（如果有）
+            const colorInputs = container.querySelectorAll('[data-color-input="true"]');
+            if (colorInputs.length > 0) {
+                colorInputs.forEach((colorInput) => {
+                    const previewId = colorInput.dataset.colorPreview;
+                    if (previewId) {
+                        const preview = document.getElementById(previewId);
+                        if (preview) {
+                            // 监听输入变化，更新预览
+                            colorInput.addEventListener('input', () => {
+                                let colorValue = colorInput.value || '#f8f9fa';
+                                if (colorValue && !colorValue.startsWith('#')) {
+                                    colorValue = `#${colorValue}`;
+                                }
+                                preview.style.backgroundColor = colorValue;
+                            });
+                        }
+                    }
+                });
+            }
+            
+            // 初始化渐变色选择器（如果有）
+            const gradientInputs = container.querySelectorAll('[data-gradient-input="true"]');
+            if (gradientInputs.length > 0) {
+                gradientInputs.forEach((gradientInput) => {
+                    const previewId = gradientInput.dataset.gradientPreview;
+                    if (previewId) {
+                        const preview = document.getElementById(previewId);
+                        if (preview) {
+                            // 监听输入变化，更新预览
+                            gradientInput.addEventListener('input', () => {
+                                const gradientValue = gradientInput.value || 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)';
+                                preview.style.background = gradientValue;
+                            });
+                        }
+                    }
+                });
+            }
         }
         
         initializeGroups() {
@@ -2718,6 +3195,85 @@
                             >
                         `;
                         break;
+                    case 'color':
+                        // 规范化颜色值
+                        let normalizedColor = value || '#f8f9fa';
+                        if (normalizedColor && !normalizedColor.startsWith('#')) {
+                            normalizedColor = `#${normalizedColor}`;
+                        }
+                        const colorPreviewId = `${id}_color_${opt.key}_preview_${Date.now()}`;
+                        inputHtml = `
+                            <div class="color-input-group">
+                                <div class="input-group input-group-sm">
+                                    <span class="input-group-text p-0" style="width: 40px; border-right: none;">
+                                        <span
+                                            id="${this.escapeAttr(colorPreviewId)}"
+                                            class="color-preview-swatch d-inline-block w-100 h-100"
+                                            style="background-color: ${this.escapeAttr(normalizedColor)}; border-radius: 0.375rem 0 0 0.375rem;"
+                                        ></span>
+                                    </span>
+                                    <input
+                                        type="text"
+                                        class="form-control form-control-sm"
+                                        placeholder="例如：#667eea"
+                                        value="${this.escapeAttr(value)}"
+                                        data-multi-key-value-key="${this.escapeAttr(opt.key)}"
+                                        data-value-type="color"
+                                        data-color-input="true"
+                                        data-color-preview="${this.escapeAttr(colorPreviewId)}"
+                                    >
+                                    <button
+                                        class="btn btn-outline-secondary btn-sm"
+                                        type="button"
+                                        data-bs-toggle="modal"
+                                        data-bs-target="#colorPickerModal"
+                                        data-target-input="${this.escapeAttr(id)}_color_${this.escapeAttr(opt.key)}"
+                                        data-preview-target="${this.escapeAttr(colorPreviewId)}"
+                                    >
+                                        <i class="bi bi-palette2"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        `;
+                        break;
+                    case 'gradient':
+                        const gradientPreviewId = `${id}_gradient_${opt.key}_preview_${Date.now()}`;
+                        const defaultGradient = 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)';
+                        const gradientValue = value || defaultGradient;
+                        inputHtml = `
+                            <div class="gradient-input-group">
+                                <div class="input-group input-group-sm">
+                                    <span class="input-group-text p-0" style="width: 60px; border-right: none;">
+                                        <span
+                                            id="${this.escapeAttr(gradientPreviewId)}"
+                                            class="gradient-preview-swatch d-inline-block w-100 h-100"
+                                            style="background: ${this.escapeAttr(gradientValue)}; border-radius: 0.375rem 0 0 0.375rem; border: 1px solid #e5e7eb;"
+                                        ></span>
+                                    </span>
+                                    <input
+                                        type="text"
+                                        class="form-control form-control-sm"
+                                        placeholder="例如：linear-gradient(135deg, #667eea 0%, #764ba2 100%)"
+                                        value="${this.escapeAttr(value)}"
+                                        data-multi-key-value-key="${this.escapeAttr(opt.key)}"
+                                        data-value-type="gradient"
+                                        data-gradient-input="true"
+                                        data-gradient-preview="${this.escapeAttr(gradientPreviewId)}"
+                                    >
+                                    <button
+                                        class="btn btn-outline-secondary btn-sm"
+                                        type="button"
+                                        data-bs-toggle="modal"
+                                        data-bs-target="#gradientPickerModal"
+                                        data-target-input="${this.escapeAttr(id)}_gradient_${this.escapeAttr(opt.key)}"
+                                        data-preview-target="${this.escapeAttr(gradientPreviewId)}"
+                                    >
+                                        <i class="bi bi-palette"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        `;
+                        break;
                     default: // text
                         inputHtml = `
                             <input
@@ -2809,6 +3365,45 @@
                     });
                 }
                 
+                // 初始化颜色选择器（如果有）
+                const colorInputs = newPair.querySelectorAll('[data-color-input="true"]');
+                if (colorInputs.length > 0) {
+                    colorInputs.forEach((colorInput) => {
+                        const previewId = colorInput.dataset.colorPreview;
+                        if (previewId) {
+                            const preview = document.getElementById(previewId);
+                            if (preview) {
+                                // 监听输入变化，更新预览
+                                colorInput.addEventListener('input', () => {
+                                    let colorValue = colorInput.value || '#f8f9fa';
+                                    if (colorValue && !colorValue.startsWith('#')) {
+                                        colorValue = `#${colorValue}`;
+                                    }
+                                    preview.style.backgroundColor = colorValue;
+                                });
+                            }
+                        }
+                    });
+                }
+                
+                // 初始化渐变色选择器（如果有）
+                const gradientInputs = newPair.querySelectorAll('[data-gradient-input="true"]');
+                if (gradientInputs.length > 0) {
+                    gradientInputs.forEach((gradientInput) => {
+                        const previewId = gradientInput.dataset.gradientPreview;
+                        if (previewId) {
+                            const preview = document.getElementById(previewId);
+                            if (preview) {
+                                // 监听输入变化，更新预览
+                                gradientInput.addEventListener('input', () => {
+                                    const gradientValue = gradientInput.value || 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)';
+                                    preview.style.background = gradientValue;
+                                });
+                            }
+                        }
+                    });
+                }
+                
                 // 绑定删除按钮事件
                 const removeBtn = newPair.querySelector('.remove-pair-btn');
                 if (removeBtn) {
@@ -2877,6 +3472,45 @@
                             window.flatpickr(dateInput, config);
                         } catch (error) {
                             console.error('[MultiKeyValueField] 初始化日期选择器失败:', error);
+                        }
+                    });
+                }
+                
+                // 初始化颜色选择器（如果有）
+                const colorInputs = pairEl.querySelectorAll('[data-color-input="true"]');
+                if (colorInputs.length > 0) {
+                    colorInputs.forEach((colorInput) => {
+                        const previewId = colorInput.dataset.colorPreview;
+                        if (previewId) {
+                            const preview = document.getElementById(previewId);
+                            if (preview) {
+                                // 监听输入变化，更新预览
+                                colorInput.addEventListener('input', () => {
+                                    let colorValue = colorInput.value || '#f8f9fa';
+                                    if (colorValue && !colorValue.startsWith('#')) {
+                                        colorValue = `#${colorValue}`;
+                                    }
+                                    preview.style.backgroundColor = colorValue;
+                                });
+                            }
+                        }
+                    });
+                }
+                
+                // 初始化渐变色选择器（如果有）
+                const gradientInputs = pairEl.querySelectorAll('[data-gradient-input="true"]');
+                if (gradientInputs.length > 0) {
+                    gradientInputs.forEach((gradientInput) => {
+                        const previewId = gradientInput.dataset.gradientPreview;
+                        if (previewId) {
+                            const preview = document.getElementById(previewId);
+                            if (preview) {
+                                // 监听输入变化，更新预览
+                                gradientInput.addEventListener('input', () => {
+                                    const gradientValue = gradientInput.value || 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)';
+                                    preview.style.background = gradientValue;
+                                });
+                            }
                         }
                     });
                 }

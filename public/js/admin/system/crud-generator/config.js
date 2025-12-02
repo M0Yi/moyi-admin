@@ -1501,6 +1501,8 @@ function renderFieldsConfig(columns) {
                         <option value="file" ${column.form_type === 'file' ? 'selected' : ''}>文件上传</option>
                         ${modelType === 'array' ? `<option value="key_value" ${column.form_type === 'key_value' ? 'selected' : ''}>键值类型</option>` : ''}
                         ${modelType === 'array' ? `<option value="multi_key_value" ${column.form_type === 'multi_key_value' ? 'selected' : ''}>多键值类型</option>` : ''}
+                        ${modelType === 'string' ? `<option value="color" ${column.form_type === 'color' ? 'selected' : ''}>颜色选择器</option>` : ''}
+                        ${modelType === 'string' ? `<option value="gradient" ${column.form_type === 'gradient' ? 'selected' : ''}>渐变色选择器</option>` : ''}
                     </select>
                 </td>
                 <td>
@@ -1519,6 +1521,8 @@ function renderFieldsConfig(columns) {
                         <option value="relation" ${columnType === 'relation' ? 'selected' : ''}>关联</option>
                         <option value="key_value" ${columnType === 'key_value' ? 'selected' : ''}>键值</option>
                         <option value="multi_key_value" ${columnType === 'multi_key_value' ? 'selected' : ''}>多键值</option>
+                        <option value="color" ${columnType === 'color' ? 'selected' : ''}>颜色</option>
+                        <option value="gradient" ${columnType === 'gradient' ? 'selected' : ''}>渐变</option>
                         <option value="columns" ${columnType === 'columns' ? 'selected' : ''}>列组</option>
                         <option value="custom" ${columnType === 'custom' ? 'selected' : ''}>自定义</option>
                     </select>
@@ -2001,6 +2005,9 @@ function renderFieldsConfig(columns) {
             // 检查是否已有键值类型和多键值类型选项
             const keyValueOption = formTypeSelect.querySelector('option[value="key_value"]');
             const multiKeyValueOption = formTypeSelect.querySelector('option[value="multi_key_value"]');
+            // 检查是否已有颜色和渐变色类型选项
+            const colorOption = formTypeSelect.querySelector('option[value="color"]');
+            const gradientOption = formTypeSelect.querySelector('option[value="gradient"]');
             
             if (modelType === 'array') {
                 // 如果是array类型，添加键值类型选项（如果不存在）
@@ -2017,21 +2024,71 @@ function renderFieldsConfig(columns) {
                     option.textContent = '多键值类型';
                     formTypeSelect.appendChild(option);
                 }
-            } else {
-                // 如果不是array类型，移除键值类型和多键值类型选项
+                // 移除颜色和渐变色类型选项（如果不是string类型）
+                if (colorOption) {
+                    if (currentFormType === 'color') {
+                        formTypeSelect.value = 'text';
+                    }
+                    colorOption.remove();
+                }
+                if (gradientOption) {
+                    if (currentFormType === 'gradient') {
+                        formTypeSelect.value = 'text';
+                    }
+                    gradientOption.remove();
+                }
+            } else if (modelType === 'string') {
+                // 如果是string类型，添加颜色和渐变色类型选项（如果不存在）
+                if (!colorOption) {
+                    const option = document.createElement('option');
+                    option.value = 'color';
+                    option.textContent = '颜色选择器';
+                    formTypeSelect.appendChild(option);
+                }
+                if (!gradientOption) {
+                    const option = document.createElement('option');
+                    option.value = 'gradient';
+                    option.textContent = '渐变色选择器';
+                    formTypeSelect.appendChild(option);
+                }
+                // 移除键值类型和多键值类型选项（如果不是array类型）
                 if (keyValueOption) {
-                    // 如果当前选中的是键值类型，改为text
                     if (currentFormType === 'key_value') {
                         formTypeSelect.value = 'text';
                     }
                     keyValueOption.remove();
                 }
                 if (multiKeyValueOption) {
-                    // 如果当前选中的是多键值类型，改为text
                     if (currentFormType === 'multi_key_value') {
                         formTypeSelect.value = 'text';
                     }
                     multiKeyValueOption.remove();
+                }
+            } else {
+                // 如果不是array或string类型，移除所有特殊类型选项
+                if (keyValueOption) {
+                    if (currentFormType === 'key_value') {
+                        formTypeSelect.value = 'text';
+                    }
+                    keyValueOption.remove();
+                }
+                if (multiKeyValueOption) {
+                    if (currentFormType === 'multi_key_value') {
+                        formTypeSelect.value = 'text';
+                    }
+                    multiKeyValueOption.remove();
+                }
+                if (colorOption) {
+                    if (currentFormType === 'color') {
+                        formTypeSelect.value = 'text';
+                    }
+                    colorOption.remove();
+                }
+                if (gradientOption) {
+                    if (currentFormType === 'gradient') {
+                        formTypeSelect.value = 'text';
+                    }
+                    gradientOption.remove();
                 }
             }
         });

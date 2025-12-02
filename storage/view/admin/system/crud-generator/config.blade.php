@@ -572,7 +572,10 @@ const FORM_TYPES = [
     { value: 'images', label: '多图上传' },
     { value: 'file', label: '文件上传' },
     { value: 'key_value', label: '键值类型', modelType: 'array' }, // 仅在模型类型为array时可用
-    { value: 'multi_key_value', label: '多键值类型', modelType: 'array' } // 仅在模型类型为array时可用
+    { value: 'multi_key_value', label: '多键值类型', modelType: 'array' }, // 仅在模型类型为array时可用
+    { value: 'object_key_value', label: '对象键值', modelType: 'array' }, // 仅在模型类型为array时可用
+    { value: 'color', label: '颜色选择器', modelType: 'string' }, // 仅在模型类型为string时可用
+    { value: 'gradient', label: '渐变色选择器', modelType: 'string' } // 仅在模型类型为string时可用
 ];
 
 const COLUMN_TYPES = [
@@ -588,6 +591,10 @@ const COLUMN_TYPES = [
     { value: 'link', label: '链接' },
     { value: 'relation', label: '关联' },
     { value: 'key_value', label: '键值' },
+    { value: 'multi_key_value', label: '多键值' },
+    { value: 'object_key_value', label: '对象键值' },
+    { value: 'color', label: '颜色' },
+    { value: 'gradient', label: '渐变' },
     { value: 'columns', label: '列组' },
     { value: 'custom', label: '自定义' }
 ];
@@ -2044,6 +2051,9 @@ function renderFieldsConfig(columns) {
                         <option value="file" ${column.form_type === 'file' ? 'selected' : ''}>文件上传</option>
                         ${modelType === 'array' ? `<option value="key_value" ${column.form_type === 'key_value' ? 'selected' : ''}>键值类型</option>` : ''}
                         ${modelType === 'array' ? `<option value="multi_key_value" ${column.form_type === 'multi_key_value' ? 'selected' : ''}>多键值类型</option>` : ''}
+                        ${modelType === 'array' ? `<option value="object_key_value" ${column.form_type === 'object_key_value' ? 'selected' : ''}>对象键值</option>` : ''}
+                        ${modelType === 'string' ? `<option value="color" ${column.form_type === 'color' ? 'selected' : ''}>颜色选择器</option>` : ''}
+                        ${modelType === 'string' ? `<option value="gradient" ${column.form_type === 'gradient' ? 'selected' : ''}>渐变色选择器</option>` : ''}
                     </select>
                 </td>
                 <td>
@@ -2062,6 +2072,8 @@ function renderFieldsConfig(columns) {
                         <option value="relation" ${columnType === 'relation' ? 'selected' : ''}>关联</option>
                         <option value="key_value" ${columnType === 'key_value' ? 'selected' : ''}>键值</option>
                         <option value="multi_key_value" ${columnType === 'multi_key_value' ? 'selected' : ''}>多键值</option>
+                        <option value="color" ${columnType === 'color' ? 'selected' : ''}>颜色</option>
+                        <option value="gradient" ${columnType === 'gradient' ? 'selected' : ''}>渐变</option>
                         <option value="columns" ${columnType === 'columns' ? 'selected' : ''}>列组</option>
                         <option value="custom" ${columnType === 'custom' ? 'selected' : ''}>自定义</option>
                     </select>
@@ -2529,6 +2541,219 @@ function renderFieldsConfig(columns) {
             const index = this.closest('tr').getAttribute('data-index');
             updateColumnTypeAttributes(index, this.value);
         });
+    });
+    
+    // 为所有模型类型选择框添加事件监听，动态更新表单类型选项
+    document.querySelectorAll('.field-model-type').forEach(select => {
+        select.addEventListener('change', function() {
+            const index = parseInt(this.getAttribute('data-index'));
+            const modelType = this.value;
+            const row = this.closest('tr.field-row');
+            if (!row) return;
+            
+            const formTypeSelect = row.querySelector(`select.field-form-type[data-index="${index}"]`);
+            if (!formTypeSelect) return;
+            
+            const currentFormType = formTypeSelect.value;
+            
+            // 检查是否已有键值类型和多键值类型选项
+            const keyValueOption = formTypeSelect.querySelector('option[value="key_value"]');
+            const multiKeyValueOption = formTypeSelect.querySelector('option[value="multi_key_value"]');
+            const objectKeyValueOption = formTypeSelect.querySelector('option[value="object_key_value"]');
+            // 检查是否已有颜色和渐变色类型选项
+            const colorOption = formTypeSelect.querySelector('option[value="color"]');
+            const gradientOption = formTypeSelect.querySelector('option[value="gradient"]');
+            
+            if (modelType === 'array') {
+                // 如果是array类型，添加键值类型选项（如果不存在）
+                if (!keyValueOption) {
+                    const option = document.createElement('option');
+                    option.value = 'key_value';
+                    option.textContent = '键值类型';
+                    formTypeSelect.appendChild(option);
+                }
+                // 添加多键值类型选项（如果不存在）
+                if (!multiKeyValueOption) {
+                    const option = document.createElement('option');
+                    option.value = 'multi_key_value';
+                    option.textContent = '多键值类型';
+                    formTypeSelect.appendChild(option);
+                }
+                // 添加对象键值类型选项（如果不存在）
+                if (!objectKeyValueOption) {
+                    const option = document.createElement('option');
+                    option.value = 'object_key_value';
+                    option.textContent = '对象键值';
+                    formTypeSelect.appendChild(option);
+                }
+                // 移除颜色和渐变色类型选项（如果不是string类型）
+                if (colorOption) {
+                    if (currentFormType === 'color') {
+                        formTypeSelect.value = 'text';
+                    }
+                    colorOption.remove();
+                }
+                if (gradientOption) {
+                    if (currentFormType === 'gradient') {
+                        formTypeSelect.value = 'text';
+                    }
+                    gradientOption.remove();
+                }
+            } else if (modelType === 'string') {
+                // 如果是string类型，添加颜色和渐变色类型选项（如果不存在）
+                if (!colorOption) {
+                    const option = document.createElement('option');
+                    option.value = 'color';
+                    option.textContent = '颜色选择器';
+                    formTypeSelect.appendChild(option);
+                }
+                if (!gradientOption) {
+                    const option = document.createElement('option');
+                    option.value = 'gradient';
+                    option.textContent = '渐变色选择器';
+                    formTypeSelect.appendChild(option);
+                }
+                // 移除键值类型和多键值类型选项（如果不是array类型）
+                if (keyValueOption) {
+                    if (currentFormType === 'key_value') {
+                        formTypeSelect.value = 'text';
+                    }
+                    keyValueOption.remove();
+                }
+                if (multiKeyValueOption) {
+                    if (currentFormType === 'multi_key_value') {
+                        formTypeSelect.value = 'text';
+                    }
+                    multiKeyValueOption.remove();
+                }
+                if (objectKeyValueOption) {
+                    if (currentFormType === 'object_key_value') {
+                        formTypeSelect.value = 'text';
+                    }
+                    objectKeyValueOption.remove();
+                }
+            } else {
+                // 如果不是array或string类型，移除所有特殊类型选项
+                if (keyValueOption) {
+                    if (currentFormType === 'key_value') {
+                        formTypeSelect.value = 'text';
+                    }
+                    keyValueOption.remove();
+                }
+                if (multiKeyValueOption) {
+                    if (currentFormType === 'multi_key_value') {
+                        formTypeSelect.value = 'text';
+                    }
+                    multiKeyValueOption.remove();
+                }
+                if (objectKeyValueOption) {
+                    if (currentFormType === 'object_key_value') {
+                        formTypeSelect.value = 'text';
+                    }
+                    objectKeyValueOption.remove();
+                }
+                if (colorOption) {
+                    if (currentFormType === 'color') {
+                        formTypeSelect.value = 'text';
+                    }
+                    colorOption.remove();
+                }
+                if (gradientOption) {
+                    if (currentFormType === 'gradient') {
+                        formTypeSelect.value = 'text';
+                    }
+                    gradientOption.remove();
+                }
+            }
+        });
+    });
+    
+    // 初始化时也要检查表单类型选项的显示状态
+    document.querySelectorAll('.field-model-type').forEach(select => {
+        const index = parseInt(select.getAttribute('data-index'));
+        const modelType = select.value;
+        const row = select.closest('tr.field-row');
+        if (!row) return;
+        
+        const formTypeSelect = row.querySelector(`select.field-form-type[data-index="${index}"]`);
+        if (!formTypeSelect) return;
+        
+        // 检查是否已有键值类型和多键值类型选项
+        const keyValueOption = formTypeSelect.querySelector('option[value="key_value"]');
+        const multiKeyValueOption = formTypeSelect.querySelector('option[value="multi_key_value"]');
+        const objectKeyValueOption = formTypeSelect.querySelector('option[value="object_key_value"]');
+        // 检查是否已有颜色和渐变色类型选项
+        const colorOption = formTypeSelect.querySelector('option[value="color"]');
+        const gradientOption = formTypeSelect.querySelector('option[value="gradient"]');
+        
+        if (modelType === 'array') {
+            // 如果是array类型，添加键值类型选项（如果不存在）
+            if (!keyValueOption) {
+                const option = document.createElement('option');
+                option.value = 'key_value';
+                option.textContent = '键值类型';
+                formTypeSelect.appendChild(option);
+            }
+            // 添加多键值类型选项（如果不存在）
+            if (!multiKeyValueOption) {
+                const option = document.createElement('option');
+                option.value = 'multi_key_value';
+                option.textContent = '多键值类型';
+                formTypeSelect.appendChild(option);
+            }
+            // 添加对象键值类型选项（如果不存在）
+            if (!objectKeyValueOption) {
+                const option = document.createElement('option');
+                option.value = 'object_key_value';
+                option.textContent = '对象键值';
+                formTypeSelect.appendChild(option);
+            }
+            // 移除颜色和渐变色类型选项（如果不是string类型）
+            if (colorOption) {
+                colorOption.remove();
+            }
+            if (gradientOption) {
+                gradientOption.remove();
+            }
+        } else if (modelType === 'string') {
+            // 如果是string类型，添加颜色和渐变色类型选项（如果不存在）
+            if (!colorOption) {
+                const option = document.createElement('option');
+                option.value = 'color';
+                option.textContent = '颜色选择器';
+                formTypeSelect.appendChild(option);
+            }
+            if (!gradientOption) {
+                const option = document.createElement('option');
+                option.value = 'gradient';
+                option.textContent = '渐变色选择器';
+                formTypeSelect.appendChild(option);
+            }
+            // 移除键值类型和多键值类型选项（如果不是array类型）
+            if (keyValueOption) {
+                keyValueOption.remove();
+            }
+            if (multiKeyValueOption) {
+                multiKeyValueOption.remove();
+            }
+            if (objectKeyValueOption) {
+                objectKeyValueOption.remove();
+            }
+        } else {
+            // 如果不是array或string类型，移除所有特殊类型选项
+            if (keyValueOption) {
+                keyValueOption.remove();
+            }
+            if (multiKeyValueOption) {
+                multiKeyValueOption.remove();
+            }
+            if (colorOption) {
+                colorOption.remove();
+            }
+            if (gradientOption) {
+                gradientOption.remove();
+            }
+        }
     });
     
     // 为所有表单类型选择框添加事件监听，自动更新搜索类型
@@ -3869,7 +4094,9 @@ function renderOptionsList(index, column) {
     const optionsArray = parseOptionsData(column.options);
     // 检查是否为多键值类型
     const isMultiKeyValue = column.form_type === 'multi_key_value';
-    // 值类型选项（仅在多键值类型时使用）
+    const isObjectKeyValue = column.form_type === 'object_key_value';
+    const showValueType = isMultiKeyValue || isObjectKeyValue;
+    // 值类型选项（在多键值类型和对象键值类型时使用）
     const VALUE_TYPES = [
         { value: 'text', label: '文本' },
         { value: 'number', label: '数字' },
@@ -3909,8 +4136,8 @@ function renderOptionsList(index, column) {
                        data-option-index="${optIndex}"
                        onchange="updateBadgePreview(${index}, ${optIndex})"
                        oninput="updateBadgePreview(${index}, ${optIndex})">
-                ${isMultiKeyValue ? `
-                <span class="input-group-text" title="值类型（仅多键值类型）">
+                ${showValueType ? `
+                <span class="input-group-text" title="值类型（多键值类型和对象键值类型）">
                     <i class="bi bi-type"></i>
                 </span>
                 <select class="form-select form-select-sm option-value-type-select" 
@@ -4078,7 +4305,9 @@ function addOption(index) {
         { value: 'date', label: '日期' },
         { value: 'datetime', label: '日期时间' },
         { value: 'email', label: '邮箱' },
-        { value: 'password', label: '密码' }
+        { value: 'password', label: '密码' },
+        { value: 'color', label: '颜色选择器' },
+        { value: 'gradient', label: '渐变色选择器' }
     ];
     
     // 创建新选项 HTML
@@ -4108,8 +4337,8 @@ function addOption(index) {
                    data-option-index="${optIndex}"
                    onchange="updateBadgePreview(${index}, ${optIndex})"
                    oninput="updateBadgePreview(${index}, ${optIndex})">
-            ${isMultiKeyValue ? `
-            <span class="input-group-text" title="值类型（仅多键值类型）">
+            ${showValueType ? `
+            <span class="input-group-text" title="值类型（多键值类型和对象键值类型）">
                 <i class="bi bi-type"></i>
             </span>
             <select class="form-select form-select-sm option-value-type-select" 
