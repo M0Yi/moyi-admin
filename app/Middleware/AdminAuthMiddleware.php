@@ -34,7 +34,8 @@ class AdminAuthMiddleware implements MiddlewareInterface
 
     public function __construct(
         protected HttpResponse $response,
-        protected \Hyperf\Contract\SessionInterface $session
+        protected \Hyperf\Contract\SessionInterface $session,
+        protected RenderInterface $render
     ) {}
 
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
@@ -54,7 +55,14 @@ class AdminAuthMiddleware implements MiddlewareInterface
                     'message' => '未登录',
                 ])->withStatus(401);
             }
-            // 页面请求重定向到登录页
+            
+            // 页面请求：检查是否为 iframe 请求
+            if ($this->isEmbeddedRequest($request)) {
+                // iframe 请求未登录时，返回特殊页面通知主页面刷新
+                return $this->handleUnauthorizedInIframe($request);
+            }
+            
+            // 普通页面请求重定向到登录页
             $adminPath = Context::get('admin_entry_path', '/admin');
             $loginUrl = $adminPath . '/login';
             return $this->response->redirect($loginUrl);
@@ -71,6 +79,10 @@ class AdminAuthMiddleware implements MiddlewareInterface
         // 检查用户状态（如果是对象，检查 status 属性；如果是数组，检查 status 键）
         $status = is_object($user) ? $user->status : ($user['status'] ?? null);
         if ($status != 1) {
+            // 检查是否为 iframe 请求
+            if ($this->isEmbeddedRequest($request)) {
+                return $this->handleDisabledInIframe($request);
+            }
             return $this->handleDisabled($request);
         }
 
@@ -190,11 +202,24 @@ class AdminAuthMiddleware implements MiddlewareInterface
             ])->withStatus(401);
         }
 
+        // 检查是否为 iframe 请求
+        if ($this->isEmbeddedRequest($request)) {
+            return $this->handleUnauthorizedInIframe($request);
+        }
+
         // 页面请求重定向到登录页
         $adminPath = Context::get('admin_entry_path', '/admin');
         $loginUrl = $adminPath . '/login';
 
         return $this->response->redirect($loginUrl);
+    }
+
+    /**
+     * 处理 iframe 中的未登录情况：通知主页面刷新
+     */
+    protected function handleUnauthorizedInIframe(ServerRequestInterface $request): ResponseInterface
+    {
+        return $this->render->render('errors.unauthorized_in_iframe');
     }
 
     /**
@@ -210,11 +235,26 @@ class AdminAuthMiddleware implements MiddlewareInterface
             ])->withStatus(403);
         }
 
+        // 检查是否为 iframe 请求
+        if ($this->isEmbeddedRequest($request)) {
+            return $this->handleDisabledInIframe($request);
+        }
+
         // 页面请求重定向到登录页并显示错误信息
         $adminPath = Context::get('admin_entry_path', '/admin');
         $loginUrl = $adminPath . '/login?error=disabled';
 
         return $this->response->redirect($loginUrl);
+    }
+
+    /**
+     * 处理 iframe 中的账号已禁用情况：通知主页面刷新
+     */
+    protected function handleDisabledInIframe(ServerRequestInterface $request): ResponseInterface
+    {
+        return $this->render->render('errors.unauthorized_in_iframe', [
+            'message' => '账号已被禁用',
+        ]);
     }
 
     /**
@@ -238,6 +278,26 @@ class AdminAuthMiddleware implements MiddlewareInterface
         // 请求头包含 X-Requested-With: XMLHttpRequest
         $xRequestedWith = $request->getHeaderLine('X-Requested-With');
         if ($xRequestedWith === 'XMLHttpRequest') {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * 判断是否为 iframe 嵌入请求
+     */
+    protected function isEmbeddedRequest(ServerRequestInterface $request): bool
+    {
+        // 方式1：检查 URL 参数 _embed
+        $queryParams = $request->getQueryParams();
+        if (isset($queryParams['_embed']) && $queryParams['_embed'] === '1') {
+            return true;
+        }
+
+        // 方式2：检查 HTTP_SEC_FETCH_DEST 请求头（现代浏览器支持）
+        $serverParams = $request->getServerParams();
+        if (isset($serverParams['HTTP_SEC_FETCH_DEST']) && $serverParams['HTTP_SEC_FETCH_DEST'] === 'iframe') {
             return true;
         }
 

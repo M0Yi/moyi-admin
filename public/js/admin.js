@@ -905,4 +905,103 @@ window.Admin.utils.handleEmbeddedFormSuccess = handleEmbeddedFormSuccess;
 // 便于 iframe 内直接调用的别名
 window.Admin.handleEmbeddedFormSuccess = handleEmbeddedFormSuccess;
 
+/**
+ * 处理未登录情况（401 响应）
+ * 在 iframe 中检测到未登录时，通知主页面刷新
+ */
+function handleUnauthorized() {
+    // 检查是否在 iframe 中
+    const isInIframe = window.self !== window.top;
+    
+    if (!isInIframe) {
+        // 不在 iframe 中，直接重定向到登录页
+        const adminPath = window.ADMIN_ENTRY_PATH || '/admin';
+        window.location.href = adminPath + '/login';
+        return;
+    }
+    
+    // 在 iframe 中，通知主页面刷新
+    try {
+        // 方式1：使用 AdminIframeClient（如果存在）
+        if (window.AdminIframeClient && typeof window.AdminIframeClient.refreshMainFrame === 'function') {
+            console.log('[Admin] 检测到未登录，使用 AdminIframeClient.refreshMainFrame 通知主页面刷新');
+            window.AdminIframeClient.refreshMainFrame({
+                message: '检测到未登录，正在刷新主页面',
+                delay: 0,
+                showToast: false
+            });
+            return;
+        }
+        
+        // 方式2：使用 postMessage 通知父窗口
+        if (window.parent && window.parent !== window) {
+            console.log('[Admin] 检测到未登录，使用 postMessage 通知主页面刷新');
+            window.parent.postMessage({
+                channel: 'admin-iframe-shell',
+                action: 'refresh-main',
+                payload: {
+                    message: '检测到未登录，正在刷新主页面',
+                    delay: 0,
+                    showToast: false
+                },
+                source: window.location.href
+            }, window.location.origin);
+            return;
+        }
+        
+        // 方式3：直接刷新父窗口（降级方案）
+        if (window.top && window.top !== window) {
+            console.log('[Admin] 检测到未登录，直接刷新主窗口（降级方案）');
+            try {
+                window.top.location.reload();
+                return;
+            } catch (e) {
+                console.warn('[Admin] 无法刷新主窗口（可能是跨域限制）:', e);
+            }
+        }
+        
+        // 方式4：如果无法访问父窗口，刷新当前窗口
+        console.log('[Admin] 无法访问父窗口，刷新当前窗口');
+        window.location.reload();
+        
+    } catch (error) {
+        console.error('[Admin] 处理未登录失败:', error);
+        // 降级方案：刷新当前窗口
+        window.location.reload();
+    }
+}
+
+// 将函数挂载到 Admin 命名空间
+window.Admin.utils.handleUnauthorized = handleUnauthorized;
+
+// 在 iframe 页面中，拦截全局的 fetch 请求，处理 401 响应
+if (window.self !== window.top) {
+    // 保存原始的 fetch
+    const originalFetch = window.fetch;
+    
+    // 包装 fetch 函数
+    window.fetch = function(...args) {
+        return originalFetch.apply(this, args).then(response => {
+            // 检查响应状态码
+            if (response.status === 401) {
+                // 尝试解析响应体，确认是否为未登录错误
+                const clonedResponse = response.clone();
+                clonedResponse.json().then(data => {
+                    if (data && (data.code === 401 || data.message === '未登录' || data.msg === '未登录')) {
+                        console.warn('[Admin] 检测到 API 401 响应（未登录）:', data);
+                        handleUnauthorized();
+                    }
+                }).catch(() => {
+                    // 如果解析失败，也认为是未登录
+                    console.warn('[Admin] 检测到 HTTP 401 响应（未登录）');
+                    handleUnauthorized();
+                });
+            }
+            return response;
+        });
+    };
+    
+    console.log('[Admin] 已启用 iframe 模式下的 401 响应拦截器');
+}
+
 })(); // 结束 IIFE 包裹
