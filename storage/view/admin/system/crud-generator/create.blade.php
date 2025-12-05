@@ -32,12 +32,21 @@
                 <div class="col-md-4">
                     <select id="connectionSelect" class="form-select" onchange="switchConnection(this.value)">
                         @foreach($connections as $conn)
+                        @php
+                            $connType = $connectionTypes[$conn['name']]['type'] ?? 'config';
+                            $isRemote = $connectionTypes[$conn['name']]['is_remote'] ?? false;
+                        @endphp
                         <option value="{{ $conn['name'] }}" 
                                 data-database="{{ $conn['database'] }}"
                                 data-host="{{ $conn['host'] }}"
                                 data-port="{{ $conn['port'] }}"
+                                data-type="{{ $connType }}"
+                                data-is-remote="{{ $isRemote ? '1' : '0' }}"
                                 {{ $currentConnection === $conn['name'] ? 'selected' : '' }}>
                             {{ $conn['name'] }}
+                            @if($isRemote)
+                                <span class="badge bg-info">远程</span>
+                            @endif
                             @if($conn['name'] !== $conn['database'])
                                 ({{ $conn['database'] }})
                             @endif
@@ -50,9 +59,16 @@
                         $currentConnInfo = $connections[$currentConnection] ?? null;
                     @endphp
                     @if($currentConnInfo)
+                    @php
+                        $isRemote = $connectionTypes[$currentConnection]['is_remote'] ?? false;
+                    @endphp
                     <small class="text-muted">
                         <i class="bi bi-info-circle"></i>
-                        <span class="badge bg-secondary me-1">{{ strtoupper($currentConnInfo['driver'] ?? 'mysql') }}</span>
+                        @if($isRemote)
+                            <span class="badge bg-info me-1">远程数据库</span>
+                        @else
+                            <span class="badge bg-secondary me-1">{{ strtoupper($currentConnInfo['driver'] ?? 'mysql') }}</span>
+                        @endif
                         数据库：<strong>{{ $currentConnInfo['database'] }}</strong> | 
                         主机：<strong>{{ $currentConnInfo['host'] }}:{{ $currentConnInfo['port'] }}</strong>
                     </small>

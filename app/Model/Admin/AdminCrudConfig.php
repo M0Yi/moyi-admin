@@ -14,7 +14,8 @@ use function Hyperf\Support\now;
  * @property int $id
  * @property int $site_id
  * @property string $table_name
- * @property string|null $db_connection
+ * @property int $is_remote_connection 是否使用远程数据库连接：0=配置文件连接，1=远程数据库连接
+ * @property string|null $db_connection 数据库连接名称：当 is_remote_connection=0 时对应 config/databases.php 中的连接键名；当 is_remote_connection=1 时对应 admin_database_connections 表中的 name 字段
  * @property string $model_name
  * @property string $controller_name
  * @property string $module_name
@@ -74,6 +75,7 @@ class AdminCrudConfig extends Model
     protected array $fillable = [
         'site_id',
         'table_name',
+        'is_remote_connection',
         'db_connection',
         'model_name',
         'controller_name',
@@ -101,6 +103,7 @@ class AdminCrudConfig extends Model
     protected array $casts = [
         'id' => 'integer',
         'site_id' => 'integer',
+        'is_remote_connection' => 'integer',
         'route_slug' => 'string',
         'route_prefix' => 'string',
         'page_size' => 'integer',

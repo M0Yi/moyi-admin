@@ -344,6 +344,13 @@ class InstallController extends AbstractController
                             $this->makeButtonPermission('更新站点设置', 'system.sites.edit', '/system/sites', 2, 'PUT'),
                         ],
                     ],
+                    $this->buildCrudPermissionDefinition(
+                        '远程数据库',
+                        'system.database-connections',
+                        '/system/database-connections',
+                        155,
+                        'database'
+                    ),
                     [
                         'name' => 'CRUD 生成器',
                         'slug' => 'system.crud-generator',
@@ -614,6 +621,29 @@ class InstallController extends AbstractController
                'visible' => 1,
                'status' => 1,
                'sort' => 5,
+               'cache' => 1,
+               'config' => null,
+               'remark' => null,
+           ]
+       );
+
+       AdminMenu::query()->firstOrCreate(
+           ['site_id' => $siteId, 'path' => '/system/database-connections'],
+           [
+               'parent_id' => $system->id,
+               'name' => 'system.database-connections',
+               'title' => '远程数据库',
+               'icon' => 'bi bi-database',
+               'component' => null,
+               'redirect' => null,
+               'type' => AdminMenu::TYPE_MENU,
+               'target' => AdminMenu::TARGET_SELF,
+               'badge' => null,
+               'badge_type' => null,
+               'permission' => 'system.database-connections.view',
+               'visible' => 1,
+               'status' => 1,
+               'sort' => 6,
                'cache' => 1,
                'config' => null,
                'remark' => null,
@@ -1237,7 +1267,8 @@ class InstallController extends AbstractController
                 $table->bigIncrements('id')->comment('配置ID');
                 $table->unsignedBigInteger('site_id')->comment('站点ID');
                 $table->string('table_name', 100)->comment('数据表名');
-                $table->string('db_connection', 50)->default('default')->comment('数据库连接名称，对应 config/databases.php 中的连接键名');
+                $table->tinyInteger('is_remote_connection')->default(0)->comment('是否使用远程数据库连接：0=配置文件连接，1=远程数据库连接');
+                $table->string('db_connection', 50)->default('default')->comment('数据库连接名称：当 is_remote_connection=0 时对应 config/databases.php 中的连接键名；当 is_remote_connection=1 时对应 admin_database_connections 表中的 name 字段');
                 $table->string('model_name', 100)->comment('模型名称');
                 $table->string('controller_name', 100)->comment('控制器名称');
                 $table->string('module_name', 100)->comment('模块名称（中文）');
@@ -1269,6 +1300,37 @@ class InstallController extends AbstractController
             Db::statement("ALTER TABLE `admin_crud_configs` MODIFY `fields_config` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_bin DEFAULT NULL COMMENT '字段配置（JSON格式）' CHECK (json_valid(`fields_config`))");
             Db::statement("ALTER TABLE `admin_crud_configs` MODIFY `options` longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_bin DEFAULT NULL COMMENT '其他选项（分页、软删除等）' CHECK (json_valid(`options`))");
             Db::statement("ALTER TABLE `admin_crud_configs` COMMENT = 'CRUD配置表'");
+        }
+
+        if (! Schema::hasTable('admin_database_connections')) {
+            Schema::create('admin_database_connections', function (Blueprint $table) {
+                $table->engine = 'InnoDB';
+                $table->charset = 'utf8mb4';
+                $table->collation = 'utf8mb4_unicode_ci';
+                $table->bigIncrements('id')->comment('连接ID');
+                $table->unsignedBigInteger('site_id')->nullable()->comment('站点ID');
+                $table->string('name', 50)->comment('连接名称（用于在配置中引用，如 db2、db3）');
+                $table->string('driver', 20)->default('mysql')->comment('驱动类型：mysql、pgsql、sqlite等');
+                $table->string('host', 255)->comment('主机地址');
+                $table->unsignedInteger('port')->default(3306)->comment('端口');
+                $table->string('database', 100)->comment('数据库名');
+                $table->string('username', 100)->comment('用户名');
+                $table->string('password', 255)->comment('密码（明文存储，用于数据库连接）');
+                $table->string('charset', 20)->default('utf8mb4')->comment('字符集');
+                $table->string('collation', 50)->default('utf8mb4_unicode_ci')->comment('排序规则');
+                $table->string('prefix', 50)->nullable()->comment('表前缀');
+                $table->string('description', 255)->nullable()->comment('描述');
+                $table->tinyInteger('status')->default(1)->comment('状态：0=禁用，1=启用');
+                $table->integer('sort')->default(0)->comment('排序');
+                $table->timestamp('created_at')->nullable()->comment('创建时间');
+                $table->timestamp('updated_at')->nullable()->comment('更新时间');
+                $table->softDeletes()->comment('删除时间');
+                $table->unique(['site_id', 'name'], 'uk_site_name');
+                $table->index('site_id', 'idx_site_id');
+                $table->index('status', 'idx_status');
+                $table->index('sort', 'idx_sort');
+            });
+            Db::statement("ALTER TABLE `admin_database_connections` COMMENT = '远程数据库连接配置表'");
         }
     }
 

@@ -47,14 +47,30 @@ class CrudGeneratorController extends AbstractController
         $connections = $this->databaseService->getAllConnections();
         // 从请求参数获取数据库连接名称，默认为 'default'
         $connection = $this->request->query('connection', key($connections));
+        
+        // 确保远程连接已注册
+        $this->databaseService->ensureConnectionRegistered($connection);
+        
         $tables = $this->databaseService->getAllTables($connection);
+        
+        // 构建连接类型映射
+        $connectionTypes = [];
+        foreach ($connections as $name => $conn) {
+            $connectionTypes[$name] = [
+                'type' => $conn['type'] ?? 'config',
+                'is_remote' => $conn['is_remote'] ?? false,
+            ];
+        }
+        
         // 只获取当前连接下的配置
         $query = AdminCrudConfig::query()->where('db_connection', $connection);
         $configs = $query->get()->keyBy('table_name');
+        
         return $this->renderAdmin('admin.system.crud-generator.create', [
             'tables' => $tables,
             'configs' => $configs,
             'connections' => $connections,
+            'connectionTypes' => $connectionTypes, // 新增：连接类型信息
             'currentConnection' => $connection,
         ]);
     }
@@ -72,6 +88,9 @@ class CrudGeneratorController extends AbstractController
         $requestConnection = $this->request->query('connection');
         $dbConnection = $requestConnection ?? key($connections);
 
+        // 确保远程连接已注册
+        $this->databaseService->ensureConnectionRegistered($dbConnection);
+
         // 尝试获取已有配置
         $query = AdminCrudConfig::query()
             ->where('table_name', $tableName)
@@ -85,6 +104,15 @@ class CrudGeneratorController extends AbstractController
             $dbConnection = $config->db_connection ?? key($connections);
         }
 
+        // 构建连接类型映射
+        $connectionTypes = [];
+        foreach ($connections as $name => $conn) {
+            $connectionTypes[$name] = [
+                'type' => $conn['type'] ?? 'config',
+                'is_remote' => $conn['is_remote'] ?? false,
+            ];
+        }
+
         $baseConfig = $this->buildBaseConfig($tableName, $dbConnection, $config);
         $tableComment = $baseConfig['table_comment'] ?? null;
 
@@ -93,6 +121,7 @@ class CrudGeneratorController extends AbstractController
             'tableComment' => $tableComment,
             'config' => $baseConfig,
             'connections' => $connections,
+            'connectionTypes' => $connectionTypes, // 新增：连接类型信息
             'dbConnection' => $dbConnection,
             'currentConnInfo' => $connections[$dbConnection] ?? null,
         ]);
@@ -138,6 +167,9 @@ class CrudGeneratorController extends AbstractController
         // 从请求参数获取数据库连接名称
         $requestConnection = $this->request->query('connection');
         $dbConnection = $requestConnection ?? key($connections);
+
+        // 确保远程连接已注册
+        $this->databaseService->ensureConnectionRegistered($dbConnection);
 
         // 尝试获取已有配置（超级管理员跳过站点筛选）
         $query = AdminCrudConfig::query()
@@ -558,6 +590,14 @@ class CrudGeneratorController extends AbstractController
 
         // 获取数据库连接名称（默认为 'default'）
         $dbConnection = $data['db_connection'] ?? 'default';
+        
+        // 确保远程连接已注册
+        $this->databaseService->ensureConnectionRegistered($dbConnection);
+        
+        // 判断连接类型
+        $connections = $this->databaseService->getAllConnections();
+        $isRemoteConnection = $connections[$dbConnection]['is_remote'] ?? false;
+        
         $routeSlugInput = $this->normalizeRouteSlug($data['route_slug'] ?? null);
 
         if ($routeSlugInput === '') {
@@ -572,6 +612,7 @@ class CrudGeneratorController extends AbstractController
 
         if ($config) {
             $config->update([
+                'is_remote_connection' => $isRemoteConnection ? 1 : 0,
                 'db_connection' => $dbConnection,
                 'model_name' => $data['model_name'] ?? $config->model_name,
                 'controller_name' => $data['controller_name'] ?? $config->controller_name,
@@ -602,6 +643,7 @@ class CrudGeneratorController extends AbstractController
             $config = AdminCrudConfig::create([
                 'site_id' => site_id(),
                 'table_name' => $tableName,
+                'is_remote_connection' => $isRemoteConnection ? 1 : 0,
                 'db_connection' => $dbConnection,
                 'model_name' => $modelName,
                 'controller_name' => $controllerName,

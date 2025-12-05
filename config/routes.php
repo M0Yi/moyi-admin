@@ -152,6 +152,21 @@ Router::addGroup('/admin/{adminPath:[a-zA-Z0-9\-_]+}', function () {
         });
 
         // ========================================
+        // 远程数据库连接管理
+        // ========================================
+        Router::addGroup('/system/database-connections', function () {
+            Router::get('', 'App\Controller\Admin\System\DatabaseConnectionController@index');
+            Router::get('/create', 'App\Controller\Admin\System\DatabaseConnectionController@create');
+            Router::post('', 'App\Controller\Admin\System\DatabaseConnectionController@store');
+            Router::get('/{id:\d+}/edit', 'App\Controller\Admin\System\DatabaseConnectionController@edit');
+            Router::put('/{id:\d+}', 'App\Controller\Admin\System\DatabaseConnectionController@update');
+            Router::delete('/{id:\d+}', 'App\Controller\Admin\System\DatabaseConnectionController@destroy');
+            Router::post('/batch-destroy', 'App\Controller\Admin\System\DatabaseConnectionController@batchDestroy');
+            Router::post('/{id:\d+}/toggle-status', 'App\Controller\Admin\System\DatabaseConnectionController@toggleStatus');
+            Router::post('/{id:\d+}/test-connection', 'App\Controller\Admin\System\DatabaseConnectionController@testConnection');
+        });
+
+        // ========================================
         // 图片上传 API（客户端直传PUT方案）
         // ========================================
         Router::post('/api/admin/upload/token', 'App\Controller\Admin\System\ImageUploadController@getUploadToken');

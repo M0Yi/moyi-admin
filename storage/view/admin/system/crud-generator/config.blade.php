@@ -198,10 +198,16 @@
                         {{ $tableComment }}
                     </span>
                     @if($currentConnInfo)
+                        @php
+                            $isRemote = $connectionTypes[$dbConnection]['is_remote'] ?? false;
+                        @endphp
                         <span class="ms-2">
                             <span class="badge bg-info" id="connectionBadgeName">
                                 <i class="bi bi-database"></i> {{ $dbConnection }}
                             </span>
+                            @if($isRemote)
+                                <span class="badge bg-warning ms-1">远程</span>
+                            @endif
                             <small class="text-muted ms-2" id="connectionHostInfo" style="{{ $currentConnInfo ? '' : 'display:none;' }}">
                                 @if($currentConnInfo)
                                     ({{ $currentConnInfo['database'] }} @ {{ $currentConnInfo['host'] }}:{{ $currentConnInfo['port'] }})
@@ -488,6 +494,7 @@ window.__CRUD_GENERATOR_PAGE_VARS__ = {
     baseConfig: @json($config ?? []),
     tableComment: @json($tableComment),
     connectionInfo: @json($currentConnInfo),
+    connectionTypes: @json($connectionTypes ?? []),
 };
 </script>
 
@@ -803,6 +810,23 @@ function hydrateBasicConfig(baseConfig = {}, meta = {}) {
     if (dbConnectionDisplay && dbConnectionDisplay.dataset.userModified !== 'true' && dbConnectionDisplay.value !== dbConnectionValue) {
         dbConnectionDisplay.value = dbConnectionValue;
     }
+    
+    // 设置 is_remote_connection 字段
+    const connectionTypes = PAGE_VARS.connectionTypes || {};
+    const isRemote = connectionTypes[dbConnectionValue]?.is_remote || false;
+    let isRemoteInput = document.getElementById('isRemoteConnectionInput');
+    if (!isRemoteInput) {
+        // 如果不存在，创建一个隐藏字段
+        isRemoteInput = document.createElement('input');
+        isRemoteInput.type = 'hidden';
+        isRemoteInput.name = 'is_remote_connection';
+        isRemoteInput.id = 'isRemoteConnectionInput';
+        const form = document.getElementById('configForm');
+        if (form) {
+            form.appendChild(isRemoteInput);
+        }
+    }
+    isRemoteInput.value = isRemote ? '1' : '0';
 
     // 前端推测：如果后端没有返回 model_name，从前端推测
     const modelInput = document.querySelector('input[name="model_name"]');

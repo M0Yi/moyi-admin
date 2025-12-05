@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace App\Service\Admin;
 
+use App\Model\Admin\AdminDatabaseConnection;
+use Hyperf\Context\ApplicationContext;
+use Hyperf\Contract\ConfigInterface;
 use Hyperf\DbConnection\Db;
 use function Hyperf\Config\config;
 
@@ -14,30 +17,222 @@ use function Hyperf\Config\config;
 class DatabaseService
 {
     /**
-     * 获取所有数据库连接配置
+     * 已注册的远程连接缓存（避免重复注册）
      *
-     * @return array 返回连接名称和数据库名称的映射
+     * @var array<string, bool>
+     */
+    private array $registeredConnections = [];
+    /**
+     * 获取所有数据库连接配置
+     * 包括配置文件中的连接和远程数据库连接表中的连接
+     *
+     * @return array 返回连接名称和数据库信息的映射
      */
     public function getAllConnections(): array
     {
-        $connections = config('databases', []);
         $result = [];
 
-        foreach ($connections as $name => $config) {
+        // 1. 从配置文件读取连接（is_remote_connection = 0）
+        $configConnections = config('databases', []);
+        foreach ($configConnections as $name => $config) {
             if (is_array($config) && isset($config['database'])) {
                 $result[$name] = [
                     'name' => $name,
+                    'type' => 'config', // 标识来源：配置文件
                     'driver' => $config['driver'] ?? 'mysql',
                     'database' => $config['database'] ?? '',
                     'host' => $config['host'] ?? 'localhost',
                     'port' => $config['port'] ?? 3306,
+                    'is_remote' => false,
                 ];
             }
+        }
+
+        // 2. 从远程数据库连接表读取连接（is_remote_connection = 1）
+        try {
+            $remoteConnections = AdminDatabaseConnection::query()
+                ->where('status', AdminDatabaseConnection::STATUS_ENABLED)
+                ->get();
+
+            foreach ($remoteConnections as $connection) {
+                $name = $connection->name;
+                // 如果远程连接名称与配置文件中的连接名称冲突，跳过（配置文件优先级更高）
+                if (!isset($result[$name])) {
+                    $result[$name] = [
+                        'name' => $name,
+                        'type' => 'remote', // 标识来源：远程数据库连接表
+                        'driver' => $connection->driver,
+                        'database' => $connection->database,
+                        'host' => $connection->host,
+                        'port' => $connection->port,
+                        'is_remote' => true,
+                        'connection_id' => $connection->id, // 远程连接ID，用于后续操作
+                    ];
+                }
+            }
+        } catch (\Throwable $e) {
+            // 如果表不存在或查询失败，忽略错误（可能是首次安装）
+            logger()->warning('读取远程数据库连接配置失败：' . $e->getMessage());
         }
 
         return $result;
     }
 
+    /**
+     * 获取数据库连接配置（支持配置文件和远程数据库）
+     *
+     * @param string $connectionName 连接名称
+     * @return array|null 连接配置数组，如果不存在返回 null
+     */
+    public function getConnectionConfig(string $connectionName): ?array
+    {
+        // 1. 先尝试从配置文件读取
+        $configConnections = config('databases', []);
+        if (isset($configConnections[$connectionName])) {
+            return $configConnections[$connectionName];
+        }
+
+        // 2. 从远程数据库连接表读取
+        try {
+            $remoteConnection = AdminDatabaseConnection::query()
+                ->where('name', $connectionName)
+                ->where('status', AdminDatabaseConnection::STATUS_ENABLED)
+                ->first();
+
+            if ($remoteConnection) {
+                // 构建 Hyperf 数据库连接配置格式
+                // 密码以明文形式存储，可以直接用于数据库连接
+                return [
+                    'driver' => $remoteConnection->driver,
+                    'host' => $remoteConnection->host,
+                    'port' => $remoteConnection->port,
+                    'database' => $remoteConnection->database,
+                    'username' => $remoteConnection->username,
+                    'password' => $remoteConnection->password, // 明文密码，可直接使用
+                    'charset' => $remoteConnection->charset,
+                    'collation' => $remoteConnection->collation,
+                    'prefix' => $remoteConnection->prefix ?? '',
+                    // 添加默认的 pool 配置
+                    'pool' => [
+                        'min_connections' => 1,
+                        'max_connections' => 10,
+                        'connect_timeout' => 10.0,
+                        'wait_timeout' => 3.0,
+                        'heartbeat' => -1,
+                        'max_idle_time' => 60.0,
+                    ],
+                ];
+            }
+        } catch (\Throwable $e) {
+            // 如果表不存在或查询失败，忽略错误
+            logger()->warning('读取远程数据库连接配置失败：' . $e->getMessage());
+        }
+
+        return null;
+    }
+
+    /**
+     * 确保连接已注册（如果是远程连接，动态注册）
+     *
+     * @param string $connectionName 连接名称
+     * @return bool 是否成功
+     */
+    public function ensureConnectionRegistered(string $connectionName): bool
+    {
+        // 检查连接是否已存在
+        try {
+            Db::connection($connectionName);
+            return true; // 连接已存在
+        } catch (\Throwable $e) {
+            // 连接不存在，需要注册
+        }
+
+        // 如果已经尝试注册过但失败，不再重复尝试
+        if (isset($this->registeredConnections[$connectionName]) && !$this->registeredConnections[$connectionName]) {
+            return false;
+        }
+
+        // 获取连接配置
+        $config = $this->getConnectionConfig($connectionName);
+        if (!$config) {
+            logger()->warning("连接配置不存在: {$connectionName}");
+            $this->registeredConnections[$connectionName] = false;
+            return false;
+        }
+
+        // 检查是否是远程连接
+        $connections = $this->getAllConnections();
+        $isRemote = $connections[$connectionName]['is_remote'] ?? false;
+
+        if (!$isRemote) {
+            // 配置文件连接，应该已经存在
+            logger()->warning("配置文件连接 {$connectionName} 不存在");
+            $this->registeredConnections[$connectionName] = false;
+            return false;
+        }
+
+        // 动态注册远程连接
+        $result = $this->registerRemoteConnection($connectionName, $config);
+        $this->registeredConnections[$connectionName] = $result;
+        return $result;
+    }
+
+    /**
+     * 动态注册远程数据库连接到 Hyperf 连接池
+     *
+     * @param string $connectionName 连接名称
+     * @param array $config 连接配置
+     * @return bool 是否成功
+     */
+    protected function registerRemoteConnection(string $connectionName, array $config): bool
+    {
+        try {
+            // 使用 Hyperf 的配置管理器动态添加连接配置
+            $configManager = ApplicationContext::getContainer()
+                ->get(ConfigInterface::class);
+
+            // 构建完整的连接配置
+            $fullConfig = array_merge($config, [
+                'pool' => $config['pool'] ?? [
+                    'min_connections' => 1,
+                    'max_connections' => 5, // 远程连接使用较小的连接池
+                    'connect_timeout' => 10.0,
+                    'wait_timeout' => 3.0,
+                    'heartbeat' => -1,
+                    'max_idle_time' => 60.0,
+                ],
+                // 添加缓存配置（可选）
+                'cache' => $config['cache'] ?? [
+                    'handler' => \Hyperf\ModelCache\Handler\RedisHandler::class,
+                    'cache_key' => '{mc:%s:m:%s}:%s:%s',
+                    'prefix' => $connectionName,
+                    'ttl' => 3600 * 24,
+                    'empty_model_ttl' => 600,
+                    'load_script' => true,
+                ],
+            ]);
+
+            // 动态设置配置
+            $configManager->set("databases.{$connectionName}", $fullConfig);
+
+            // 测试连接（这会触发连接池的创建）
+            Db::connection($connectionName)->select('SELECT 1');
+
+            logger()->info("远程数据库连接注册成功: {$connectionName}", [
+                'host' => $config['host'],
+                'database' => $config['database'],
+            ]);
+
+            return true;
+        } catch (\Throwable $e) {
+            logger()->error("远程数据库连接注册失败: {$connectionName}", [
+                'error' => $e->getMessage(),
+                'host' => $config['host'] ?? 'unknown',
+                'database' => $config['database'] ?? 'unknown',
+            ]);
+            return false;
+        }
+    }
 
     /**
      * 检查表是否有指定字段
@@ -51,8 +246,20 @@ class DatabaseService
     {
         try {
             $connection = $connection ?? 'default';
-            $database = config("databases.{$connection}.database");
-            $driver = config("databases.{$connection}.driver", 'mysql');
+            
+            // 确保远程连接已注册
+            $this->ensureConnectionRegistered($connection);
+            
+            $connectionConfig = $this->getConnectionConfig($connection);
+            if (!$connectionConfig) {
+                return false;
+            }
+            $database = $connectionConfig['database'] ?? null;
+            $driver = $connectionConfig['driver'] ?? 'mysql';
+            
+            if (!$database) {
+                return false;
+            }
             
             if ($driver === 'pgsql') {
                 // PostgreSQL
@@ -87,8 +294,19 @@ class DatabaseService
     public function getAllTables(?string $connection = null): array
     {
         $connection = $connection ?? 'default';
-        $database = config("databases.{$connection}.database");
-        $driver = config("databases.{$connection}.driver", 'mysql');
+        
+        // 确保远程连接已注册
+        if (!$this->ensureConnectionRegistered($connection)) {
+            logger()->warning("无法注册数据库连接: {$connection}");
+            return [];
+        }
+        
+        $connectionConfig = $this->getConnectionConfig($connection);
+        if (!$connectionConfig) {
+            return [];
+        }
+        $database = $connectionConfig['database'] ?? null;
+        $driver = $connectionConfig['driver'] ?? 'mysql';
 
         if (!$database) {
             return [];
@@ -144,8 +362,16 @@ class DatabaseService
     public function getTableComment(string $tableName, ?string $connection = null): string
     {
         $connection = $connection ?? 'default';
-        $database = config("databases.{$connection}.database");
-        $driver = config("databases.{$connection}.driver", 'mysql');
+        
+        // 确保远程连接已注册
+        $this->ensureConnectionRegistered($connection);
+        
+        $connectionConfig = $this->getConnectionConfig($connection);
+        if (!$connectionConfig) {
+            return '';
+        }
+        $database = $connectionConfig['database'] ?? null;
+        $driver = $connectionConfig['driver'] ?? 'mysql';
 
         if (!$database) {
             return '';
@@ -186,7 +412,15 @@ class DatabaseService
     {
         try {
             $connection = $connection ?? 'default';
-            $driver = config("databases.{$connection}.driver", 'mysql');
+            
+            // 确保远程连接已注册
+            $this->ensureConnectionRegistered($connection);
+            
+            $connectionConfig = $this->getConnectionConfig($connection);
+            if (!$connectionConfig) {
+                return 0;
+            }
+            $driver = $connectionConfig['driver'] ?? 'mysql';
             
             // PostgreSQL 使用双引号，MySQL 使用反引号
             if ($driver === 'pgsql') {
@@ -218,8 +452,23 @@ class DatabaseService
             'connection' => $connection,
         ]);
 
-        $database = config("databases.{$connection}.database");
-        $driver = config("databases.{$connection}.driver", 'mysql');
+        // 确保远程连接已注册
+        if (!$this->ensureConnectionRegistered($connection)) {
+            logger('crud_generator')->error("无法注册数据库连接", [
+                'connection' => $connection,
+            ]);
+            return [];
+        }
+
+        $connectionConfig = $this->getConnectionConfig($connection);
+        if (!$connectionConfig) {
+            logger('crud_generator')->error("数据库连接配置不存在", [
+                'connection' => $connection,
+            ]);
+            return [];
+        }
+        $database = $connectionConfig['database'] ?? null;
+        $driver = $connectionConfig['driver'] ?? 'mysql';
         
         if (!$database) {
             logger('crud_generator')->error("数据库连接配置不存在", [
@@ -406,8 +655,16 @@ class DatabaseService
     public function getRawTableColumns(string $tableName, ?string $connection = null): array
     {
         $connection = $connection ?? 'default';
-        $database = config("databases.{$connection}.database");
-        $driver = config("databases.{$connection}.driver", 'mysql');
+        
+        // 确保远程连接已注册
+        $this->ensureConnectionRegistered($connection);
+        
+        $connectionConfig = $this->getConnectionConfig($connection);
+        if (!$connectionConfig) {
+            return [];
+        }
+        $database = $connectionConfig['database'] ?? null;
+        $driver = $connectionConfig['driver'] ?? 'mysql';
         
         if (!$database) {
             return [];
