@@ -31,4 +31,17 @@ return [
      */
     \Hyperf\Contract\StdoutLoggerInterface::class => \App\Logging\StdoutLogger::class,
 
+    /**
+     * 多站点 Redis Session Handler 工厂类绑定
+     * 
+     * 原因：
+     * MultiSiteRedisHandler 需要 $redis 和 $gcMaxLifeTime 构造函数参数，
+     * 无法通过依赖注入自动解析，需要使用工厂类来创建实例。
+     * 
+     * 解决方案：
+     * 使用 MultiSiteRedisHandlerFactory 工厂类，从配置中读取 Redis 连接和生命周期设置，
+     * 然后创建 MultiSiteRedisHandler 实例。
+     */
+    \App\Session\Handler\MultiSiteRedisHandler::class => \App\Session\Handler\MultiSiteRedisHandlerFactory::class,
+
 ];

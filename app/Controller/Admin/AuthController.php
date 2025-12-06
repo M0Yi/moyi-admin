@@ -131,7 +131,17 @@ class AuthController extends AbstractController
                 $value = base64_encode($payload . '.' . $signature);
 
                 $secure = ($this->request->getUri()->getScheme() === 'https');
-                $cookie = new \Hyperf\HttpMessage\Cookie\Cookie('admin_remember', $value, $expires, '/', '', $secure, true);
+                
+                // 获取当前请求的域名，确保"记住我" cookie 使用正确的 domain
+                $host = $this->request->getHeaderLine('Host');
+                $domain = $this->extractDomainFromHost($host);
+                
+                // 如果是 IP 地址，不设置 domain
+                if (empty($domain) || filter_var($domain, FILTER_VALIDATE_IP)) {
+                    $domain = '';
+                }
+                
+                $cookie = new \Hyperf\HttpMessage\Cookie\Cookie('admin_remember', $value, $expires, '/', $domain, $secure, true);
                 $this->response->withCookie($cookie);
             }
 
@@ -165,6 +175,27 @@ class AuthController extends AbstractController
         return $serverParams['remote_addr'] ?? '0.0.0.0';
     }
 
+    /**
+     * 从 Host 中提取域名（移除端口）
+     */
+    private function extractDomainFromHost(string $host): string
+    {
+        // 处理 IPv6（形如 [::1]:8080）
+        if (str_starts_with($host, '[')) {
+            $endBracket = strpos($host, ']');
+            if ($endBracket !== false) {
+                // IPv6 地址，返回空（IP 地址不能设置 cookie domain）
+                return '';
+            }
+        }
+
+        // IPv4 或域名
+        $parts = explode(':', $host);
+        $domain = $parts[0];
+
+        return $domain;
+    }
+
 
     /**
      * 退出登录
@@ -177,10 +208,20 @@ class AuthController extends AbstractController
         // 2. 使 Session 无效
         $this->session->invalidate();
 
-        // 3. 清除“记住我” Cookie
+        // 3. 清除"记住我" Cookie
         try {
             $expired = time() - 3600;
-            $cookie = new \Hyperf\HttpMessage\Cookie\Cookie('admin_remember', '', $expired, '/', '', false, true);
+            
+            // 获取当前请求的域名，确保清除 cookie 时使用正确的 domain
+            $host = $this->request->getHeaderLine('Host');
+            $domain = $this->extractDomainFromHost($host);
+            
+            // 如果是 IP 地址，不设置 domain
+            if (empty($domain) || filter_var($domain, FILTER_VALIDATE_IP)) {
+                $domain = '';
+            }
+            
+            $cookie = new \Hyperf\HttpMessage\Cookie\Cookie('admin_remember', '', $expired, '/', $domain, false, true);
             $this->response->withCookie($cookie);
         } catch (\Throwable $e) {}
 
