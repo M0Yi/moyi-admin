@@ -578,6 +578,126 @@
             box-shadow: var(--glow-primary);
         }
 
+        /* 画廊瀑布流 */
+        .gallery-section {
+            padding: 80px 40px;
+        }
+
+        .gallery-subtitle {
+            text-align: center;
+            color: var(--text-secondary);
+            margin-top: -24px;
+            margin-bottom: 36px;
+        }
+
+        .masonry {
+            column-count: 3;
+            column-gap: 18px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .masonry-item {
+            break-inside: avoid;
+            background: var(--bg-panel);
+            border: 1px solid var(--border-color);
+            border-radius: 14px;
+            margin-bottom: 18px;
+            overflow: hidden;
+            position: relative;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.28);
+            transition: transform 0.3s, box-shadow 0.3s, border-color 0.3s;
+        }
+
+        .masonry-item::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(135deg, rgba(0, 212, 255, 0.12), rgba(124, 58, 237, 0.14));
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+
+        .masonry-item:hover {
+            transform: translateY(-6px);
+            box-shadow: 0 28px 50px rgba(0, 0, 0, 0.36);
+            border-color: var(--primary);
+        }
+
+        .masonry-item:hover::before {
+            opacity: 1;
+        }
+
+        .masonry-visual {
+            width: 100%;
+            background: radial-gradient(circle at 20% 20%, rgba(0, 212, 255, 0.35), transparent 45%),
+                        radial-gradient(circle at 80% 30%, rgba(124, 58, 237, 0.4), transparent 40%),
+                        linear-gradient(145deg, rgba(0, 212, 255, 0.2), rgba(124, 58, 237, 0.18));
+        }
+
+        .masonry-content {
+            padding: 18px 18px 20px;
+            position: relative;
+            z-index: 1;
+        }
+
+        .masonry-tag {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 12px;
+            border-radius: 999px;
+            background: rgba(0, 212, 255, 0.12);
+            color: var(--primary);
+            border: 1px solid rgba(0, 212, 255, 0.25);
+            font-size: 12px;
+            letter-spacing: 0.1em;
+        }
+
+        .masonry-title {
+            font-size: 18px;
+            font-weight: 700;
+            margin: 12px 0 8px;
+            color: var(--text-primary);
+        }
+
+        .masonry-desc {
+            color: var(--text-secondary);
+            font-size: 14px;
+            line-height: 1.6;
+        }
+
+        .masonry-meta {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 12px;
+            color: var(--text-secondary);
+            font-size: 12px;
+            letter-spacing: 0.05em;
+        }
+
+        .pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 10px;
+            border-radius: 10px;
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        @media (max-width: 1024px) {
+            .masonry {
+                column-count: 2;
+            }
+        }
+
+        @media (max-width: 640px) {
+            .masonry {
+                column-count: 1;
+            }
+        }
+
         /* 底部 */
         .footer {
             padding: 60px 40px 30px;
@@ -787,6 +907,91 @@
                     <div class="feature-icon">🖼️</div>
                     <h3 class="feature-title">iframe 模式</h3>
                     <p class="feature-description">支持在弹窗中以 iframe 方式打开页面，提升用户体验</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- 画廊瀑布流 -->
+        <section class="gallery-section" id="gallery">
+            <h2 class="section-title">画廊瀑布流</h2>
+            <p class="gallery-subtitle">快速浏览核心场景，瀑布流布局自适应高宽比，保持动感而不失秩序</p>
+            <div class="masonry">
+                <div class="masonry-item">
+                    <div class="masonry-visual"></div>
+                    <div class="masonry-content">
+                        <span class="masonry-tag">CRUD CORE</span>
+                        <div class="masonry-title">一体化模型/表格/表单</div>
+                        <div class="masonry-desc">通用 CRUD 核心，模型、表格、表单联动生成，零样板代码，敏捷上线。</div>
+                        <div class="masonry-meta">
+                            <span class="pill">配置驱动</span>
+                            <span>高并发 · Hyperf</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="masonry-item">
+                    <div class="masonry-visual"></div>
+                    <div class="masonry-content">
+                        <span class="masonry-tag">DATA HUB</span>
+                        <div class="masonry-title">多数据库一站式调度</div>
+                        <div class="masonry-desc">支持远程连接、测试、启停与切换，跨库统一管理，满足复杂数据中心场景。</div>
+                        <div class="masonry-meta">
+                            <span class="pill">MySQL · Redis</span>
+                            <span>连接池 · 安全</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="masonry-item">
+                    <div class="masonry-visual"></div>
+                    <div class="masonry-content">
+                        <span class="masonry-tag">MULTI-SITE</span>
+                        <div class="masonry-title">多站点独立隔离</div>
+                        <div class="masonry-desc">域名级隔离数据与会话，站点全生命周期管理，开箱即用的站点验证流程。</div>
+                        <div class="masonry-meta">
+                            <span class="pill">隔离</span>
+                            <span>站点验证</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="masonry-item">
+                    <div class="masonry-visual"></div>
+                    <div class="masonry-content">
+                        <span class="masonry-tag">SECURITY</span>
+                        <div class="masonry-title">JWT + Session 双态守护</div>
+                        <div class="masonry-desc">后端双态认证，操作日志可追溯，权限中间件精细管控，安全与性能兼顾。</div>
+                        <div class="masonry-meta">
+                            <span class="pill">鉴权</span>
+                            <span>审计</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="masonry-item">
+                    <div class="masonry-visual"></div>
+                    <div class="masonry-content">
+                        <span class="masonry-tag">EXPORT/IMPORT</span>
+                        <div class="masonry-title">Excel / CSV 一键导出</div>
+                        <div class="masonry-desc">条件导出、批量导出与回收站恢复并行，确保数据流转全链路可控。</div>
+                        <div class="masonry-meta">
+                            <span class="pill">导出</span>
+                            <span>回收站</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="masonry-item">
+                    <div class="masonry-visual"></div>
+                    <div class="masonry-content">
+                        <span class="masonry-tag">IFRAME MODE</span>
+                        <div class="masonry-title">弹窗内嵌 · 轻量体验</div>
+                        <div class="masonry-desc">iframe 模式双向通信，完成后自动刷新父级，适配弹窗与微前端场景。</div>
+                        <div class="masonry-meta">
+                            <span class="pill">轻交互</span>
+                            <span>刷新同步</span>
+                        </div>
+                    </div>
                 </div>
             </div>
         </section>

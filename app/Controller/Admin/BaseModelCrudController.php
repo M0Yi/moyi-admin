@@ -13,6 +13,7 @@ use Hyperf\Di\Annotation\Inject;
 use Hyperf\HttpServer\Contract\RequestInterface;
 use Hyperf\Validation\Contract\ValidatorFactoryInterface;
 use Psr\Http\Message\ResponseInterface;
+use function Hyperf\Support\class_uses_recursive;
 
 /**
  * 基于 Hyperf Model 的 CRUD 基类控制器
@@ -276,15 +277,33 @@ abstract class BaseModelCrudController extends AbstractController
                 $query->orderBy($this->getDefaultSortField(), $this->getDefaultSortOrder());
             }
 
-            // 分页
-            $paginator = $query->paginate($pageSize, ['*'], 'page', $page);
+            // 分页处理：如果 page_size 为 0，返回所有数据
+            if ($pageSize > 0) {
+                $paginator = $query->paginate($pageSize, ['*'], 'page', $page);
+                
+                $data = $paginator->items();
+                $total = $paginator->total();
+                $currentPage = $paginator->currentPage();
+                $perPage = $paginator->perPage();
+                $lastPage = $paginator->lastPage();
+            } else {
+                // page_size 为 0，返回所有数据
+                $total = $query->count();
+                $data = $query->get()->toArray();
+                $currentPage = 1;
+                $perPage = $total > 0 ? $total : 0;
+                $lastPage = 1;
+            }
+
+            // 格式化数据（子类可以重写 formatListData 方法）
+            $data = $this->formatListData($data);
 
             return $this->success([
-                'data' => $paginator->items(),
-                'total' => $paginator->total(),
-                'page' => $paginator->currentPage(),
-                'page_size' => $paginator->perPage(),
-                'last_page' => $paginator->lastPage(),
+                'data' => $data,
+                'total' => $total,
+                'page' => $currentPage,
+                'page_size' => $perPage,
+                'last_page' => $lastPage,
             ]);
         } catch (\Throwable $e) {
             logger()->error('[BaseModelCrudController] 获取列表数据失败', [
@@ -294,6 +313,23 @@ abstract class BaseModelCrudController extends AbstractController
             ]);
             return $this->error($e->getMessage());
         }
+    }
+
+    /**
+     * 格式化列表数据
+     * 子类可以重写此方法以自定义数据格式化逻辑
+     *
+     * @param array $data 原始数据数组（可能是 Model 对象数组或数组）
+     * @return array 格式化后的数据数组
+     */
+    protected function formatListData(array $data): array
+    {
+        // 默认实现：将 Model 对象转换为数组
+        $formatted = [];
+        foreach ($data as $item) {
+            $formatted[] = is_array($item) ? $item : $item->toArray();
+        }
+        return $formatted;
     }
 
     /**
@@ -843,16 +879,30 @@ abstract class BaseModelCrudController extends AbstractController
             // 排序
             $query->orderBy($sortField, $sortOrder);
 
-            // 分页
-            $paginator = $query->paginate($pageSize, ['*'], 'page', $page);
-
-            return $this->success([
-                'data' => $paginator->items(),
-                'total' => $paginator->total(),
-                'page' => $paginator->currentPage(),
-                'page_size' => $paginator->perPage(),
-                'last_page' => $paginator->lastPage(),
-            ]);
+            // 分页处理：如果 page_size 为 0，返回所有数据
+            if ($pageSize > 0) {
+                $paginator = $query->paginate($pageSize, ['*'], 'page', $page);
+                
+                return $this->success([
+                    'data' => $paginator->items(),
+                    'total' => $paginator->total(),
+                    'page' => $paginator->currentPage(),
+                    'page_size' => $paginator->perPage(),
+                    'last_page' => $paginator->lastPage(),
+                ]);
+            } else {
+                // page_size 为 0，返回所有数据
+                $total = $query->count();
+                $data = $query->get()->toArray();
+                
+                return $this->success([
+                    'data' => $data,
+                    'total' => $total,
+                    'page' => 1,
+                    'page_size' => $total > 0 ? $total : 0,
+                    'last_page' => 1,
+                ]);
+            }
         } catch (\Throwable $e) {
             return $this->error($e->getMessage());
         }

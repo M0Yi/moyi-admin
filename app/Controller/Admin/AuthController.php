@@ -124,6 +124,10 @@ class AuthController extends AbstractController
 
             // 11. 处理"记住我" - 设置长期 Cookie
             $remember = (int)($data['remember'] ?? 0) === 1;
+            $response = $this->success([
+                'redirect' => 'dashboard',
+            ], '登录成功');
+            
             if ($remember) {
                 $expires = time() + 60 * 60 * 24 * 30; // 30 天
                 $payload = $user->id . '.' . $site->id . '.' . $expires;
@@ -142,13 +146,11 @@ class AuthController extends AbstractController
                 }
                 
                 $cookie = new \Hyperf\HttpMessage\Cookie\Cookie('admin_remember', $value, $expires, '/', $domain, $secure, true);
-                $this->response->withCookie($cookie);
+                // withCookie 返回新的响应对象，需要接收返回值
+                $response = $response->withCookie($cookie);
             }
 
-
-            return $this->success([
-                    'redirect' => 'dashboard',
-            ], '登录成功');
+            return $response;
 
         } catch (\Throwable $e) {
             return $this->error('登录失败：' . $e->getMessage(), null, 500);
@@ -209,6 +211,9 @@ class AuthController extends AbstractController
         $this->session->invalidate();
 
         // 3. 清除"记住我" Cookie
+        $adminPath = Context::get('admin_entry_path', '/admin');
+        $response = $this->response->redirect($adminPath . '/login');
+        
         try {
             $expired = time() - 3600;
             
@@ -222,11 +227,12 @@ class AuthController extends AbstractController
             }
             
             $cookie = new \Hyperf\HttpMessage\Cookie\Cookie('admin_remember', '', $expired, '/', $domain, false, true);
-            $this->response->withCookie($cookie);
-        } catch (\Throwable $e) {}
+            // withCookie 返回新的响应对象，需要接收返回值
+            $response = $response->withCookie($cookie);
+        } catch (\Throwable $e) {
+            // 清除 Cookie 失败不影响登出流程
+        }
 
-        // 4. 重定向到登录页
-        $adminPath = Context::get('admin_entry_path', '/admin');
-        return $this->response->redirect($adminPath . '/login');
+        return $response;
     }
 }

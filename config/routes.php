@@ -167,6 +167,22 @@ Router::addGroup('/admin/{adminPath:[a-zA-Z0-9\-_]+}', function () {
         });
 
         // ========================================
+        // 文件管理
+        // ========================================
+        Router::addGroup('/system/upload-files', function () {
+            Router::get('', 'App\Controller\Admin\System\UploadFileController@index');
+            Router::get('/create', 'App\Controller\Admin\System\UploadFileController@create');
+            Router::post('/token', 'App\Controller\Admin\System\UploadFileController@getUploadToken');
+            Router::put('/upload/{path:.+}', 'App\Controller\Admin\System\UploadFileController@upload');
+            Router::get('/{id:\d+}', 'App\Controller\Admin\System\UploadFileController@show');
+            Router::get('/{id:\d+}/preview', 'App\Controller\Admin\System\UploadFileController@preview');
+            Router::get('/{id:\d+}/check', 'App\Controller\Admin\System\UploadFileController@check');
+            Router::post('/{id:\d+}/check', 'App\Controller\Admin\System\UploadFileController@check');
+            Router::delete('/{id:\d+}', 'App\Controller\Admin\System\UploadFileController@destroy');
+            Router::post('/batch-destroy', 'App\Controller\Admin\System\UploadFileController@batchDestroy');
+        });
+
+        // ========================================
         // 图片上传 API（客户端直传PUT方案）
         // ========================================
         Router::post('/api/admin/upload/token', 'App\Controller\Admin\System\ImageUploadController@getUploadToken');

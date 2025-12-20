@@ -17,6 +17,7 @@ use Hyperf\HttpServer\Contract\RequestInterface;
 use Hyperf\HttpServer\Contract\ResponseInterface as HttpResponse;
 use Hyperf\Di\Annotation\Inject;
 use HyperfExtension\Auth\Events\Logout;
+use function Hyperf\Support\env;
 
 /**
  * 系统初始化控制器
@@ -75,9 +76,9 @@ class InstallController extends AbstractController
             logger()->info('开始数据库事务');
             Db::beginTransaction();
 
-            // 1. 创建站点
+            // 1. 创建站点（系统初始化时使用默认路径）
             logger()->info('开始创建站点');
-            $site = $this->createSite($data);
+            $site = $this->createSite($data, true);
             logger()->info('站点创建完成，ID=' . $site->id);
 
             // 2. 创建超级管理员角色（角色已解耦站点，全局共享）
@@ -220,12 +221,19 @@ class InstallController extends AbstractController
 
     /**
      * 创建站点
+     * 
+     * @param array $data 站点数据
+     * @param bool $useDefaultPath 是否使用默认路径（仅系统初始化时使用）
      */
-    protected function createSite(array $data): AdminSite
+    protected function createSite(array $data, bool $useDefaultPath = false): AdminSite
     {
-        // 生成随机的后台入口路径
-        $adminPath = AdminSite::generateRandomAdminPath(16);
-        return AdminSite::create([
+        // 获取后台入口路径
+        // 系统初始化时：优先使用环境变量配置，否则随机生成
+        // 多站点创建时：始终随机生成
+        $adminPath = $useDefaultPath ? $this->getAdminEntryPath() : AdminSite::generateRandomAdminPath(16);
+        
+        // 站点基础数据
+        $siteData = [
             'domain' => $data['site_domain'],
             'admin_entry_path' => $adminPath,
             'name' => $data['site_name'],
@@ -237,7 +245,262 @@ class InstallController extends AbstractController
             ],
             'status' => AdminSite::STATUS_ENABLED,
             'sort' => 0,
-        ]);
+        ];
+        
+        // 检查是否有 env 自定义上传配置
+        $uploadConfig = $this->getUploadConfigFromEnv();
+        if ($uploadConfig !== null) {
+            $siteData['upload_driver'] = $uploadConfig['driver'];
+            $siteData['upload_config'] = $uploadConfig['config'];
+            
+            // 如果是 S3 配置，同时设置独立字段
+            if ($uploadConfig['driver'] === 's3' && isset($uploadConfig['config']['s3'])) {
+                $s3Config = $uploadConfig['config']['s3'];
+                $siteData['s3_key'] = $s3Config['key'] ?? $s3Config['credentials']['key'] ?? null;
+                $siteData['s3_secret'] = $s3Config['secret'] ?? $s3Config['credentials']['secret'] ?? null;
+                $siteData['s3_bucket'] = $s3Config['bucket'] ?? $s3Config['bucket_name'] ?? null;
+                $siteData['s3_region'] = $s3Config['region'] ?? null;
+                $siteData['s3_endpoint'] = $s3Config['endpoint'] ?? null;
+                $siteData['s3_cdn'] = $s3Config['cdn'] ?? null;
+                $siteData['s3_path_style'] = ($s3Config['use_path_style_endpoint'] ?? false) ? 1 : 0;
+            }
+            
+            logger()->info('检测到环境变量中的上传配置，已自动设置为使用自定义上传配置', [
+                'driver' => $uploadConfig['driver'],
+            ]);
+        }
+        
+        // 设置默认的文件上传格式（如果未配置）
+        if (empty($siteData['upload_allowed_mime_types'])) {
+            $siteData['upload_allowed_mime_types'] = implode(',', $this->getDefaultMimeTypes());
+        }
+        if (empty($siteData['upload_allowed_extensions'])) {
+            $siteData['upload_allowed_extensions'] = implode(',', $this->getDefaultExtensions());
+        }
+        
+        return AdminSite::create($siteData);
+    }
+    
+    /**
+     * 从环境变量读取上传配置
+     * 如果存在相关配置，返回配置数组；否则返回 null
+     * 
+     * @return array|null 返回 ['driver' => 's3'|'local', 'config' => [...]] 或 null
+     */
+    protected function getUploadConfigFromEnv(): ?array
+    {
+        // 检查上传驱动类型
+        $driver = env('UPLOAD_DRIVER');
+        if (empty($driver)) {
+            // 如果没有明确指定驱动，检查是否有 S3 配置
+            $hasS3Config = !empty(env('S3_KEY')) || !empty(env('UPLOAD_S3_KEY')) ||
+                          !empty(env('S3_SECRET')) || !empty(env('UPLOAD_S3_SECRET')) ||
+                          !empty(env('S3_BUCKET')) || !empty(env('UPLOAD_S3_BUCKET'));
+            
+            if ($hasS3Config) {
+                $driver = 's3';
+            } else {
+                // 没有配置，返回 null
+                return null;
+            }
+        }
+        
+        // 只支持 s3 和 local
+        if (!in_array($driver, ['s3', 'local'])) {
+            logger()->warning('不支持的 UPLOAD_DRIVER 值，已忽略', ['driver' => $driver]);
+            return null;
+        }
+        
+        // S3 配置
+        if ($driver === 's3') {
+            // 读取 S3 配置（支持多种 env 变量名）
+            $s3Key = env('S3_KEY') ?: env('UPLOAD_S3_KEY') ?: env('AWS_ACCESS_KEY_ID');
+            $s3Secret = env('S3_SECRET') ?: env('UPLOAD_S3_SECRET') ?: env('AWS_SECRET_ACCESS_KEY');
+            $s3Bucket = env('S3_BUCKET') ?: env('UPLOAD_S3_BUCKET') ?: env('AWS_BUCKET');
+            $s3Region = env('S3_REGION') ?: env('UPLOAD_S3_REGION') ?: env('AWS_REGION') ?: 'us-east-1';
+            $s3Endpoint = env('S3_ENDPOINT') ?: env('UPLOAD_S3_ENDPOINT') ?: env('AWS_ENDPOINT');
+            $s3Cdn = env('S3_CDN') ?: env('UPLOAD_S3_CDN') ?: env('AWS_CDN');
+            $s3PathStyle = env('S3_PATH_STYLE') ?: env('UPLOAD_S3_PATH_STYLE');
+            $s3Version = env('S3_VERSION') ?: env('UPLOAD_S3_VERSION') ?: 'latest';
+            
+            // 验证必填项
+            if (empty($s3Key) || empty($s3Secret) || empty($s3Bucket) || empty($s3Cdn)) {
+                logger()->warning('S3 配置不完整，已忽略自定义上传配置', [
+                    'has_key' => !empty($s3Key),
+                    'has_secret' => !empty($s3Secret),
+                    'has_bucket' => !empty($s3Bucket),
+                    'has_cdn' => !empty($s3Cdn),
+                ]);
+                return null;
+            }
+            
+            // 构建 S3 配置
+            $s3Config = [
+                'key' => $s3Key,
+                'secret' => $s3Secret,
+                'bucket' => $s3Bucket,
+                'region' => $s3Region,
+                'cdn' => $s3Cdn,
+                'version' => $s3Version,
+            ];
+            
+            if (!empty($s3Endpoint)) {
+                $s3Config['endpoint'] = $s3Endpoint;
+            }
+            
+            if ($s3PathStyle !== null) {
+                $s3Config['use_path_style_endpoint'] = filter_var($s3PathStyle, FILTER_VALIDATE_BOOLEAN);
+            }
+            
+            return [
+                'driver' => 's3',
+                'config' => [
+                    's3' => $s3Config,
+                ],
+            ];
+        }
+        
+        // Local 配置（如果需要自定义本地存储路径等，可以在这里扩展）
+        if ($driver === 'local') {
+            $localStoragePath = env('UPLOAD_LOCAL_STORAGE_PATH');
+            $localPublicPath = env('UPLOAD_LOCAL_PUBLIC_PATH');
+            
+            $localConfig = [];
+            if (!empty($localStoragePath)) {
+                $localConfig['storage_path'] = $localStoragePath;
+            }
+            if (!empty($localPublicPath)) {
+                $localConfig['public_path'] = $localPublicPath;
+            }
+            
+            // 如果没有任何自定义配置，返回 null（使用系统默认）
+            if (empty($localConfig)) {
+                return null;
+            }
+            
+            return [
+                'driver' => 'local',
+                'config' => [
+                    'local' => $localConfig,
+                ],
+            ];
+        }
+        
+        return null;
+    }
+    
+    /**
+     * 获取默认的 MIME 类型列表
+     */
+    private function getDefaultMimeTypes(): array
+    {
+        return [
+            // 图片格式
+            'image/jpeg',
+            'image/jpg',
+            'image/png',
+            'image/gif',
+            'image/webp',
+            'image/bmp',
+            'image/svg+xml',
+            // 视频格式
+            'video/mp4',
+            'video/mpeg',
+            'video/quicktime',
+            'video/x-msvideo',
+            'video/x-ms-wmv',
+            'video/webm',
+            'video/x-flv',
+            // 音频格式
+            'audio/mpeg',
+            'audio/mp3',
+            'audio/wav',
+            'audio/x-wav',
+            'audio/ogg',
+            'audio/webm',
+            // 办公文档
+            'application/pdf',
+            'application/msword',
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // .docx
+            'application/vnd.ms-excel',
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', // .xlsx
+            'application/vnd.ms-powerpoint',
+            'application/vnd.openxmlformats-officedocument.presentationml.presentation', // .pptx
+            'application/vnd.oasis.opendocument.text', // .odt
+            'application/vnd.oasis.opendocument.spreadsheet', // .ods
+            'application/vnd.oasis.opendocument.presentation', // .odp
+            // 文本格式
+            'text/plain',
+            'text/csv',
+            'text/html',
+            'text/css',
+            'text/javascript',
+            'application/json',
+            'application/xml',
+            'text/xml',
+            // 压缩文件
+            'application/zip',
+            'application/x-zip-compressed',
+            'application/x-rar-compressed',
+            'application/x-7z-compressed',
+            'application/x-tar',
+            'application/gzip',
+        ];
+    }
+
+    /**
+     * 获取默认的文件扩展名列表
+     */
+    private function getDefaultExtensions(): array
+    {
+        return [
+            // 图片
+            'jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg',
+            // 视频
+            'mp4', 'mpeg', 'mpg', 'mov', 'avi', 'wmv', 'webm', 'flv',
+            // 音频
+            'mp3', 'wav', 'ogg', 'm4a', 'aac',
+            // 办公文档
+            'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx',
+            'odt', 'ods', 'odp',
+            // 文本
+            'txt', 'csv', 'html', 'css', 'js', 'json', 'xml',
+            // 压缩文件
+            'zip', 'rar', '7z', 'tar', 'gz',
+        ];
+    }
+    
+    /**
+     * 获取后台入口路径
+     * 优先使用环境变量配置，如果未配置或无效则随机生成
+     * 
+     * @return string 后台入口路径（不包含前导斜杠）
+     */
+    protected function getAdminEntryPath(): string
+    {
+        // 从环境变量读取默认后台路径
+        $defaultPath = env('ADMIN_ENTRY_PATH') ?: env('DEFAULT_ADMIN_PATH');
+        
+        if (!empty($defaultPath)) {
+            // 移除前导斜杠（如果存在）
+            $defaultPath = ltrim($defaultPath, '/');
+            
+            // 验证路径格式
+            if (AdminSite::isValidAdminPath('/' . $defaultPath)) {
+                logger()->info('使用环境变量配置的后台入口路径', ['path' => $defaultPath]);
+                return $defaultPath;
+            } else {
+                logger()->warning('环境变量中的后台入口路径格式无效，将使用随机生成', [
+                    'path' => $defaultPath,
+                    'valid_format' => '5-100字符，只允许字母、数字、连字符、下划线',
+                ]);
+            }
+        }
+        
+        // 如果环境变量未配置或无效，使用随机生成
+        $randomPath = AdminSite::generateRandomAdminPath(16);
+        logger()->info('使用随机生成的后台入口路径', ['path' => $randomPath]);
+        return $randomPath;
     }
 
     /**
@@ -351,6 +614,24 @@ class InstallController extends AbstractController
                         155,
                         'database'
                     ),
+                    [
+                        'name' => '文件管理',
+                        'slug' => 'system.upload-files',
+                        'type' => 'menu',
+                        'icon' => 'folder',
+                        'path' => '/system/upload-files',
+                        'method' => 'GET',
+                        'sort' => 156,
+                        'status' => 1,
+                        'children' => [
+                            // 访问文件管理页面：GET /system/upload-files*
+                            $this->makeButtonPermission('访问文件管理', 'system.upload-files.view', '/system/upload-files*', 1, 'GET'),
+                            // 删除文件：DELETE /system/upload-files/{id}
+                            $this->makeButtonPermission('删除文件', 'system.upload-files.delete', '/system/upload-files*', 2, 'DELETE'),
+                            // 批量删除文件：POST /system/upload-files/batch-destroy
+                            $this->makeButtonPermission('批量删除文件', 'system.upload-files.batch-delete', '/system/upload-files/batch-destroy', 3, 'POST'),
+                        ],
+                    ],
                     [
                         'name' => 'CRUD 生成器',
                         'slug' => 'system.crud-generator',
@@ -650,6 +931,29 @@ class InstallController extends AbstractController
            ]
        );
 
+       AdminMenu::query()->firstOrCreate(
+           ['site_id' => $siteId, 'path' => '/system/upload-files'],
+           [
+               'parent_id' => $system->id,
+               'name' => 'system.upload-files',
+               'title' => '文件管理',
+               'icon' => 'bi bi-folder',
+               'component' => null,
+               'redirect' => null,
+               'type' => AdminMenu::TYPE_MENU,
+               'target' => AdminMenu::TARGET_SELF,
+               'badge' => null,
+               'badge_type' => null,
+               'permission' => 'system.upload-files.view',
+               'visible' => 1,
+               'status' => 1,
+               'sort' => 7,
+               'cache' => 1,
+               'config' => null,
+               'remark' => null,
+           ]
+       );
+
         AdminMenu::query()->firstOrCreate(
             ['site_id' => $siteId, 'name' => 'system.divider1'],
             [
@@ -874,6 +1178,17 @@ class InstallController extends AbstractController
                 $table->tinyInteger('status')->default(1)->comment('状态：0=禁用，1=启用');
                 $table->string('upload_driver', 20)->nullable()->comment('上传驱动');
                 $table->longText('upload_config')->nullable()->comment('上传配置(JSON)');
+                // S3 配置字段
+                $table->string('s3_key', 255)->nullable()->comment('S3 Access Key ID');
+                $table->string('s3_secret', 255)->nullable()->comment('S3 Secret Access Key');
+                $table->string('s3_bucket', 255)->nullable()->comment('S3 Bucket 名称');
+                $table->string('s3_region', 100)->nullable()->comment('S3 Region 区域');
+                $table->string('s3_endpoint', 255)->nullable()->comment('S3 Endpoint 端点');
+                $table->string('s3_cdn', 255)->nullable()->comment('S3 CDN 域名');
+                $table->tinyInteger('s3_path_style')->default(0)->comment('S3 路径样式：0=关闭，1=开启');
+                // 文件上传格式验证字段
+                $table->text('upload_allowed_mime_types')->nullable()->comment('允许的 MIME 类型（逗号分隔）');
+                $table->text('upload_allowed_extensions')->nullable()->comment('允许的文件扩展名（逗号分隔）');
                 $table->integer('sort')->default(0)->comment('排序');
                 $table->timestamp('created_at')->nullable()->comment('创建时间');
                 $table->timestamp('updated_at')->nullable()->comment('更新时间');

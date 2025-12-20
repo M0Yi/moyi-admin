@@ -78,8 +78,16 @@ class ImageUploadController extends AbstractController
             );
 
             return $this->success($token, '获取上传凭证成功');
+        } catch (\RuntimeException $e) {
+            // 捕获业务异常（如不支持的文件类型），返回友好的错误响应
+            return $this->error($e->getMessage(), null, 400);
         } catch (\Throwable $e) {
-            throw $e;
+            // 记录其他异常到日志
+            logger()->error('[ImageUploadController] 获取上传凭证失败', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+            return $this->error('获取上传凭证失败：' . $e->getMessage(), null, 500);
         }
     }
 
@@ -125,8 +133,15 @@ class ImageUploadController extends AbstractController
                 return $this->error('上传令牌无效或已过期', null, 401);
             }
 
-            // 获取存储驱动（从配置读取）
-            $driver = $this->config->get('upload.driver', 'local');
+            // 从文件记录获取存储驱动（优先从数据库记录获取，确保与实际使用的驱动一致）
+            $file = AdminUploadFile::where('upload_token', $token)->first();
+            $driver = $file?->storage_driver ?? null;
+
+            // 如果文件记录中没有驱动信息，从站点配置或系统配置获取
+            if ($driver === null) {
+                $currentSite = \site();
+                $driver = $currentSite?->getUploadDriver() ?? $this->config->get('upload.driver', 'local');
+            }
 
             // 如果是本地存储，保存文件
             if ($driver === 'local') {
@@ -226,30 +241,58 @@ class ImageUploadController extends AbstractController
             // 按创建时间倒序排列
             $query->orderBy('created_at', 'desc');
 
-            // 分页查询
-            $paginator = $query->paginate($pageSize, ['*'], 'page', $page);
+            // 分页处理：如果 page_size 为 0，返回所有数据
+            if ($pageSize > 0) {
+                $paginator = $query->paginate($pageSize, ['*'], 'page', $page);
+                
+                // 格式化数据
+                $images = [];
+                foreach ($paginator->items() as $file) {
+                    $images[] = [
+                        'id' => $file->id,
+                        'url' => $file->file_url,
+                        'filename' => $file->original_filename,
+                        'size' => $file->file_size,
+                        'size_formatted' => $this->formatFileSize($file->file_size),
+                        'content_type' => $file->content_type,
+                        'created_at' => $file->created_at ? $file->created_at->format('Y-m-d H:i:s') : null,
+                    ];
+                }
 
-            // 格式化数据
-            $images = [];
-            foreach ($paginator->items() as $file) {
-                $images[] = [
-                    'id' => $file->id,
-                    'url' => $file->file_url,
-                    'filename' => $file->original_filename,
-                    'size' => $file->file_size,
-                    'size_formatted' => $this->formatFileSize($file->file_size),
-                    'content_type' => $file->content_type,
-                    'created_at' => $file->created_at ? $file->created_at->format('Y-m-d H:i:s') : null,
-                ];
+                return $this->success([
+                    'data' => $images,
+                    'total' => $paginator->total(),
+                    'page' => $paginator->currentPage(),
+                    'page_size' => $paginator->perPage(),
+                    'last_page' => $paginator->lastPage(),
+                ], '获取图片库成功');
+            } else {
+                // page_size 为 0，返回所有数据
+                $files = $query->get();
+                $total = $files->count();
+                
+                // 格式化数据
+                $images = [];
+                foreach ($files as $file) {
+                    $images[] = [
+                        'id' => $file->id,
+                        'url' => $file->file_url,
+                        'filename' => $file->original_filename,
+                        'size' => $file->file_size,
+                        'size_formatted' => $this->formatFileSize($file->file_size),
+                        'content_type' => $file->content_type,
+                        'created_at' => $file->created_at ? $file->created_at->format('Y-m-d H:i:s') : null,
+                    ];
+                }
+
+                return $this->success([
+                    'data' => $images,
+                    'total' => $total,
+                    'page' => 1,
+                    'page_size' => $total > 0 ? $total : 0,
+                    'last_page' => 1,
+                ], '获取图片库成功');
             }
-
-            return $this->success([
-                'data' => $images,
-                'total' => $paginator->total(),
-                'page' => $paginator->currentPage(),
-                'page_size' => $paginator->perPage(),
-                'last_page' => $paginator->lastPage(),
-            ], '获取图片库成功');
         } catch (\Throwable $e) {
             return $this->error($e->getMessage(), null, 500);
         }

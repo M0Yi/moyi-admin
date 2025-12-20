@@ -99,10 +99,57 @@ class SiteController extends AbstractController
             }
         }
 
-        // 如果有主题配置，保存到 config.theme
+        // 处理上传格式配置：直接保存到独立字段
+        // upload_allowed_mime_types 和 upload_allowed_extensions 字段直接保存，不需要转换
+        // S3 配置的处理将在验证后统一进行（见第 244-290 行）
+
+        // 处理 AI 配置：将 ai_ 前缀的字段转换为 config.ai JSON 结构
+        $aiConfig = [];
+        $aiFields = [
+            'token',
+            'text_model',
+            'image_model',
+            'video_model',
+            'provider',
+        ];
+
+        foreach ($aiFields as $field) {
+            $aiKey = 'ai_' . $field;
+            if (isset($data[$aiKey])) {
+                $value = $data[$aiKey];
+                $aiConfig[$field] = $value;
+                unset($data[$aiKey]); // 移除原始字段
+            }
+        }
+
+        // 根据提供商自动设置 base_url（次要非必填）
+        // 如果没有设置提供商，使用默认值（智谱AI）
+        if (empty($aiConfig['provider'])) {
+            $aiConfig['provider'] = 'zhipu';
+        }
+        
+        // 根据提供商自动设置 base_url（如果用户没有自定义 base_url）
+        $baseUrlMap = [
+            'zhipu' => 'https://open.bigmodel.cn/api/paas/v4',
+        ];
+        
+        // 如果已有 base_url 且不为空，保留原值；否则根据提供商自动设置
+        $existingConfig = $site->config['ai'] ?? [];
+        if (!empty($existingConfig['base_url'])) {
+            $aiConfig['base_url'] = $existingConfig['base_url'];
+        } elseif (isset($baseUrlMap[$aiConfig['provider']])) {
+            $aiConfig['base_url'] = $baseUrlMap[$aiConfig['provider']];
+        }
+
+        // 合并配置到 config JSON 字段
+        $config = $site->config ?? [];
         if (!empty($themeConfig)) {
-            $config = $site->config ?? [];
             $config['theme'] = $themeConfig;
+        }
+        if (!empty($aiConfig)) {
+            $config['ai'] = $aiConfig;
+        }
+        if (!empty($config)) {
             $data['config'] = $config;
         }
 
@@ -125,7 +172,17 @@ class SiteController extends AbstractController
             'resource_cdn' => 'nullable|string|max:255',
             'upload_driver' => 'nullable|string|in:local,s3',
             'upload_config' => 'nullable|array',
+            's3_key' => 'nullable|string|max:255',
+            's3_secret' => 'nullable|string|max:255',
+            's3_bucket' => 'nullable|string|max:255',
+            's3_region' => 'nullable|string|max:100',
+            's3_endpoint' => 'nullable|string|max:255',
+            's3_cdn' => 'nullable|string|max:255',
+            's3_path_style' => 'nullable|integer|in:0,1',
+            'upload_allowed_mime_types' => 'nullable|string',
+            'upload_allowed_extensions' => 'nullable|string',
             'config' => 'nullable|array',
+            'use_custom_upload' => 'nullable|string',
         ];
 
         // 验证数据
@@ -136,24 +193,80 @@ class SiteController extends AbstractController
         }
 
         // 处理上传配置
-        if (isset($data['upload_driver']) && $data['upload_driver'] === 's3') {
-            // 验证 S3 配置
-            if (empty($data['upload_config']['s3']['cdn'])) {
+        // 判断是否使用自定义上传配置：检查 upload_driver 或独立字段
+        $useCustomUpload = isset($data['upload_driver']) && $data['upload_driver'] === 's3';
+        $hasS3Fields = !empty($data['s3_key']) || !empty($data['s3_bucket']) || !empty($data['s3_cdn']);
+        
+        if ($useCustomUpload || $hasS3Fields) {
+            // 使用自定义上传配置，验证必填字段
+            $s3Cdn = $data['s3_cdn'] ?? $data['upload_config']['s3']['cdn'] ?? '';
+            if (empty($s3Cdn)) {
                 throw new BusinessException(400, '使用 S3 上传时，CDN 域名是必填项');
             }
-
-            // 如果 Secret 为空，保留原有值
-            if (empty($data['upload_config']['s3']['secret']) && isset($data['existing_s3_secret'])) {
-                $data['upload_config']['s3']['secret'] = $data['existing_s3_secret'];
+            
+            // 确保 upload_driver 设置为 s3
+            $data['upload_driver'] = 's3';
+            
+            // 处理独立字段：如果为空，尝试从 upload_config 读取（向后兼容）
+            if (empty($data['s3_key']) && !empty($data['upload_config']['s3']['key'])) {
+                $data['s3_key'] = $data['upload_config']['s3']['key'];
             }
+            if (empty($data['s3_secret']) && !empty($data['upload_config']['s3']['secret'])) {
+                $data['s3_secret'] = $data['upload_config']['s3']['secret'];
+            }
+            if (empty($data['s3_bucket']) && !empty($data['upload_config']['s3']['bucket'])) {
+                $data['s3_bucket'] = $data['upload_config']['s3']['bucket'];
+            }
+            if (empty($data['s3_region']) && !empty($data['upload_config']['s3']['region'])) {
+                $data['s3_region'] = $data['upload_config']['s3']['region'];
+            }
+            if (empty($data['s3_endpoint']) && !empty($data['upload_config']['s3']['endpoint'])) {
+                $data['s3_endpoint'] = $data['upload_config']['s3']['endpoint'];
+            }
+            if (empty($data['s3_cdn']) && !empty($data['upload_config']['s3']['cdn'])) {
+                $data['s3_cdn'] = $data['upload_config']['s3']['cdn'];
+            }
+            if (!isset($data['s3_path_style']) || $data['s3_path_style'] === '') {
+                if (isset($data['upload_config']['s3']['use_path_style_endpoint'])) {
+                    $data['s3_path_style'] = $data['upload_config']['s3']['use_path_style_endpoint'] ? 1 : 0;
+                } else {
+                    $data['s3_path_style'] = 0;
+                }
+            }
+            
+            // 构建 upload_config（向后兼容）
+            $s3Config = [
+                'key' => $data['s3_key'] ?? '',
+                'secret' => $data['s3_secret'] ?? '',
+                'bucket' => $data['s3_bucket'] ?? '',
+                'bucket_name' => $data['s3_bucket'] ?? '',
+                'region' => $data['s3_region'] ?? '',
+                'endpoint' => $data['s3_endpoint'] ?? null,
+                'cdn' => $data['s3_cdn'] ?? '',
+                'use_path_style_endpoint' => (bool)($data['s3_path_style'] ?? 0),
+                'credentials' => [
+                    'key' => $data['s3_key'] ?? '',
+                    'secret' => $data['s3_secret'] ?? '',
+                ]
+            ];
+            $uploadConfig = $site->upload_config ?? [];
+            $uploadConfig['s3'] = $s3Config;
+            $data['upload_config'] = $uploadConfig;
         } else {
-            // 不使用自定义上传配置
+            // 不使用自定义上传配置，清空所有上传相关字段
             $data['upload_driver'] = null;
             $data['upload_config'] = null;
+            $data['s3_key'] = null;
+            $data['s3_secret'] = null;
+            $data['s3_bucket'] = null;
+            $data['s3_region'] = null;
+            $data['s3_endpoint'] = null;
+            $data['s3_cdn'] = null;
+            $data['s3_path_style'] = 0;
         }
 
         // 移除不需要的字段
-        unset($data['existing_s3_secret']);
+        unset($data['existing_ai_token']);
 
         // 更新站点
         $site->fill($data);

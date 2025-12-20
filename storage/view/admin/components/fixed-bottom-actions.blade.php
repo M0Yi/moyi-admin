@@ -366,6 +366,16 @@
                                 if (detail.data) {
                                     payload.data = detail.data;
                                     console.log('[FixedBottomActions] 添加 data:', detail.data);
+                                    
+                                    // 如果响应数据中包含 refresh_parent 或 close_current，使用它们
+                                    if (detail.data.refresh_parent !== undefined) {
+                                        payload.refreshParent = detail.data.refresh_parent === true || detail.data.refresh_parent === 1 || detail.data.refresh_parent === 'true';
+                                        console.log('[FixedBottomActions] 从响应数据中提取 refresh_parent:', payload.refreshParent);
+                                    }
+                                    if (detail.data.close_current !== undefined) {
+                                        payload.closeCurrent = detail.data.close_current === true || detail.data.close_current === 1 || detail.data.close_current === 'true';
+                                        console.log('[FixedBottomActions] 从响应数据中提取 close_current:', payload.closeCurrent);
+                                    }
                                 }
                                 
                                 console.log('[FixedBottomActions] 最终 payload:', payload);

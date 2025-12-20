@@ -194,6 +194,27 @@
                                 </div>
                             </div>
                         </div>
+
+                        <!-- AI 配置分组（可折叠，默认折叠） -->
+                        <div class="mb-4" data-form-group="AI 配置">
+                            <div class="d-flex align-items-center justify-content-between mb-3">
+                                <h6 class="mb-0 fw-bold text-primary">
+                                    <i class="bi bi-robot me-2"></i>
+                                    AI 配置
+                                </h6>
+                                <button 
+                                    type="button" 
+                                    class="btn btn-sm btn-link p-0 text-decoration-none"
+                                    data-ai-config-toggle
+                                    aria-expanded="false"
+                                >
+                                    <i class="bi bi-chevron-down"></i>
+                                </button>
+                            </div>
+                            <div class="ai-config-content" data-ai-config-content style="display: none;">
+                                <div class="row" id="siteFormFields-ai"></div>
+                            </div>
+                        </div>
                     </form>
                 </div>
             </div>
@@ -266,6 +287,7 @@ document.addEventListener('DOMContentLoaded', function () {
             '联系信息': document.getElementById('siteFormFields-contact'),
             '自定义代码': document.getElementById('siteFormFields-custom'),
             '上传配置': document.getElementById('siteFormFields-upload'),
+            'AI 配置': document.getElementById('siteFormFields-ai'),
         };
         
         // 按分组移动字段
@@ -313,6 +335,21 @@ document.addEventListener('DOMContentLoaded', function () {
             });
         }
         
+        // 初始化 AI 配置分组折叠功能
+        const aiConfigToggle = document.querySelector('[data-ai-config-toggle]');
+        const aiConfigContent = document.querySelector('[data-ai-config-content]');
+        if (aiConfigToggle && aiConfigContent) {
+            aiConfigToggle.addEventListener('click', function() {
+                const isExpanded = aiConfigContent.style.display !== 'none';
+                aiConfigContent.style.display = isExpanded ? 'none' : 'block';
+                aiConfigToggle.setAttribute('aria-expanded', !isExpanded);
+                const icon = aiConfigToggle.querySelector('i');
+                if (icon) {
+                    icon.className = isExpanded ? 'bi bi-chevron-down' : 'bi bi-chevron-up';
+                }
+            });
+        }
+
         // 初始化站点表单特殊逻辑
         if (window.SiteForm && window.SiteForm.init) {
             window.SiteForm.init();

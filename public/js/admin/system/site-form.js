@@ -75,7 +75,7 @@
 
         // 监听 Region 字段变化，自动更新 Endpoint
         const s3RegionInput = document.querySelector('[name="s3_region"]');
-        const s3EndpointInput = document.querySelector('[name="s3_endpoint"]');
+        // s3EndpointInput 已在上面声明，直接使用
         
         if (s3RegionInput && s3EndpointInput) {
             s3RegionInput.addEventListener('input', function() {
@@ -337,46 +337,51 @@
                 throw new Error('请填写 CDN 域名，这是必填项，用于访问图片');
             }
 
-            // 如果 Secret 为空，则从现有配置中获取（不更新密码）
-            let finalSecret = s3Secret;
-            if (!finalSecret) {
-                const existingSecretInput = document.querySelector('[name="existing_s3_secret"]');
-                if (existingSecretInput) {
-                    finalSecret = existingSecretInput.value;
-                }
-            }
-
-            // 构建 upload_config
+            // 设置独立字段（优先使用独立字段）
+            jsonData['s3_key'] = s3Key;
+            jsonData['s3_secret'] = s3Secret;
+            jsonData['s3_bucket'] = s3Bucket;
+            jsonData['s3_region'] = s3Region;
+            jsonData['s3_endpoint'] = s3Endpoint || null;
+            jsonData['s3_cdn'] = s3Cdn;
+            jsonData['s3_path_style'] = s3PathStyle ? 1 : 0;
+            
+            // 设置 upload_driver
+            jsonData['upload_driver'] = 's3';
+            
+            // 构建 upload_config（向后兼容）
             const uploadConfig = {
                 s3: {
                     key: s3Key,
-                    secret: finalSecret,
+                    secret: s3Secret,
                     bucket: s3Bucket,
+                    bucket_name: s3Bucket,
                     region: s3Region,
                     endpoint: s3Endpoint || null,
                     cdn: s3Cdn,
                     use_path_style_endpoint: s3PathStyle,
+                    credentials: {
+                        key: s3Key,
+                        secret: s3Secret,
+                    }
                 }
             };
-
-            jsonData['upload_driver'] = 's3';
             jsonData['upload_config'] = uploadConfig;
         } else {
-            // 不使用自定义配置，设为 null（使用系统默认）
+            // 不使用自定义配置，清空所有上传相关字段
             jsonData['upload_driver'] = null;
             jsonData['upload_config'] = null;
+            jsonData['s3_key'] = null;
+            jsonData['s3_secret'] = null;
+            jsonData['s3_bucket'] = null;
+            jsonData['s3_region'] = null;
+            jsonData['s3_endpoint'] = null;
+            jsonData['s3_cdn'] = null;
+            jsonData['s3_path_style'] = 0;
         }
 
         // 移除临时字段（不在表单中提交）
-        delete jsonData['s3_key'];
-        delete jsonData['s3_secret'];
-        delete jsonData['s3_bucket'];
-        delete jsonData['s3_region'];
-        delete jsonData['s3_endpoint'];
-        delete jsonData['s3_cdn'];
-        delete jsonData['existing_s3_secret'];
         delete jsonData['use_custom_upload'];
-        delete jsonData['s3_path_style'];
 
         return jsonData;
     }

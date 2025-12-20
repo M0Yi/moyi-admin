@@ -6,7 +6,9 @@ namespace App\Model\Admin;
 
 use App\Model\Model;
 use Carbon\Carbon;
+use Hyperf\Contract\ConfigInterface;
 use Hyperf\Database\Model\SoftDeletes;
+use Hyperf\Context\ApplicationContext;
 
 /**
  * 站点模型
@@ -29,9 +31,18 @@ use Hyperf\Database\Model\SoftDeletes;
  * @property string|null $custom_css 自定义CSS
  * @property string|null $custom_js 自定义JavaScript
  * @property string|null $resource_cdn 资源CDN地址
- * @property array|null $config 扩展配置(JSON)
+ * @property array|null $config 扩展配置(JSON)，包含 theme（主题配置）和 ai（AI配置）
  * @property string|null $upload_driver 上传驱动类型（local/s3），null则使用系统默认
  * @property array|null $upload_config 上传配置JSON，包含S3密钥、本地存储路径等配置
+ * @property string|null $s3_key S3 Access Key ID
+ * @property string|null $s3_secret S3 Secret Access Key
+ * @property string|null $s3_bucket S3 Bucket 名称
+ * @property string|null $s3_region S3 Region 区域
+ * @property string|null $s3_endpoint S3 Endpoint 端点
+ * @property string|null $s3_cdn S3 CDN 域名
+ * @property int $s3_path_style S3 路径样式：0=关闭，1=开启
+ * @property string|null $upload_allowed_mime_types 允许的 MIME 类型（逗号分隔）
+ * @property string|null $upload_allowed_extensions 允许的文件扩展名（逗号分隔）
  * @property int|null $default_brand_id 默认品牌ID
  * @property int|null $default_wechat_provider_id 默认微信服务商ID
  * @property int $status 状态：0=禁用，1=启用
@@ -88,6 +99,15 @@ class AdminSite extends Model
         'config',
         'upload_driver',
         'upload_config',
+        's3_key',
+        's3_secret',
+        's3_bucket',
+        's3_region',
+        's3_endpoint',
+        's3_cdn',
+        's3_path_style',
+        'upload_allowed_mime_types',
+        'upload_allowed_extensions',
         'default_brand_id',
         'default_wechat_provider_id',
         'status',
@@ -106,6 +126,7 @@ class AdminSite extends Model
         'id' => 'integer',
         'config' => 'array',
         'upload_config' => 'array',
+        's3_path_style' => 'integer',
         'default_brand_id' => 'integer',
         'default_wechat_provider_id' => 'integer',
         'status' => 'integer',
@@ -287,17 +308,32 @@ class AdminSite extends Model
 
     /**
      * 获取S3配置
-     * 如果站点未配置S3配置，返回null（使用系统默认配置）
+     * 优先从独立字段读取，如果未配置则从 upload_config JSON 读取（向后兼容）
      *
      * @return array|null
      */
     public function getS3Config(): ?array
     {
-        if (!$this->upload_config || !isset($this->upload_config['s3'])) {
-            return null;
+        // 优先从独立字段读取
+        if (!empty($this->s3_key) || !empty($this->s3_bucket)) {
+            return [
+                'key' => $this->s3_key,
+                'secret' => $this->s3_secret,
+                'bucket' => $this->s3_bucket,
+                'bucket_name' => $this->s3_bucket, // 兼容旧字段名
+                'region' => $this->s3_region,
+                'endpoint' => $this->s3_endpoint,
+                'cdn' => $this->s3_cdn,
+                'use_path_style_endpoint' => (bool) $this->s3_path_style,
+            ];
         }
 
-        return $this->upload_config['s3'];
+        // 向后兼容：从 upload_config JSON 读取
+        if ($this->upload_config && isset($this->upload_config['s3'])) {
+            return $this->upload_config['s3'];
+        }
+
+        return null;
     }
 
     /**
@@ -323,6 +359,58 @@ class AdminSite extends Model
     public function hasUploadConfig(): bool
     {
         return $this->upload_driver !== null || $this->upload_config !== null;
+    }
+
+    /**
+     * 获取上传格式配置
+     * 上传格式配置存储在 config JSON 字段的 upload_formats 键中
+     *
+     * @return array
+     */
+    public function getUploadFormatsConfig(): array
+    {
+        $config = $this->config ?? [];
+        return $config['upload_formats'] ?? [];
+    }
+
+    /**
+     * 获取允许的 MIME 类型列表
+     *
+     * @return array 如果为空数组，表示允许所有类型
+     */
+    public function getAllowedMimeTypes(): array
+    {
+        $formats = $this->getUploadFormatsConfig();
+        if (empty($formats['mime_types'])) {
+            return [];
+        }
+        
+        // 将逗号分隔的字符串转换为数组
+        if (is_string($formats['mime_types'])) {
+            return array_filter(array_map('trim', explode(',', $formats['mime_types'])));
+        }
+        
+        return $formats['mime_types'] ?? [];
+    }
+
+    /**
+     * 获取允许的文件扩展名列表
+     *
+     * @return array 如果为空数组，表示允许所有扩展名
+     */
+    public function getAllowedExtensions(): array
+    {
+        $formats = $this->getUploadFormatsConfig();
+        if (empty($formats['extensions'])) {
+            return [];
+        }
+        
+        // 将逗号分隔的字符串转换为数组
+        if (is_string($formats['extensions'])) {
+            return array_filter(array_map('trim', explode(',', $formats['extensions'])));
+        }
+        
+        return $formats['extensions'] ?? [];
     }
 
     /**
@@ -378,6 +466,76 @@ class AdminSite extends Model
     {
         $config = $this->config ?? [];
         $config['theme'] = $themeConfig;
+        $this->config = $config;
+    }
+
+    /**
+     * 获取 AI 配置
+     * AI 配置存储在 config JSON 字段的 ai 键中
+     * 如果站点没有配置，则使用环境变量中的默认配置
+     *
+     * @return array
+     */
+    public function getAiConfig(): array
+    {
+        $config = $this->config ?? [];
+        $ai = $config['ai'] ?? [];
+
+        // 检查站点是否有 AI 配置（至少有一个非空值）
+        $hasSiteConfig = !empty(array_filter($ai, fn($value) => !empty($value)));
+
+        // 如果站点没有配置，从环境变量读取默认配置
+        if (!$hasSiteConfig) {
+            try {
+                $container = ApplicationContext::getContainer();
+                $config = $container->get(ConfigInterface::class);
+                $envConfig = $config->get('site.ai', []);
+                if (!empty($envConfig)) {
+                    // 合并环境变量配置和站点配置（站点配置优先）
+                    return array_merge($envConfig, $ai);
+                }
+            } catch (\Throwable $e) {
+                // 如果获取配置失败，继续使用默认值
+            }
+        }
+
+        // 默认 AI 配置（作为最后的兜底）
+        $defaults = [
+            'token' => '',
+            'base_url' => 'https://open.bigmodel.cn/api/paas/v4', // 智谱AI 默认接口路径（次要非必填）
+            'text_model' => 'glm-z1-flash', // 智谱AI 免费文本模型
+            'image_model' => 'cogview-3-flash', // 智谱AI 图像生成模型
+            'video_model' => 'cogvideox-flash', // 智谱AI 视频生成模型
+            'provider' => 'zhipu', // 默认使用智谱AI
+        ];
+
+        // 合并用户配置和默认值
+        return array_merge($defaults, $ai);
+    }
+
+    /**
+     * 获取 AI 配置项的值
+     *
+     * @param string $key 配置键名
+     * @param string|null $default 默认值
+     * @return string
+     */
+    public function getAiConfigValue(string $key, ?string $default = null): string
+    {
+        $ai = $this->getAiConfig();
+        return $ai[$key] ?? $default ?? '';
+    }
+
+    /**
+     * 设置 AI 配置
+     *
+     * @param array $aiConfig AI 配置数组
+     * @return void
+     */
+    public function setAiConfig(array $aiConfig): void
+    {
+        $config = $this->config ?? [];
+        $config['ai'] = $aiConfig;
         $this->config = $config;
     }
 }

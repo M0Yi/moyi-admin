@@ -60,6 +60,12 @@
             --box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
             --transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         }
+
+        /* AI 流式输出光标动画 */
+        @keyframes blink {
+            0%, 50% { opacity: 1; }
+            51%, 100% { opacity: 0; }
+        }
     </style>
 
     @include('components.admin-style')
@@ -118,6 +124,12 @@
 // 全局配置：后台入口路径及站点信息
 window.ADMIN_ENTRY_PATH = '{{ admin_entry_path() }}';
 window.ADMIN_SITE_TITLE = @json(site()?->name ?? '管理后台');
+
+// AI 配置：从站点配置或环境变量获取
+@php
+    $aiConfig = site()?->getAiConfig() ?? [];
+@endphp
+window.AI_CONFIG = @json($aiConfig);
 
 </script>
 @if ($isEmbedded)
@@ -188,6 +200,12 @@ window.ADMIN_SITE_TITLE = @json(site()?->name ?? '管理后台');
 </script>
 @endif
     @include('components.admin-js')
+    {{-- AI 配置工厂类（必须在 AI 服务类之前加载） --}}
+    @include('components.admin-script', ['path' => '/js/components/ai-config-factory.js'])
+    {{-- AI 服务类 --}}
+    @include('components.admin-script', ['path' => '/js/components/ai-service.js'])
+    {{-- AI 输入增强组件 --}}
+    @include('components.admin-script', ['path' => '/js/components/ai-input-enhancer.js'])
     {{-- 外部 JavaScript 资源（按需引入） --}}
     @include('components.plugin.bootstrap-js')
     @include('components.plugin.tom-select-js')

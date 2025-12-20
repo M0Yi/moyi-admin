@@ -13,10 +13,10 @@ use Hyperf\Di\Annotation\Inject;
 use Hyperf\HttpServer\Contract\RequestInterface;
 
 /**
- * 图片上传服务
- * 提供统一的图片上传接口，支持本地存储和S3存储
+ * 文件上传服务
+ * 提供统一的文件上传接口，支持所有文件类型，支持本地存储和S3存储
  */
-class ImageUploadService
+class FileUploadService
 {
     #[Inject]
     protected StorageEngineFactory $storageFactory;
@@ -30,7 +30,7 @@ class ImageUploadService
      * @param string $filename 原始文件名
      * @param string $contentType 文件MIME类型
      * @param int $fileSize 文件大小（字节）
-     * @param string $subPath 子路径（可选，如 'images', 'avatars'）
+     * @param string $subPath 子路径（可选，如 'files', 'documents'）
      * @param string|null $driver 存储驱动（null时使用默认配置）
      * @param RequestInterface|null $request 请求对象（可选，用于获取用户信息和IP）
      * @return array 上传凭证信息
@@ -39,14 +39,36 @@ class ImageUploadService
         string $filename,
         string $contentType,
         int $fileSize,
-        string $subPath = 'images',
+        string $subPath = 'files',
         ?string $driver = null,
         ?RequestInterface $request = null
     ): array {
-        // 验证文件类型（必须是图片）
-        $allowedImageTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/jpg'];
-        if (!in_array(strtolower($contentType), $allowedImageTypes)) {
-            throw new \RuntimeException("不支持的文件类型：{$contentType}");
+        // 验证文件大小（默认最大50MB）
+        $maxSize = $this->config->get('upload.max_size', 50 * 1024 * 1024);
+        if ($fileSize > $maxSize) {
+            throw new \RuntimeException("文件大小超过限制：" . $this->formatFileSize($maxSize));
+        }
+
+        // 获取允许的文件类型（优先从站点配置读取，其次从系统配置读取）
+        $allowedTypes = $this->getAllowedMimeTypes();
+        $allowedExtensions = $this->getAllowedExtensions();
+        
+        // 验证 MIME 类型
+        if (!empty($allowedTypes)) {
+            $contentTypeLower = strtolower($contentType);
+            $allowedTypesLower = array_map('strtolower', $allowedTypes);
+            if (!in_array($contentTypeLower, $allowedTypesLower)) {
+                throw new \RuntimeException("不支持的文件类型：{$contentType}");
+            }
+        }
+        
+        // 验证文件扩展名
+        if (!empty($allowedExtensions)) {
+            $extension = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
+            $allowedExtensionsLower = array_map('strtolower', $allowedExtensions);
+            if (!in_array($extension, $allowedExtensionsLower)) {
+                throw new \RuntimeException("不支持的文件扩展名：{$extension}");
+            }
         }
 
         // 获取存储引擎（如果 driver 为 null，会从站点配置或系统配置自动获取）
@@ -173,7 +195,7 @@ class ImageUploadService
             $file->file_url = $fileUrl;
             $file->markAsUploaded();
         }
-        if($file instanceof  AdminUploadFile){
+        if($file instanceof AdminUploadFile){
             return $file;
         }
         return null;
@@ -231,6 +253,62 @@ class ImageUploadService
         $randomString = bin2hex(random_bytes(8));
         $timestamp = time();
         return "{$timestamp}_{$randomString}.{$extension}";
+    }
+
+    /**
+     * 格式化文件大小
+     */
+    private function formatFileSize(int $bytes): string
+    {
+        $units = ['B', 'KB', 'MB', 'GB', 'TB'];
+        $bytes = max($bytes, 0);
+        $pow = floor(($bytes ? log($bytes) : 0) / log(1024));
+        $pow = min($pow, count($units) - 1);
+        $bytes /= (1 << (10 * $pow));
+        
+        return round($bytes, 2) . ' ' . $units[$pow];
+    }
+
+    /**
+     * 获取允许的 MIME 类型列表
+     * 优先从站点配置读取，其次从系统配置读取
+     *
+     * @return array 如果为空数组，表示允许所有类型
+     */
+    private function getAllowedMimeTypes(): array
+    {
+        // 优先从站点配置读取
+        $site = site();
+        if ($site) {
+            $siteMimeTypes = $site->getAllowedMimeTypes();
+            if (!empty($siteMimeTypes)) {
+                return $siteMimeTypes;
+            }
+        }
+
+        // 从系统配置读取
+        return $this->config->get('upload.allowed_types', []);
+    }
+
+    /**
+     * 获取允许的文件扩展名列表
+     * 优先从站点配置读取，其次从系统配置读取
+     *
+     * @return array 如果为空数组，表示允许所有扩展名
+     */
+    private function getAllowedExtensions(): array
+    {
+        // 优先从站点配置读取
+        $site = site();
+        if ($site) {
+            $siteExtensions = $site->getAllowedExtensions();
+            if (!empty($siteExtensions)) {
+                return $siteExtensions;
+            }
+        }
+
+        // 从系统配置读取（如果配置了扩展名）
+        return $this->config->get('upload.allowed_extensions', []);
     }
 }
 

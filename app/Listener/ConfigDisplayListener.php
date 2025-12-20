@@ -46,7 +46,7 @@ class ConfigDisplayListener implements ListenerInterface
         $this->logger->info('');
 
         // 应用信息
-        $this->displayAppInfo();
+//        $this->displayAppInfo();
 
         // 服务器配置
         $this->displayServerConfig();

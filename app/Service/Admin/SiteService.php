@@ -356,11 +356,11 @@ class SiteService
             [
                 'name' => 's3_secret',
                 'label' => 'Secret Access Key',
-                'type' => 'password',
+                'type' => 'text',
                 'required' => false,
                 'placeholder' => '请输入 Secret Access Key',
-                'help' => '与 Access Key ID 对应的密钥（留空则保留原值）',
-                'default' => '',
+                'help' => '与 Access Key ID 对应的密钥',
+                'default' => $s3Config['secret'] ?? $s3Config['credentials']['secret'] ?? '',
                 'col' => 'col-12 col-md-6',
                 'group' => '上传配置',
                 'conditional' => 'use_custom_upload',
@@ -426,20 +426,97 @@ class SiteService
                 'conditional' => 'use_custom_upload',
                 'help' => 'AWS：通常关闭；阿里云 OSS：建议开启；R2：建议开启；腾讯云 COS：建议开启；MinIO：必须开启',
             ],
-        ];
-
-        // 保存原始 Secret 值（用于当用户清空字段时保留原值）
-        if (isset($s3Config['secret']) || isset($s3Config['credentials']['secret'])) {
-            $fields[] = [
-                'name' => 'existing_s3_secret',
-                'label' => '',
-                'type' => 'hidden',
+            
+            // 文件上传格式配置
+            [
+                'name' => 'upload_allowed_mime_types',
+                'label' => '允许的 MIME 类型',
+                'type' => 'textarea',
                 'required' => false,
-                'default' => $s3Config['secret'] ?? $s3Config['credentials']['secret'] ?? '',
+                'placeholder' => '例如：image/jpeg,image/png,video/mp4,application/pdf',
+                'help' => '允许上传的文件 MIME 类型，多个用逗号分隔。留空则允许所有类型。',
+                'rows' => 4,
+                'default' => $site?->upload_allowed_mime_types ?? $this->getDefaultAllowedMimeTypes($site),
                 'col' => 'col-12',
                 'group' => '上传配置',
-            ];
-        }
+            ],
+            [
+                'name' => 'upload_allowed_extensions',
+                'label' => '允许的文件扩展名',
+                'type' => 'textarea',
+                'required' => false,
+                'placeholder' => '例如：jpg,jpeg,png,gif,mp4,pdf,doc,docx',
+                'help' => '允许上传的文件扩展名（不含点号），多个用逗号分隔。留空则允许所有扩展名。',
+                'rows' => 3,
+                'default' => $site?->upload_allowed_extensions ?? $this->getDefaultAllowedExtensions($site),
+                'col' => 'col-12',
+                'group' => '上传配置',
+            ],
+        ];
+
+
+        // AI 配置分组（放在最下面，可折叠且默认折叠）
+        $aiConfig = $site?->getAiConfig() ?? [];
+        $hasAiConfig = !empty(array_filter($aiConfig, fn($value) => !empty($value)));
+        
+        $fields[] = [
+            'name' => 'ai_token',
+            'label' => 'Token',
+            'type' => 'text',
+            'required' => false,
+            'placeholder' => '请输入 AI API Token',
+            'help' => 'AI 服务提供商的 API Token',
+            'default' => $site?->getAiConfigValue('token', ''),
+            'col' => 'col-12 col-md-6',
+            'group' => 'AI 配置',
+        ];
+        $fields[] = [
+            'name' => 'ai_provider',
+            'label' => '模型提供商',
+            'type' => 'select',
+            'required' => true,
+            'placeholder' => '请选择模型提供商',
+            'help' => '选择使用的 AI 模型提供商',
+            'options' => [
+                ['value' => 'zhipu', 'label' => '智谱AI'],
+            ],
+            'default' => $site?->getAiConfigValue('provider', 'zhipu'),
+            'col' => 'col-12 col-md-6',
+            'group' => 'AI 配置',
+        ];
+        $fields[] = [
+            'name' => 'ai_text_model',
+            'label' => '文本模型',
+            'type' => 'text',
+            'required' => false,
+            'placeholder' => '例如：glm-z1-flash, glm-4-flash',
+            'help' => '用于文本生成的模型名称',
+            'default' => $site?->getAiConfigValue('text_model', 'glm-z1-flash'),
+            'col' => 'col-12 col-md-6',
+            'group' => 'AI 配置',
+        ];
+        $fields[] = [
+            'name' => 'ai_image_model',
+            'label' => '图像模型',
+            'type' => 'text',
+            'required' => false,
+            'placeholder' => '例如：cogview-3-flash',
+            'help' => '用于图像生成的模型名称',
+            'default' => $site?->getAiConfigValue('image_model', 'cogview-3-flash'),
+            'col' => 'col-12 col-md-6',
+            'group' => 'AI 配置',
+        ];
+        $fields[] = [
+            'name' => 'ai_video_model',
+            'label' => '视频模型',
+            'type' => 'text',
+            'required' => false,
+            'placeholder' => '例如：cogvideox-flash',
+            'help' => '用于视频生成的模型名称',
+            'default' => $site?->getAiConfigValue('video_model', 'cogvideox-flash'),
+            'col' => 'col-12 col-md-6',
+            'group' => 'AI 配置',
+        ];
 
         return $fields;
     }
@@ -483,6 +560,121 @@ class SiteService
                 'is_current' => $currentSiteId !== null && $id === $currentSiteId,
             ];
         })->toArray();
+    }
+
+    /**
+     * 获取默认允许的 MIME 类型
+     */
+    private function getDefaultAllowedMimeTypes(?AdminSite $site): string
+    {
+        $uploadFormats = $site?->getUploadFormatsConfig() ?? [];
+        if (!empty($uploadFormats['mime_types'])) {
+            if (is_array($uploadFormats['mime_types'])) {
+                return implode(',', $uploadFormats['mime_types']);
+            }
+            return $uploadFormats['mime_types'];
+        }
+        
+        // 返回默认的常用格式
+        return implode(',', $this->getDefaultMimeTypes());
+    }
+
+    /**
+     * 获取默认允许的文件扩展名
+     */
+    private function getDefaultAllowedExtensions(?AdminSite $site): string
+    {
+        $uploadFormats = $site?->getUploadFormatsConfig() ?? [];
+        if (!empty($uploadFormats['extensions'])) {
+            if (is_array($uploadFormats['extensions'])) {
+                return implode(',', $uploadFormats['extensions']);
+            }
+            return $uploadFormats['extensions'];
+        }
+        
+        // 返回默认的常用扩展名
+        return implode(',', $this->getDefaultExtensions());
+    }
+
+    /**
+     * 获取默认的 MIME 类型列表
+     */
+    private function getDefaultMimeTypes(): array
+    {
+        return [
+            // 图片格式
+            'image/jpeg',
+            'image/jpg',
+            'image/png',
+            'image/gif',
+            'image/webp',
+            'image/bmp',
+            'image/svg+xml',
+            // 视频格式
+            'video/mp4',
+            'video/mpeg',
+            'video/quicktime',
+            'video/x-msvideo',
+            'video/x-ms-wmv',
+            'video/webm',
+            'video/x-flv',
+            // 音频格式
+            'audio/mpeg',
+            'audio/mp3',
+            'audio/wav',
+            'audio/x-wav',
+            'audio/ogg',
+            'audio/webm',
+            // 办公文档
+            'application/pdf',
+            'application/msword',
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // .docx
+            'application/vnd.ms-excel',
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', // .xlsx
+            'application/vnd.ms-powerpoint',
+            'application/vnd.openxmlformats-officedocument.presentationml.presentation', // .pptx
+            'application/vnd.oasis.opendocument.text', // .odt
+            'application/vnd.oasis.opendocument.spreadsheet', // .ods
+            'application/vnd.oasis.opendocument.presentation', // .odp
+            // 文本格式
+            'text/plain',
+            'text/csv',
+            'text/html',
+            'text/css',
+            'text/javascript',
+            'application/json',
+            'application/xml',
+            'text/xml',
+            // 压缩文件
+            'application/zip',
+            'application/x-zip-compressed',
+            'application/x-rar-compressed',
+            'application/x-7z-compressed',
+            'application/x-tar',
+            'application/gzip',
+        ];
+    }
+
+    /**
+     * 获取默认的文件扩展名列表
+     */
+    private function getDefaultExtensions(): array
+    {
+        return [
+            // 图片
+            'jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg',
+            // 视频
+            'mp4', 'mpeg', 'mpg', 'mov', 'avi', 'wmv', 'webm', 'flv',
+            // 音频
+            'mp3', 'wav', 'ogg', 'm4a', 'aac',
+            // 办公文档
+            'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx',
+            'odt', 'ods', 'odp',
+            // 文本
+            'txt', 'csv', 'html', 'css', 'js', 'json', 'xml',
+            // 压缩文件
+            'zip', 'rar', '7z', 'tar', 'gz',
+        ];
     }
 }
 

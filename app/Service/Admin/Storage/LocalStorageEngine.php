@@ -12,6 +12,7 @@ use Psr\SimpleCache\CacheInterface;
 use function Hyperf\Support\make;
 use function admin_route;
 use function site_id;
+use function site;
 
 /**
  * 本地存储引擎实现
@@ -44,10 +45,26 @@ class LocalStorageEngine implements StorageEngineInterface
             throw new \RuntimeException("文件大小超过限制：{$maxSize} 字节");
         }
 
-        // 验证文件类型
-        $allowedTypes = $this->config->get('upload.allowed_types', ['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
-        if (!in_array($contentType, $allowedTypes)) {
-            throw new \RuntimeException("不支持的文件类型：{$contentType}");
+        // 验证文件类型（优先从站点配置读取）
+        $allowedTypes = $this->getAllowedMimeTypes();
+        $allowedExtensions = $this->getAllowedExtensions();
+        
+        // 验证 MIME 类型
+        if (!empty($allowedTypes)) {
+            $contentTypeLower = strtolower($contentType);
+            $allowedTypesLower = array_map('strtolower', $allowedTypes);
+            if (!in_array($contentTypeLower, $allowedTypesLower)) {
+                throw new \RuntimeException("不支持的文件类型：{$contentType}");
+            }
+        }
+        
+        // 验证文件扩展名
+        if (!empty($allowedExtensions)) {
+            $extension = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
+            $allowedExtensionsLower = array_map('strtolower', $allowedExtensions);
+            if (!in_array($extension, $allowedExtensionsLower)) {
+                throw new \RuntimeException("不支持的文件扩展名：{$extension}");
+            }
         }
 
         // 获取站点信息
@@ -375,6 +392,48 @@ class LocalStorageEngine implements StorageEngineInterface
 
         $sanitized = trim($sanitized, '_');
         return $sanitized;
+    }
+
+    /**
+     * 获取允许的 MIME 类型列表
+     * 优先从站点配置读取，其次从系统配置读取
+     *
+     * @return array 如果为空数组，表示允许所有类型
+     */
+    private function getAllowedMimeTypes(): array
+    {
+        // 优先从站点配置读取
+        $site = site();
+        if ($site) {
+            $siteMimeTypes = $site->getAllowedMimeTypes();
+            if (!empty($siteMimeTypes)) {
+                return $siteMimeTypes;
+            }
+        }
+
+        // 从系统配置读取
+        return $this->config->get('upload.allowed_types', []);
+    }
+
+    /**
+     * 获取允许的文件扩展名列表
+     * 优先从站点配置读取，其次从系统配置读取
+     *
+     * @return array 如果为空数组，表示允许所有扩展名
+     */
+    private function getAllowedExtensions(): array
+    {
+        // 优先从站点配置读取
+        $site = site();
+        if ($site) {
+            $siteExtensions = $site->getAllowedExtensions();
+            if (!empty($siteExtensions)) {
+                return $siteExtensions;
+            }
+        }
+
+        // 从系统配置读取（如果配置了扩展名）
+        return $this->config->get('upload.allowed_extensions', []);
     }
 }
 

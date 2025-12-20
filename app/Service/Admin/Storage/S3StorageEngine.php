@@ -43,17 +43,30 @@ class S3StorageEngine implements StorageEngineInterface
         // 优先从站点配置读取S3配置
         $s3Config = $this->getS3ConfigFromSiteOrSystem();
 
-        $this->s3Client = new S3Client([
+        // 构建 S3Client 配置
+        $clientConfig = [
             'version' => $s3Config['version'] ?? 'latest',
             'region' => $s3Config['region'] ?? 'us-east-1',
             'credentials' => [
                 'key' => $s3Config['credentials']['key'] ?? '',
                 'secret' => $s3Config['credentials']['secret'] ?? '',
             ],
-            'endpoint' => $s3Config['endpoint'] ?? null,
-            'use_path_style_endpoint' => $s3Config['use_path_style_endpoint'] ?? false,
-            'bucket_endpoint' => $s3Config['bucket_endpoint'] ?? false,
-        ]);
+        ];
+        
+        // 设置 endpoint（如果配置了）
+        if (!empty($s3Config['endpoint'])) {
+            $clientConfig['endpoint'] = $s3Config['endpoint'];
+        }
+        
+        // 设置 Path Style（重要：影响预签名 URL 的生成格式）
+        $clientConfig['use_path_style_endpoint'] = $s3Config['use_path_style_endpoint'] ?? false;
+        
+        // 设置 bucket_endpoint（如果配置了）
+        if (isset($s3Config['bucket_endpoint'])) {
+            $clientConfig['bucket_endpoint'] = $s3Config['bucket_endpoint'];
+        }
+        
+        $this->s3Client = new S3Client($clientConfig);
     }
 
     /**
@@ -126,15 +139,19 @@ class S3StorageEngine implements StorageEngineInterface
         // 生成安全的文件名
         $safeFilename = $this->generateSafeFilename($filename);
 
-        // 生成文件路径（按日期分目录）
+        // 生成文件路径（按日期分目录，不包含 bucket 名称）
         $datePath = date('Y/m/d');
         $key = "{$subPath}/{$datePath}/{$safeFilename}";
 
-        // 获取Bucket名称（优先从站点配置读取）
+        // 获取Bucket名称和配置
         $bucket = $this->getBucketName();
         if (empty($bucket)) {
             throw new \RuntimeException('S3 Bucket未配置');
         }
+
+        $s3Config = $this->getS3ConfigFromSiteOrSystem();
+        $usePathStyle = $s3Config['use_path_style_endpoint'] ?? false;
+        $endpoint = $s3Config['endpoint'] ?? '';
 
         // 生成预签名URL（PUT方法）
         $command = $this->s3Client->getCommand('PutObject', [
@@ -148,6 +165,19 @@ class S3StorageEngine implements StorageEngineInterface
             $command,
             '+' . self::PRESIGNED_URL_EXPIRE . ' seconds'
         )->getUri();
+
+        // 注意：不要修改预签名 URL，因为签名是基于原始 URL 计算的
+        // 修改 URL 会导致签名失效，返回 403 Forbidden
+        // 如果 URL 格式不对，应该检查 S3Client 的配置（use_path_style_endpoint 等）
+        
+        // 记录生成的 URL 用于调试（可选）
+        // logger()->debug('[S3StorageEngine] 生成的预签名 URL', [
+        //     'url' => (string) $presignedUrl,
+        //     'bucket' => $bucket,
+        //     'key' => $key,
+        //     'use_path_style' => $usePathStyle,
+        //     'endpoint' => $endpoint,
+        // ]);
 
         // 生成上传令牌（用于服务端验证）
         $token = bin2hex(random_bytes(32));
@@ -179,7 +209,7 @@ class S3StorageEngine implements StorageEngineInterface
             'final_url' => $finalUrl,
             'token' => $token,
             'expire_at' => $tokenData['expire_at'],
-            'path' => $key, // 添加路径信息（S3 Key），方便记录到数据库
+            'path' => $key, // S3 Key（不包含 bucket 名称）
         ];
     }
 
@@ -225,6 +255,7 @@ class S3StorageEngine implements StorageEngineInterface
     /**
      * 获取文件访问URL
      * 优先从站点配置读取CDN和端点配置
+     * 注意：path 参数应该是 S3 Key（不包含 bucket 名称），例如：images/2024/01/01/file.jpg
      */
     public function getFileUrl(string $path): string
     {
@@ -232,26 +263,61 @@ class S3StorageEngine implements StorageEngineInterface
         $bucket = $s3Config['bucket_name'] ?? '';
         $cdn = $s3Config['cdn'] ?? '';
 
+        // 确保 path 不包含 bucket 名称（移除开头的 bucket 名称）
+        $path = $this->normalizePath($path, $bucket);
+
         // 如果配置了CDN，使用CDN域名
+        // CDN 域名应该已经指向 bucket 根目录，直接拼接路径即可（不包含 bucket）
         if (!empty($cdn)) {
-            return rtrim($cdn, '/') . '/' . ltrim($path, '/');
+            // 移除 CDN 域名末尾可能包含的 bucket 名称（如果用户错误配置了）
+            $cdn = rtrim($cdn, '/');
+            if (str_ends_with($cdn, '/' . $bucket)) {
+                $cdn = substr($cdn, 0, -strlen('/' . $bucket));
+            }
+            
+            // 拼接路径（path 已经规范化，不包含 bucket）
+            return $cdn . '/' . ltrim($path, '/');
         }
 
         // 否则使用S3标准URL
         $region = $s3Config['region'] ?? 'us-east-1';
         $endpoint = $s3Config['endpoint'] ?? '';
+        $usePathStyle = $s3Config['use_path_style_endpoint'] ?? false;
         
         if (!empty($endpoint)) {
-            // 自定义端点（如MinIO）
-            $usePathStyle = $s3Config['use_path_style_endpoint'] ?? false;
+            // 自定义端点（如MinIO、阿里云OSS、七牛云等）
             if ($usePathStyle) {
+                // Path Style: https://endpoint/bucket/path
                 return rtrim($endpoint, '/') . "/{$bucket}/" . ltrim($path, '/');
             }
+            // Virtual Hosted Style: https://bucket.endpoint/path
+            // 注意：某些服务商的 endpoint 格式可能不同，这里假设 endpoint 是基础端点
             return rtrim($endpoint, '/') . '/' . ltrim($path, '/');
         }
 
-        // AWS S3标准URL
+        // AWS S3标准URL（Virtual Hosted Style）
+        // 格式：https://bucket.s3.region.amazonaws.com/path
         return "https://{$bucket}.s3.{$region}.amazonaws.com/" . ltrim($path, '/');
+    }
+
+    /**
+     * 规范化路径，移除可能包含的 bucket 名称
+     * 
+     * @param string $path 原始路径
+     * @param string $bucket Bucket 名称
+     * @return string 规范化后的路径
+     */
+    private function normalizePath(string $path, string $bucket): string
+    {
+        // 移除开头的斜杠
+        $path = ltrim($path, '/');
+        
+        // 如果路径以 bucket 名称开头，移除它
+        if (!empty($bucket) && str_starts_with($path, $bucket . '/')) {
+            $path = substr($path, strlen($bucket) + 1);
+        }
+        
+        return $path;
     }
 
     /**
@@ -300,4 +366,3 @@ class S3StorageEngine implements StorageEngineInterface
         return "{$timestamp}_{$randomString}.{$extension}";
     }
 }
-

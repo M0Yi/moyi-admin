@@ -1049,7 +1049,7 @@ class UniversalCrudService
 
         // 分页
         $page = $params['page'] ?? 1;
-        $pageSize = $params['page_size'] ?? 15;
+        $pageSize = (int)($params['page_size'] ?? 15);
 
         // 克隆查询用于统计总数，避免影响原始查询
         $countQuery = clone $query;
@@ -1058,7 +1058,11 @@ class UniversalCrudService
 
         // 克隆查询用于数据查询，避免影响原始查询
         $dataQuery = clone $query;
-        $dataQuery->forPage($page, $pageSize);
+        
+        // 如果 page_size 为 0，返回所有数据（不分页）
+        if ($pageSize > 0) {
+            $dataQuery->forPage($page, $pageSize);
+        }
         
         // 执行数据查询
         $data = $dataQuery->get()->toArray();
@@ -1188,12 +1192,15 @@ class UniversalCrudService
             }
         }
 
+        // 计算总页数：如果 page_size 为 0，则总页数为 1（所有数据在一页）
+        $lastPage = $pageSize > 0 ? (int) ceil($total / $pageSize) : 1;
+
         return [
             'data' => $data,
             'total' => $total,
             'page' => $page,
-            'page_size' => $pageSize,
-            'last_page' => (int) ceil($total / $pageSize),
+            'page_size' => $pageSize > 0 ? $pageSize : $total, // 如果 page_size 为 0，返回实际数据总数
+            'last_page' => $lastPage,
         ];
     }
 
