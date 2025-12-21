@@ -362,55 +362,119 @@ class AdminSite extends Model
     }
 
     /**
-     * 获取上传格式配置
-     * 上传格式配置存储在 config JSON 字段的 upload_formats 键中
-     *
-     * @return array
-     */
-    public function getUploadFormatsConfig(): array
-    {
-        $config = $this->config ?? [];
-        return $config['upload_formats'] ?? [];
-    }
-
-    /**
      * 获取允许的 MIME 类型列表
+     * 只从 upload_allowed_mime_types 独立字段读取，不从 config JSON 读取
      *
      * @return array 如果为空数组，表示允许所有类型
      */
     public function getAllowedMimeTypes(): array
     {
-        $formats = $this->getUploadFormatsConfig();
-        if (empty($formats['mime_types'])) {
+        if (empty($this->upload_allowed_mime_types)) {
             return [];
         }
         
         // 将逗号分隔的字符串转换为数组
-        if (is_string($formats['mime_types'])) {
-            return array_filter(array_map('trim', explode(',', $formats['mime_types'])));
-        }
+        $mimeTypes = explode(',', $this->upload_allowed_mime_types);
+        $mimeTypes = array_map(function($type) {
+            return trim($type);
+        }, $mimeTypes);
+        $mimeTypes = array_filter($mimeTypes, function($type) {
+            return !empty($type); // 移除空值和只包含空格的字符串
+        });
         
-        return $formats['mime_types'] ?? [];
+        return array_values($mimeTypes);
     }
 
     /**
      * 获取允许的文件扩展名列表
+     * 只从 upload_allowed_extensions 独立字段读取，不从 config JSON 读取
      *
      * @return array 如果为空数组，表示允许所有扩展名
      */
     public function getAllowedExtensions(): array
     {
-        $formats = $this->getUploadFormatsConfig();
-        if (empty($formats['extensions'])) {
+        if (empty($this->upload_allowed_extensions)) {
             return [];
         }
         
         // 将逗号分隔的字符串转换为数组
-        if (is_string($formats['extensions'])) {
-            return array_filter(array_map('trim', explode(',', $formats['extensions'])));
-        }
+        $extensions = explode(',', $this->upload_allowed_extensions);
+        $extensions = array_map(function($ext) {
+            return trim($ext);
+        }, $extensions);
+        $extensions = array_filter($extensions, function($ext) {
+            return !empty($ext); // 移除空值和只包含空格的字符串
+        });
         
-        return $formats['extensions'] ?? [];
+        return array_values($extensions);
+    }
+
+    /**
+     * 获取最大上传文件大小（字节）
+     * 从 config JSON 字段的 upload_max_size 键读取，如果未配置则返回 null
+     *
+     * @return int|null 最大文件大小（字节），null 表示使用系统默认配置
+     */
+    public function getMaxUploadSize(): ?int
+    {
+        if (!$this->config || !isset($this->config['upload_max_size'])) {
+            return null;
+        }
+
+        $maxSize = $this->config['upload_max_size'];
+        
+        // 如果是字符串，尝试解析（支持 "50MB", "10M" 等格式）
+        if (is_string($maxSize)) {
+            return $this->parseSizeString($maxSize);
+        }
+
+        // 如果是数字，直接返回（假设是字节）
+        if (is_numeric($maxSize)) {
+            return (int) $maxSize;
+        }
+
+        return null;
+    }
+
+    /**
+     * 解析大小字符串（如 "50MB", "10M", "1024KB" 等）为字节数
+     *
+     * @param string $sizeString
+     * @return int
+     */
+    private function parseSizeString(string $sizeString): int
+    {
+        $sizeString = trim($sizeString);
+        if (empty($sizeString)) {
+            return 0;
+        }
+
+        // 提取数字和单位
+        if (preg_match('/^(\d+(?:\.\d+)?)\s*([KMGT]?B?)$/i', $sizeString, $matches)) {
+            $size = (float) $matches[1];
+            $unit = strtoupper($matches[2] ?? 'B');
+
+            // 标准化单位（移除 B，只保留 K, M, G, T）
+            $unit = str_replace('B', '', $unit);
+            if (empty($unit)) {
+                $unit = 'B';
+            }
+
+            // 转换为字节
+            $multipliers = [
+                'B' => 1,
+                'K' => 1024,
+                'M' => 1024 * 1024,
+                'G' => 1024 * 1024 * 1024,
+                'T' => 1024 * 1024 * 1024 * 1024,
+            ];
+
+            $multiplier = $multipliers[$unit] ?? 1;
+            return (int) ($size * $multiplier);
+        }
+
+        // 如果无法解析，尝试直接转换为整数（假设是字节）
+        return (int) $sizeString;
     }
 
     /**

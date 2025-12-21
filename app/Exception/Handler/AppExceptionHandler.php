@@ -69,7 +69,6 @@ class AppExceptionHandler extends ExceptionHandler
         }
 
         if ($throwable instanceof QueryException) {
-            print_r($throwable);
             $this->logger->error(sprintf('%s[%s] in %s', $throwable->getMessage(), $throwable->getLine(), $throwable->getFile()));
             $message = str_contains($throwable->getMessage(), '1142')
                 ? '数据库权限不足，请联系管理员'

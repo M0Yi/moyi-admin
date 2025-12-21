@@ -41,6 +41,14 @@
                 }
             }
 
+            // 设置上传接口地址（用于状态更新通知）
+            if (!this.schema.endpoints.uploadUrl) {
+                if (typeof window !== 'undefined' && window.ADMIN_ENTRY_PATH) {
+                    const base = window.ADMIN_ENTRY_PATH.replace(/\/$/, '');
+                    this.schema.endpoints.uploadUrl = `${base}/api/admin/upload`;
+                }
+            }
+
             if (!this.endpoints) {
                 this.endpoints = {};
             }
@@ -2466,6 +2474,9 @@
                 throw new Error('图片大小不能超过 10MB');
             }
 
+            // 获取上传接口地址（用于状态更新通知）
+            const uploadUrl = this.endpoints.uploadUrl || (this.endpoints.uploadToken.replace('/token', ''));
+
             const tokenResponse = await fetch(this.endpoints.uploadToken, {
                 method: 'POST',
                 headers: {
@@ -2485,19 +2496,83 @@
             }
 
             const tokenData = tokenResult.data;
-            const uploadResponse = await fetch(tokenData.url, {
-                method: tokenData.method || 'PUT',
-                headers: Object.assign({}, tokenData.headers || {}, {
-                    'Content-Type': file.type,
-                }),
+            const { token, path, url, upload_url, final_url, method, headers } = tokenData;
+
+            // 判断是 S3 直传还是服务器上传
+            const s3UploadUrl = url || upload_url;
+            const isS3Upload = s3UploadUrl && (
+                s3UploadUrl.includes('amazonaws.com') || 
+                s3UploadUrl.includes('s3.') || 
+                s3UploadUrl.includes('s3-') ||
+                s3UploadUrl.includes('oss-') ||
+                s3UploadUrl.includes('aliyuncs.com') ||
+                s3UploadUrl.includes('myqcloud.com') ||
+                s3UploadUrl.includes('qcloud.com') ||
+                s3UploadUrl.includes('qiniucs.com') ||
+                s3UploadUrl.includes('cloudflarestorage.com')
+            );
+            const targetUrl = isS3Upload ? s3UploadUrl : (uploadUrl + '/' + encodeURIComponent(path));
+
+            // 构建上传请求头
+            const uploadHeaders = {
+                'Content-Type': file.type,
+            };
+
+            // 如果是 S3 直传，使用 tokenData 中的 headers（预签名 URL 的签名信息）
+            if (isS3Upload && headers) {
+                Object.assign(uploadHeaders, headers);
+            } else {
+                // 服务器上传需要上传令牌
+                uploadHeaders['X-Upload-Token'] = token;
+            }
+
+            // 上传文件
+            const uploadResponse = await fetch(targetUrl, {
+                method: method || 'PUT',
+                headers: uploadHeaders,
                 body: file,
             });
 
             if (!uploadResponse.ok) {
+                // S3 上传失败时，响应可能是 XML 格式
+                if (isS3Upload) {
+                    const errorText = await uploadResponse.text();
+                    throw new Error('上传到 S3 失败: ' + (errorText || uploadResponse.statusText));
+                }
                 throw new Error('文件上传失败');
             }
 
-            return tokenData.final_url || tokenData.url || '';
+            // S3 上传成功后，需要通知服务器更新文件状态
+            if (isS3Upload) {
+                // 通知服务器文件已上传（使用 final_url）
+                const notifyResponse = await fetch(uploadUrl + '/' + encodeURIComponent(path), {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-Upload-Token': token,
+                    },
+                    body: JSON.stringify({
+                        file_url: final_url || s3UploadUrl,
+                    }),
+                });
+
+                if (!notifyResponse.ok) {
+                    let errorData = {};
+                    try {
+                        errorData = await notifyResponse.json();
+                    } catch (e) {
+                        // 忽略解析错误
+                    }
+                    throw new Error(errorData.msg || errorData.message || '更新文件状态失败');
+                }
+
+                const notifyResult = await notifyResponse.json();
+                if (notifyResult.code !== 200) {
+                    throw new Error(notifyResult.msg || notifyResult.message || '更新文件状态失败');
+                }
+            }
+
+            return final_url || s3UploadUrl || tokenData.url || '';
         }
 
         getColumnClass(field) {

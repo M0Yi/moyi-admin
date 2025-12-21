@@ -45,6 +45,8 @@ class AdminLoginLog extends Model
         'user_id',
         'username',
         'ip',
+        'ip_list',
+        'admin_entry_path',
         'user_agent',
         'status',
         'message',
@@ -57,6 +59,8 @@ class AdminLoginLog extends Model
         'id' => 'integer',
         'site_id' => 'integer',
         'user_id' => 'integer',
+        'ip_list' => 'array',
+        'admin_entry_path' => 'string',
         'status' => 'integer',
         'created_at' => 'datetime',
     ];

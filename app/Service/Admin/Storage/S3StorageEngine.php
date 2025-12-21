@@ -124,17 +124,8 @@ class S3StorageEngine implements StorageEngineInterface
         // 初始化S3客户端（延迟初始化，确保能获取到站点配置）
         $this->initS3Client();
 
-        // 验证文件大小
-        $maxSize = $this->config->get('upload.max_size', 10 * 1024 * 1024);
-        if ($fileSize > $maxSize) {
-            throw new \RuntimeException("文件大小超过限制：{$maxSize} 字节");
-        }
-
-        // 验证文件类型
-        $allowedTypes = $this->config->get('upload.allowed_types', ['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
-        if (!in_array($contentType, $allowedTypes)) {
-            throw new \RuntimeException("不支持的文件类型：{$contentType}");
-        }
+        // 注意：文件大小和文件类型验证已在 FileUploadService 中完成，这里不再重复验证
+        // 如果将来需要在这里验证，请使用与 FileUploadService 相同的验证逻辑
 
         // 生成安全的文件名
         $safeFilename = $this->generateSafeFilename($filename);

@@ -44,10 +44,6 @@ class AdminAuthMiddleware implements MiddlewareInterface
 
         // 检查用户是否已登录
         if (!$guard->check()) {
-            // 尝试通过“记住我”自动登录
-            if ($this->attemptRememberLogin($request)) {
-                return $handler->handle($request);
-            }
             // 用户未登录，判断是否为 API 请求
             if ($this->isApiRequest($request)) {
                 return $this->response->json([
@@ -95,50 +91,6 @@ class AdminAuthMiddleware implements MiddlewareInterface
         Context::set('admin_user_id', $userId);
 
         return $handler->handle($request);
-    }
-
-    /**
-     * 尝试从“记住我” Cookie 自动登录
-     */
-    protected function attemptRememberLogin(ServerRequestInterface $request): bool
-    {
-        try {
-            $cookies = $request->getCookieParams();
-            $raw = $cookies['admin_remember'] ?? null;
-            if (!$raw) return false;
-
-            $decoded = base64_decode($raw, true);
-            if ($decoded === false) return false;
-
-            $parts = explode('.', $decoded);
-            if (count($parts) !== 4) return false;
-
-            [$userId, $siteId, $expires, $signature] = $parts;
-            if (!is_numeric($userId) || !is_numeric($siteId) || !is_numeric($expires)) return false;
-            if ((int)$expires < time()) return false;
-
-            $user = \App\Model\Admin\AdminUser::query()
-                ->where('id', (int)$userId)
-                ->where('site_id', (int)$siteId)
-                ->first();
-            if (!$user instanceof AdminUser) return false;
-
-            $payload = $userId . '.' . $siteId . '.' . $expires;
-            $expected = hash_hmac('sha256', $payload, (string)$user->password);
-            if (!hash_equals($expected, $signature)) return false;
-
-            // 账号状态检查
-            if ((int)$user->status !== 1) return false;
-            // 登录并写入会话
-            auth('admin')->login($user);
-            $this->session->set('admin_user_id', (int)$userId);
-            $this->session->set('admin_site_id', (int)$siteId);
-            Context::set('admin_user', $user);
-            Context::set('admin_user_id', (int)$userId);
-            return true;
-        } catch (\Throwable $e) {
-            return false;
-        }
     }
 
     /**

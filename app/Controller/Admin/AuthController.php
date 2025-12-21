@@ -5,234 +5,180 @@ declare(strict_types=1);
 namespace App\Controller\Admin;
 
 use App\Controller\AbstractController;
+use App\Model\Admin\AdminLoginLog;
 use App\Model\Admin\AdminUser;
-use App\Service\LoginAttemptService;
 use Hyperf\Di\Annotation\Inject;
 use Hyperf\HttpServer\Contract\RequestInterface;
-use Hyperf\HttpServer\Contract\ResponseInterface as HttpResponse;
-use Hyperf\Context\Context;
+use Psr\Http\Message\ResponseInterface;
+use Hyperf\Contract\SessionInterface;
 
-/**
- * 管理后台认证控制器
- */
 class AuthController extends AbstractController
 {
     #[Inject]
-    protected LoginAttemptService $loginAttemptService;
+    protected SessionInterface $session;
 
     /**
      * 登录页面
      */
-    public function login(): \Psr\Http\Message\ResponseInterface
+    public function login(): ResponseInterface
     {
-        // 验证码接口 URL（通用接口，不在管理后台路径下）
         $captchaUrl = '/captcha';
-
-        $guard = auth('admin');
-        $isLoggedIn = $guard->check();
-        $adminPath = Context::get('admin_entry_path', '/admin');
-        $loggedInUserName = null;
-        if ($isLoggedIn) {
-            $user = $guard->user();
-            if (is_object($user)) {
-                $loggedInUserName = $user->real_name ?: $user->username ?? null;
-            } elseif (is_array($user)) {
-                $loggedInUserName = $user['real_name'] ?? $user['username'] ?? null;
-            }
-        }
-
-        // 不需要传递 $site 到视图，视图中直接使用 site() 全局函数
         return $this->render->render('admin.auth.login', [
             'captchaUrl' => $captchaUrl,
-            'isLoggedIn' => $isLoggedIn,
-            'quickLoginUrl' => $isLoggedIn ? $adminPath . '/dashboard' : null,
-            'loggedInUserName' => $loggedInUserName,
         ]);
     }
 
     /**
-     * 处理登录请求
+     * 登录提交
      */
-    public function doLogin(): \Psr\Http\Message\ResponseInterface
+    public function doLogin(RequestInterface $request): ResponseInterface
     {
-        $data = $this->request->all();
+        $data = $request->all();
+        $username = trim((string) ($data['username'] ?? ''));
+        $password = (string) ($data['password'] ?? '');
 
-        // 1. 验证输入数据
-        $username = $data['username'] ?? '';
-        $password = $data['password'] ?? '';
+        // 获取一些请求信息
+        $serverParams = $request->getServerParams();
+        $userAgent = $request->getHeaderLine('User-Agent') ?: null;
 
-        if (empty($username) || empty($password)) {
-            return $this->error('请输入用户名和密码', null, 400);
+        // 解析 ip 与 ip_list（简单实现，兼容常见头）
+        $xForwardedFor = $request->getHeaderLine('X-Forwarded-For');
+        $ipList = [];
+        if (!empty($xForwardedFor)) {
+            $parts = array_map('trim', explode(',', $xForwardedFor));
+            foreach ($parts as $p) {
+                if (filter_var($p, FILTER_VALIDATE_IP)) {
+                    $ipList[] = $p;
+                }
+            }
         }
+        $xRealIp = $request->getHeaderLine('X-Real-IP');
+        if (!empty($xRealIp) && filter_var($xRealIp, FILTER_VALIDATE_IP)) {
+            $ipList[] = trim($xRealIp);
+        }
+        $remoteAddr = $serverParams['REMOTE_ADDR'] ?? $serverParams['remote_addr'] ?? null;
+        if ($remoteAddr && filter_var($remoteAddr, FILTER_VALIDATE_IP)) {
+            $ipList[] = $remoteAddr;
+        }
+        $ipList = array_values(array_unique($ipList));
+        $ip = $ipList[0] ?? ($remoteAddr ?? '0.0.0.0');
 
-        // 2. 获取当前站点信息（使用 site() 全局函数）
-        $site = site();
-        if (!$site) {
-            return $this->error('站点信息异常', null, 400);
+        // 记录基础登录日志数据
+        $siteId = (int) (site_id() ?? 0);
+        // 后台入口路径（站点配置优先，回退到 URL 解析）
+        $siteObj = function_exists('site') ? site() : null;
+        $adminEntryPath = $siteObj?->admin_entry_path ?? null;
+        if (empty($adminEntryPath)) {
+            $requestPath = $request->getUri()->getPath();
+            if (preg_match('#^/admin/([^/]+)#', $requestPath, $m)) {
+                $adminEntryPath = $m[1];
+            }
         }
 
         try {
-            // 3. 查询用户（先根据用户名查找，不限定站点）
-            $user = \App\Model\Admin\AdminUser::query()
+            // 查找用户
+            $user = AdminUser::query()
                 ->where('username', $username)
                 ->first();
 
-            // 4. 验证用户是否存在
-            if (!$user instanceof AdminUser) {
-                // 登录失败，增加失败次数
-                $this->loginAttemptService->increment();
-                return $this->error('用户名或密码错误', null, 400);
+            if (! $user) {
+                // 未找到用户 -> 记录失败日志
+                AdminLoginLog::create([
+                    'site_id' => $siteId,
+                    'user_id' => null,
+                    'username' => $username,
+                    'ip' => $ip,
+                    'ip_list' => $ipList,
+                    'admin_entry_path' => $adminEntryPath,
+                    'user_agent' => $userAgent,
+                    'status' => AdminLoginLog::STATUS_FAILED,
+                    'message' => '用户名或密码错误',
+                ]);
+
+                return $this->error('用户名或密码错误', null, 401);
             }
 
-            // 4.1 校验用户站点是否匹配
-            if ((int)$user->site_id !== (int)$site->id) {
-                $this->loginAttemptService->increment();
-                return $this->error('账号所属站点不匹配', null, 400);
-            }
-
-            // 5. 验证密码（使用 Model 中的 verifyPassword 方法）
-            if (!$user->verifyPassword($password)) {
-                // 登录失败，增加失败次数
-                $this->loginAttemptService->increment();
-                return $this->error('用户名或密码错误', null, 400);
-            }
-
-            // 6. 检查用户状态
+            // 检查用户状态
             if ($user->status != 1) {
-                // 登录失败，增加失败次数
-                $this->loginAttemptService->increment();
-                return $this->error('账号已被禁用', null, 400);
+                AdminLoginLog::create([
+                    'site_id' => $siteId,
+                    'user_id' => $user->id,
+                    'username' => $username,
+                    'ip' => $ip,
+                    'ip_list' => $ipList,
+                    'admin_entry_path' => $adminEntryPath,
+                    'user_agent' => $userAgent,
+                    'status' => AdminLoginLog::STATUS_FAILED,
+                    'message' => '账号已被禁用',
+                ]);
+
+                return $this->error('账号已被禁用', null, 403);
             }
 
-            // 7. 登录成功，清除失败次数
-            $this->loginAttemptService->clear();
+            // 验证密码
+            if (! $user->verifyPassword($password)) {
+                AdminLoginLog::create([
+                    'site_id' => $siteId,
+                    'user_id' => $user->id,
+                    'username' => $username,
+                    'ip' => $ip,
+                    'ip_list' => $ipList,
+                    'admin_entry_path' => $adminEntryPath,
+                    'user_agent' => $userAgent,
+                    'status' => AdminLoginLog::STATUS_FAILED,
+                    'message' => '用户名或密码错误',
+                ]);
 
-            // 8. 创建 Session
+                return $this->error('用户名或密码错误', null, 401);
+            }
+
+            // 登录成功：设置 Session（页面登录）
             $this->session->set('admin_user_id', $user->id);
-            $this->session->set('admin_site_id', $site->id);
+            $this->session->set('admin_site_id', $user->site_id ?? $siteId);
+            $this->session->set('admin_user', $user->toArray());
 
-            // 9. 更新最后登录信息
+            // 更新最后登录信息
             $user->update([
-                'last_login_ip' => $this->getClientIp(),
+                'last_login_ip' => $ip,
                 'last_login_at' => date('Y-m-d H:i:s'),
             ]);
 
-            // 10. TODO: 记录登录日志
-            // $this->logService->recordLogin($user, true);
+            // 记录成功日志
+            AdminLoginLog::create([
+                'site_id' => $siteId,
+                'user_id' => $user->id,
+                'username' => $username,
+                'ip' => $ip,
+                'ip_list' => $ipList,
+                'admin_entry_path' => $adminEntryPath,
+                'user_agent' => $userAgent,
+                'status' => AdminLoginLog::STATUS_SUCCESS,
+                'message' => '登录成功',
+            ]);
 
-            auth('admin')->login($user);
-
-            // 11. 处理"记住我" - 设置长期 Cookie
-            $remember = (int)($data['remember'] ?? 0) === 1;
-            $response = $this->success([
-                'redirect' => 'dashboard',
-            ], '登录成功');
-            
-            if ($remember) {
-                $expires = time() + 60 * 60 * 24 * 30; // 30 天
-                $payload = $user->id . '.' . $site->id . '.' . $expires;
-                $signature = hash_hmac('sha256', $payload, (string)$user->password);
-                $value = base64_encode($payload . '.' . $signature);
-
-                $secure = ($this->request->getUri()->getScheme() === 'https');
-                
-                // 获取当前请求的域名，确保"记住我" cookie 使用正确的 domain
-                $host = $this->request->getHeaderLine('Host');
-                $domain = $this->extractDomainFromHost($host);
-                
-                // 如果是 IP 地址，不设置 domain
-                if (empty($domain) || filter_var($domain, FILTER_VALIDATE_IP)) {
-                    $domain = '';
-                }
-                
-                $cookie = new \Hyperf\HttpMessage\Cookie\Cookie('admin_remember', $value, $expires, '/', $domain, $secure, true);
-                // withCookie 返回新的响应对象，需要接收返回值
-                $response = $response->withCookie($cookie);
-            }
-
-            return $response;
-
+            // 返回重定向到后台首页
+            return $this->success(['redirect' => admin_route('dashboard')], '登录成功', 200);
         } catch (\Throwable $e) {
-            return $this->error('登录失败：' . $e->getMessage(), null, 500);
-        }
-    }
-
-    /**
-     * 获取客户端 IP
-     */
-    private function getClientIp(): string
-    {
-        $serverParams = $this->request->getServerParams();
-
-        // 优先获取代理转发的真实 IP
-        if (isset($serverParams['http_x_forwarded_for'])) {
-            $ips = explode(',', $serverParams['http_x_forwarded_for']);
-            return trim($ips[0]);
-        }
-
-        if (isset($serverParams['http_x_real_ip'])) {
-            return $serverParams['http_x_real_ip'];
-        }
-
-        return $serverParams['remote_addr'] ?? '0.0.0.0';
-    }
-
-    /**
-     * 从 Host 中提取域名（移除端口）
-     */
-    private function extractDomainFromHost(string $host): string
-    {
-        // 处理 IPv6（形如 [::1]:8080）
-        if (str_starts_with($host, '[')) {
-            $endBracket = strpos($host, ']');
-            if ($endBracket !== false) {
-                // IPv6 地址，返回空（IP 地址不能设置 cookie domain）
-                return '';
+            // 记录失败日志（异常）
+            try {
+                AdminLoginLog::create([
+                    'site_id' => $siteId,
+                    'user_id' => $user->id ?? null,
+                    'username' => $username,
+                    'ip' => $ip,
+                    'ip_list' => $ipList,
+                    'admin_entry_path' => $adminEntryPath,
+                    'user_agent' => $userAgent,
+                    'status' => AdminLoginLog::STATUS_FAILED,
+                    'message' => '登录异常: ' . $e->getMessage(),
+                ]);
+            } catch (\Throwable $_) {
+                // 忽略二次失败
             }
+
+            logger()->error('登录处理异常', ['error' => $e->getMessage(), 'trace' => $e->getTraceAsString()]);
+            return $this->error('登录失败，请稍后重试', null, 500);
         }
-
-        // IPv4 或域名
-        $parts = explode(':', $host);
-        $domain = $parts[0];
-
-        return $domain;
-    }
-
-
-    /**
-     * 退出登录
-     */
-    public function logout(): \Psr\Http\Message\ResponseInterface
-    {
-        // 1. 清除 Session
-        $this->session->clear();
-
-        // 2. 使 Session 无效
-        $this->session->invalidate();
-
-        // 3. 清除"记住我" Cookie
-        $adminPath = Context::get('admin_entry_path', '/admin');
-        $response = $this->response->redirect($adminPath . '/login');
-        
-        try {
-            $expired = time() - 3600;
-            
-            // 获取当前请求的域名，确保清除 cookie 时使用正确的 domain
-            $host = $this->request->getHeaderLine('Host');
-            $domain = $this->extractDomainFromHost($host);
-            
-            // 如果是 IP 地址，不设置 domain
-            if (empty($domain) || filter_var($domain, FILTER_VALIDATE_IP)) {
-                $domain = '';
-            }
-            
-            $cookie = new \Hyperf\HttpMessage\Cookie\Cookie('admin_remember', '', $expired, '/', $domain, false, true);
-            // withCookie 返回新的响应对象，需要接收返回值
-            $response = $response->withCookie($cookie);
-        } catch (\Throwable $e) {
-            // 清除 Cookie 失败不影响登出流程
-        }
-
-        return $response;
     }
 }
+

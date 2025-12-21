@@ -43,8 +43,8 @@ class FileUploadService
         ?string $driver = null,
         ?RequestInterface $request = null
     ): array {
-        // 验证文件大小（默认最大50MB）
-        $maxSize = $this->config->get('upload.max_size', 50 * 1024 * 1024);
+        // 验证文件大小（优先从站点配置读取，其次从系统配置读取）
+        $maxSize = $this->getMaxUploadSize();
         if ($fileSize > $maxSize) {
             throw new \RuntimeException("文件大小超过限制：" . $this->formatFileSize($maxSize));
         }
@@ -53,20 +53,73 @@ class FileUploadService
         $allowedTypes = $this->getAllowedMimeTypes();
         $allowedExtensions = $this->getAllowedExtensions();
         
+        // 记录日志
+        $logData = [
+            'filename' => $filename,
+            'content_type' => $contentType,
+            'file_size' => $fileSize,
+            'allowed_mime_types' => $allowedTypes,
+            'allowed_extensions' => $allowedExtensions,
+            'site_id' => \site_id(),
+        ];
+        logger()->info('[FileUploadService] 文件上传验证', $logData);
+        
         // 验证 MIME 类型
         if (!empty($allowedTypes)) {
-            $contentTypeLower = strtolower($contentType);
-            $allowedTypesLower = array_map('strtolower', $allowedTypes);
-            if (!in_array($contentTypeLower, $allowedTypesLower)) {
+            $contentTypeLower = strtolower(trim($contentType));
+            // 对数组中的每个值也进行 trim 和 strtolower 处理
+            $allowedTypesLower = array_map(function($type) {
+                return strtolower(trim($type));
+            }, $allowedTypes);
+            // 移除空值
+            $allowedTypesLower = array_filter($allowedTypesLower);
+            $allowedTypesLower = array_values($allowedTypesLower); // 重新索引数组
+            
+            // 记录验证过程
+            $checkResult = in_array($contentTypeLower, $allowedTypesLower, true);
+            logger()->info('[FileUploadService] MIME 类型验证过程', [
+                'content_type_original' => $contentType,
+                'content_type_lower' => $contentTypeLower,
+                'content_type_length' => strlen($contentType),
+                'content_type_lower_length' => strlen($contentTypeLower),
+                'allowed_types_count' => count($allowedTypes),
+                'allowed_types_lower' => $allowedTypesLower,
+                'check_result' => $checkResult,
+                'in_array_strict' => $checkResult,
+            ]);
+            
+            if (!$checkResult) {
+                logger()->warning('[FileUploadService] MIME 类型验证失败', [
+                    'filename' => $filename,
+                    'content_type' => $contentType,
+                    'content_type_lower' => $contentTypeLower,
+                    'allowed_types' => $allowedTypes,
+                    'allowed_types_lower' => $allowedTypesLower,
+                    'site_id' => \site_id(),
+                ]);
                 throw new \RuntimeException("不支持的文件类型：{$contentType}");
             }
         }
         
         // 验证文件扩展名
         if (!empty($allowedExtensions)) {
-            $extension = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
-            $allowedExtensionsLower = array_map('strtolower', $allowedExtensions);
-            if (!in_array($extension, $allowedExtensionsLower)) {
+            $extension = strtolower(trim(pathinfo($filename, PATHINFO_EXTENSION)));
+            // 对数组中的每个值也进行 trim 和 strtolower 处理
+            $allowedExtensionsLower = array_map(function($ext) {
+                return strtolower(trim($ext));
+            }, $allowedExtensions);
+            // 移除空值
+            $allowedExtensionsLower = array_filter($allowedExtensionsLower);
+            $allowedExtensionsLower = array_values($allowedExtensionsLower); // 重新索引数组
+            
+            if (!in_array($extension, $allowedExtensionsLower, true)) {
+                logger()->warning('[FileUploadService] 文件扩展名验证失败', [
+                    'filename' => $filename,
+                    'extension' => $extension,
+                    'allowed_extensions' => $allowedExtensions,
+                    'allowed_extensions_lower' => $allowedExtensionsLower,
+                    'site_id' => \site_id(),
+                ]);
                 throw new \RuntimeException("不支持的文件扩展名：{$extension}");
             }
         }
@@ -281,13 +334,24 @@ class FileUploadService
         $site = site();
         if ($site) {
             $siteMimeTypes = $site->getAllowedMimeTypes();
+            $logData = [
+                'site_id' => $site->id,
+                'site_mime_types' => $siteMimeTypes,
+                'upload_allowed_mime_types_field' => $site->upload_allowed_mime_types,
+            ];
+            logger()->info('[FileUploadService] 从站点配置读取 MIME 类型', $logData);
             if (!empty($siteMimeTypes)) {
                 return $siteMimeTypes;
             }
         }
 
         // 从系统配置读取
-        return $this->config->get('upload.allowed_types', []);
+        $systemTypes = $this->config->get('upload.allowed_types', []);
+        $logData = [
+            'system_mime_types' => $systemTypes,
+        ];
+        logger()->info('[FileUploadService] 从系统配置读取 MIME 类型', $logData);
+        return $systemTypes;
     }
 
     /**
@@ -302,13 +366,45 @@ class FileUploadService
         $site = site();
         if ($site) {
             $siteExtensions = $site->getAllowedExtensions();
+            $logData = [
+                'site_id' => $site->id,
+                'site_extensions' => $siteExtensions,
+                'upload_allowed_extensions_field' => $site->upload_allowed_extensions,
+            ];
+            logger()->info('[FileUploadService] 从站点配置读取文件扩展名', $logData);
             if (!empty($siteExtensions)) {
                 return $siteExtensions;
             }
         }
 
         // 从系统配置读取（如果配置了扩展名）
-        return $this->config->get('upload.allowed_extensions', []);
+        $systemExtensions = $this->config->get('upload.allowed_extensions', []);
+        $logData = [
+            'system_extensions' => $systemExtensions,
+        ];
+        logger()->info('[FileUploadService] 从系统配置读取文件扩展名', $logData);
+        return $systemExtensions;
+    }
+
+    /**
+     * 获取最大上传文件大小（字节）
+     * 优先从站点配置读取，其次从系统配置读取
+     *
+     * @return int 最大文件大小（字节），默认 50MB
+     */
+    private function getMaxUploadSize(): int
+    {
+        // 优先从站点配置读取
+        $site = site();
+        if ($site) {
+            $siteMaxSize = $site->getMaxUploadSize();
+            if ($siteMaxSize !== null && $siteMaxSize > 0) {
+                return $siteMaxSize;
+            }
+        }
+
+        // 从系统配置读取
+        return $this->config->get('upload.max_size', 50 * 1024 * 1024);
     }
 }
 

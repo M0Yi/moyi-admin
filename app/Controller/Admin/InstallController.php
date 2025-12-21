@@ -666,6 +666,54 @@ class InstallController extends AbstractController
                     ],
                 ],
             ],
+            [
+                'name' => '日志管理',
+                'slug' => 'logs',
+                'type' => 'group',
+                'icon' => 'journal-text',
+                'path' => '/logs',
+                'method' => 'GET',
+                'sort' => 200,
+                'status' => 1,
+                'children' => [
+                    [
+                        'name' => '操作日志',
+                        'slug' => 'system.operation-logs',
+                        'type' => 'menu',
+                        'icon' => 'list-check',
+                        'path' => '/system/operation-logs*',
+                        'method' => 'GET',
+                        'sort' => 1,
+                        'status' => 1,
+                        'children' => [
+                            // 查看操作日志列表：GET /system/operation-logs*
+                            $this->makeButtonPermission('查看操作日志', 'system.operation-logs.view', '/system/operation-logs*', 1, 'GET'),
+                            // 删除操作日志：DELETE /system/operation-logs/{id}
+                            $this->makeButtonPermission('删除操作日志', 'system.operation-logs.delete', '/system/operation-logs*', 2, 'DELETE'),
+                            // 批量删除操作日志：POST /system/operation-logs/batch-destroy
+                            $this->makeButtonPermission('批量删除操作日志', 'system.operation-logs.batch-delete', '/system/operation-logs/batch-destroy', 3, 'POST'),
+                        ],
+                    ],
+                    [
+                        'name' => '登录日志',
+                        'slug' => 'system.login-logs',
+                        'type' => 'menu',
+                        'icon' => 'box-arrow-in-right',
+                        'path' => '/system/login-logs*',
+                        'method' => 'GET',
+                        'sort' => 2,
+                        'status' => 1,
+                        'children' => [
+                            // 查看登录日志列表：GET /system/login-logs*
+                            $this->makeButtonPermission('查看登录日志', 'system.login-logs.view', '/system/login-logs*', 1, 'GET'),
+                            // 删除登录日志：DELETE /system/login-logs/{id}
+                            $this->makeButtonPermission('删除登录日志', 'system.login-logs.delete', '/system/login-logs*', 2, 'DELETE'),
+                            // 批量删除登录日志：POST /system/login-logs/batch-destroy
+                            $this->makeButtonPermission('批量删除登录日志', 'system.login-logs.batch-delete', '/system/login-logs/batch-destroy', 3, 'POST'),
+                        ],
+                    ],
+                ],
+            ],
         ];
     }
 
@@ -953,6 +1001,78 @@ class InstallController extends AbstractController
                'remark' => null,
            ]
        );
+
+        // 日志分组
+        $logs = AdminMenu::query()->firstOrCreate(
+            ['site_id' => $siteId, 'path' => '/logs'],
+            [
+                'parent_id' => 0,
+                'name' => 'logs',
+                'title' => '日志管理',
+                'icon' => 'bi bi-journal-text',
+                'component' => null,
+                'redirect' => null,
+                'type' => AdminMenu::TYPE_GROUP,
+                'target' => AdminMenu::TARGET_SELF,
+                'badge' => null,
+                'badge_type' => null,
+                'permission' => null,
+                'visible' => 1,
+                'status' => 1,
+                'sort' => 200,
+                'cache' => 1,
+                'config' => null,
+                'remark' => null,
+            ]
+        );
+
+        // 操作日志
+        AdminMenu::query()->firstOrCreate(
+            ['site_id' => $siteId, 'path' => '/system/operation-logs'],
+            [
+                'parent_id' => $logs->id,
+                'name' => 'system.operation-logs',
+                'title' => '操作日志',
+                'icon' => 'bi bi-list-check',
+                'component' => null,
+                'redirect' => null,
+                'type' => AdminMenu::TYPE_MENU,
+                'target' => AdminMenu::TARGET_SELF,
+                'badge' => null,
+                'badge_type' => null,
+                'permission' => 'system.operation-logs.view',
+                'visible' => 1,
+                'status' => 1,
+                'sort' => 1,
+                'cache' => 1,
+                'config' => null,
+                'remark' => null,
+            ]
+        );
+
+        // 登录日志（位于日志分组下，排序在操作日志之后）
+        AdminMenu::query()->firstOrCreate(
+            ['site_id' => $siteId, 'path' => '/system/login-logs'],
+            [
+                'parent_id' => $logs->id,
+                'name' => 'system.login-logs',
+                'title' => '登录日志',
+                'icon' => 'bi bi-box-arrow-in-right',
+                'component' => null,
+                'redirect' => null,
+                'type' => AdminMenu::TYPE_MENU,
+                'target' => AdminMenu::TARGET_SELF,
+                'badge' => null,
+                'badge_type' => null,
+                'permission' => 'system.login-logs.view',
+                'visible' => 1,
+                'status' => 1,
+                'sort' => 2,
+                'cache' => 1,
+                'config' => null,
+                'remark' => null,
+            ]
+        );
 
         AdminMenu::query()->firstOrCreate(
             ['site_id' => $siteId, 'name' => 'system.divider1'],
@@ -1497,6 +1617,57 @@ class InstallController extends AbstractController
                 $table->unique(['site_id', 'error_hash'], 'uk_site_error_hash');
             });
             Db::statement("ALTER TABLE `admin_error_statistics` COMMENT = '系统错误统计表'");
+        }
+
+        if (! Schema::hasTable('admin_login_logs')) {
+            Schema::create('admin_login_logs', function (Blueprint $table) {
+                $table->engine = 'InnoDB';
+                $table->charset = 'utf8mb4';
+                $table->collation = 'utf8mb4_unicode_ci';
+                $table->bigIncrements('id')->comment('登录日志ID');
+                $table->unsignedBigInteger('site_id')->nullable()->comment('站点ID');
+                $table->unsignedBigInteger('user_id')->nullable()->comment('用户ID');
+                $table->string('username', 50)->nullable()->comment('用户名');
+                $table->string('ip', 50)->nullable()->comment('IP地址');
+                $table->json('ip_list')->nullable()->comment('代理链IP列表');
+                $table->string('admin_entry_path', 64)->nullable()->comment('后台入口标识');
+                $table->string('user_agent', 255)->nullable()->comment('User Agent');
+                $table->tinyInteger('status')->default(1)->comment('状态：0=失败，1=成功');
+                $table->string('message', 255)->nullable()->comment('消息');
+                $table->timestamp('created_at')->nullable()->comment('创建时间');
+                $table->index('site_id', 'admin_login_logs_site_id_index');
+                $table->index('user_id', 'admin_login_logs_user_id_index');
+                $table->index('created_at', 'admin_login_logs_created_at_index');
+            });
+            Db::statement("ALTER TABLE `admin_login_logs` COMMENT = '管理员登录日志表'");
+        }
+
+        if (! Schema::hasTable('admin_operation_logs')) {
+            Schema::create('admin_operation_logs', function (Blueprint $table) {
+                $table->engine = 'InnoDB';
+                $table->charset = 'utf8mb4';
+                $table->collation = 'utf8mb4_unicode_ci';
+                $table->bigIncrements('id')->comment('操作日志ID');
+                $table->unsignedBigInteger('site_id')->nullable()->comment('站点ID');
+                $table->unsignedBigInteger('user_id')->comment('用户ID');
+                $table->string('username', 50)->comment('用户名');
+                $table->string('method', 10)->comment('请求方法');
+                $table->string('path', 255)->comment('请求路径');
+                $table->string('ip', 50)->comment('IP地址');
+                $table->json('ip_list')->nullable()->comment('代理链IP列表');
+                $table->text('user_agent')->nullable()->comment('User Agent');
+                $table->json('params')->nullable()->comment('请求参数');
+                $table->json('response')->nullable()->comment('响应数据');
+                $table->integer('status_code')->nullable()->comment('状态码');
+                $table->integer('duration')->nullable()->comment('执行时长(ms)');
+                $table->timestamp('created_at')->nullable()->comment('创建时间');
+                $table->index('site_id', 'idx_site_id');
+                $table->index('user_id', 'idx_user_id');
+                $table->index('path', 'idx_path');
+                $table->index('created_at', 'idx_created_at');
+                $table->index(['site_id', 'created_at'], 'idx_site_created_at');
+            });
+            Db::statement("ALTER TABLE `admin_operation_logs` COMMENT = '操作日志表'");
         }
 
         if (! Schema::hasTable('users')) {

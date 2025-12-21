@@ -77,6 +77,13 @@ Router::addGroup('/admin/{adminPath:[a-zA-Z0-9\-_]+}', function () {
         // 测试页面
         Router::get('/test', 'App\\Controller\\Admin\\TestController@index');
 
+        // Cookie 测试页面
+        Router::addGroup('/cookie-test', function () {
+            Router::get('', 'App\Controller\Admin\CookieTestController@index');
+            Router::post('/set', 'App\Controller\Admin\CookieTestController@setTestCookie');
+            Router::post('/delete', 'App\Controller\Admin\CookieTestController@deleteTestCookie');
+        });
+
         // iframe 模式体验页
         Router::get('/system/iframe-demo', 'App\Controller\Admin\System\IframeDemoController@index');
         Router::get('/system/iframe-demo/modal-demo', 'App\Controller\Admin\System\IframeDemoController@modalDemo');
@@ -167,12 +174,31 @@ Router::addGroup('/admin/{adminPath:[a-zA-Z0-9\-_]+}', function () {
         });
 
         // ========================================
+        // 操作日志
+        // ========================================
+        Router::addGroup('/system/operation-logs', function () {
+            Router::get('', 'App\Controller\Admin\System\OperationLogController@index');
+            Router::get('/{id:\d+}', 'App\Controller\Admin\System\OperationLogController@show');
+            Router::delete('/{id:\d+}', 'App\Controller\Admin\System\OperationLogController@destroy');
+            Router::post('/batch-destroy', 'App\Controller\Admin\System\OperationLogController@batchDestroy');
+        });
+
+        // ========================================
+        // 登录日志
+        // ========================================
+        Router::addGroup('/system/login-logs', function () {
+            Router::get('', 'App\Controller\Admin\System\LoginLogController@index');
+            Router::get('/{id:\d+}', 'App\Controller\Admin\System\LoginLogController@show');
+            Router::delete('/{id:\d+}', 'App\Controller\Admin\System\LoginLogController@destroy');
+            Router::post('/batch-destroy', 'App\Controller\Admin\System\LoginLogController@batchDestroy');
+        });
+
+        // ========================================
         // 文件管理
         // ========================================
         Router::addGroup('/system/upload-files', function () {
             Router::get('', 'App\Controller\Admin\System\UploadFileController@index');
             Router::get('/create', 'App\Controller\Admin\System\UploadFileController@create');
-            Router::post('/token', 'App\Controller\Admin\System\UploadFileController@getUploadToken');
             Router::put('/upload/{path:.+}', 'App\Controller\Admin\System\UploadFileController@upload');
             Router::get('/{id:\d+}', 'App\Controller\Admin\System\UploadFileController@show');
             Router::get('/{id:\d+}/preview', 'App\Controller\Admin\System\UploadFileController@preview');
@@ -236,6 +262,7 @@ Router::addGroup('/admin/{adminPath:[a-zA-Z0-9\-_]+}', function () {
         'middleware' => [
             \App\Middleware\AdminAuthMiddleware::class,
             \App\Middleware\PermissionMiddleware::class,
+            \App\Middleware\OperationLogMiddleware::class,
         ]
     ]);
 

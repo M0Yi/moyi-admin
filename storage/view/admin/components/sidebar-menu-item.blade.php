@@ -13,16 +13,41 @@
     <hr class="my-3 mx-3" style="border-color: #e2e8f0;">
 
 @elseif($menu['type'] === 'group')
-    {{-- 菜单分组 --}}
+    {{-- 菜单分组（支持展开/收缩） --}}
+    @php
+        $hasGroupChildren = isset($menu['children']) && count($menu['children']) > 0;
+        $groupId = $hasGroupChildren ? 'group-' . md5(($menu['title'] ?? '') . '-' . ($menu['id'] ?? uniqid('', true))) : null;
+        // 默认展开分组（可以通过 localStorage 控制）
+        $defaultExpanded = true;
+    @endphp
+    
     @if(!empty($menu['title']) && $menu['title'] !== '-')
-        <div class="sidebar-heading">{{ $menu['title'] }}</div>
+        @if($hasGroupChildren && $groupId)
+            {{-- 可展开/收缩的分组标题 --}}
+            <div class="sidebar-group-header" 
+                 data-group-toggle
+                 data-target="#{{ $groupId }}"
+                 role="button"
+                 aria-expanded="true"
+                 aria-controls="{{ $groupId }}">
+                <span class="sidebar-group-title">{{ $menu['title'] }}</span>
+                <i class="bi bi-chevron-down sidebar-group-arrow" style="font-size: 0.75rem; transition: transform 0.2s ease;"></i>
+            </div>
+        @else
+            {{-- 不可展开的分组标题（没有子菜单） --}}
+            <div class="sidebar-heading">{{ $menu['title'] }}</div>
+        @endif
     @endif
 
     {{-- 渲染子菜单 --}}
-    @if(isset($menu['children']) && count($menu['children']) > 0)
-        @foreach($menu['children'] as $child)
-            @include('admin.components.sidebar-menu-item', ['menu' => $child])
-        @endforeach
+    @if($hasGroupChildren)
+        <ul class="nav flex-column sidebar-group-content {{ $groupId ? 'collapse show' : '' }}" 
+            id="{{ $groupId }}"
+            data-group-id="{{ $groupId }}">
+            @foreach($menu['children'] as $child)
+                @include('admin.components.sidebar-menu-item', ['menu' => $child])
+            @endforeach
+        </ul>
     @endif
 
 @else

@@ -264,8 +264,10 @@ async function startUpload() {
 
 // 上传单个文件
 async function uploadFile(file, progressId) {
-    const uploadTokenUrl = '{{ admin_route("system/upload-files") }}/token';
-    const uploadUrl = '{{ admin_route("system/upload-files") }}/upload';
+    // 统一使用 /api/admin/upload/token 接口（支持所有文件类型）
+    const uploadTokenUrl = '{{ admin_route("api/admin/upload/token") }}';
+    // 统一使用 /api/admin/upload/{path} 接口上传（与 token 接口对应）
+    const uploadUrl = '{{ admin_route("api/admin/upload") }}';
 
     // 1. 获取上传凭证
     updateProgress(progressId, 10, '获取上传凭证...', 'info');

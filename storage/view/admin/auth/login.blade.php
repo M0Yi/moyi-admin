@@ -456,16 +456,6 @@
                     'showFreeToken' => true,
                 ])
 
-                <div class="form-check">
-                    <input
-                        type="checkbox"
-                        id="remember"
-                        name="remember"
-                        class="form-check-input"
-                    >
-                    <label class="form-check-label" for="remember">记住我</label>
-                </div>
-
                 <button type="submit" class="btn btn-primary" id="loginBtn">
                     登录
                 </button>
@@ -515,7 +505,6 @@
                 const requestData = {
                     username: formData.get('username'),
                     password: formData.get('password'),
-                    remember: formData.get('remember') ? 1 : 0,
                 };
 
                 // 如果有免验证码令牌，带上令牌（使用组件提供的函数）

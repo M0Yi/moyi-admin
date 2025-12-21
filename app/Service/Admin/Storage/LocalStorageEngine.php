@@ -45,27 +45,8 @@ class LocalStorageEngine implements StorageEngineInterface
             throw new \RuntimeException("文件大小超过限制：{$maxSize} 字节");
         }
 
-        // 验证文件类型（优先从站点配置读取）
-        $allowedTypes = $this->getAllowedMimeTypes();
-        $allowedExtensions = $this->getAllowedExtensions();
-        
-        // 验证 MIME 类型
-        if (!empty($allowedTypes)) {
-            $contentTypeLower = strtolower($contentType);
-            $allowedTypesLower = array_map('strtolower', $allowedTypes);
-            if (!in_array($contentTypeLower, $allowedTypesLower)) {
-                throw new \RuntimeException("不支持的文件类型：{$contentType}");
-            }
-        }
-        
-        // 验证文件扩展名
-        if (!empty($allowedExtensions)) {
-            $extension = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
-            $allowedExtensionsLower = array_map('strtolower', $allowedExtensions);
-            if (!in_array($extension, $allowedExtensionsLower)) {
-                throw new \RuntimeException("不支持的文件扩展名：{$extension}");
-            }
-        }
+        // 注意：文件类型验证已在 FileUploadService 中完成，这里不再重复验证
+        // 如果将来需要在这里验证，请使用与 FileUploadService 相同的验证逻辑
 
         // 获取站点信息
         $siteId = site_id();

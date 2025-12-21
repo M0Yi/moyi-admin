@@ -567,12 +567,9 @@ class SiteService
      */
     private function getDefaultAllowedMimeTypes(?AdminSite $site): string
     {
-        $uploadFormats = $site?->getUploadFormatsConfig() ?? [];
-        if (!empty($uploadFormats['mime_types'])) {
-            if (is_array($uploadFormats['mime_types'])) {
-                return implode(',', $uploadFormats['mime_types']);
-            }
-            return $uploadFormats['mime_types'];
+        // 从独立字段读取
+        if ($site && !empty($site->upload_allowed_mime_types)) {
+            return $site->upload_allowed_mime_types;
         }
         
         // 返回默认的常用格式
@@ -584,12 +581,9 @@ class SiteService
      */
     private function getDefaultAllowedExtensions(?AdminSite $site): string
     {
-        $uploadFormats = $site?->getUploadFormatsConfig() ?? [];
-        if (!empty($uploadFormats['extensions'])) {
-            if (is_array($uploadFormats['extensions'])) {
-                return implode(',', $uploadFormats['extensions']);
-            }
-            return $uploadFormats['extensions'];
+        // 从独立字段读取
+        if ($site && !empty($site->upload_allowed_extensions)) {
+            return $site->upload_allowed_extensions;
         }
         
         // 返回默认的常用扩展名

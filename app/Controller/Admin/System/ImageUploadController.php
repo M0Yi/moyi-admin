@@ -6,7 +6,7 @@ namespace App\Controller\Admin\System;
 
 use App\Controller\AbstractController;
 use App\Model\Admin\AdminUploadFile;
-use App\Service\Admin\ImageUploadService;
+use App\Service\Admin\FileUploadService;
 use Hyperf\Contract\ConfigInterface;
 use Hyperf\Context\Context;
 use Hyperf\Di\Annotation\Inject;
@@ -14,13 +14,14 @@ use Hyperf\HttpServer\Contract\RequestInterface;
 use Psr\Http\Message\ResponseInterface;
 
 /**
- * 图片上传控制器
+ * 文件上传控制器（统一上传接口）
  * 提供客户端直传PUT方案的上传接口
+ * 支持所有文件类型（图片、视频、文档等），文件类型验证由站点配置控制
  */
 class ImageUploadController extends AbstractController
 {
     #[Inject]
-    protected ImageUploadService $uploadService;
+    protected FileUploadService $uploadService;
 
     #[Inject]
     protected ConfigInterface $config;
@@ -64,7 +65,7 @@ class ImageUploadController extends AbstractController
             $filename = $request->input('filename');
             $contentType = $request->input('content_type');
             $fileSize = (int) $request->input('file_size');
-            $subPath = $request->input('sub_path', 'images');
+            $subPath = $request->input('sub_path', 'images'); // 默认使用 images 子路径，保持向后兼容
             $driver = $request->input('driver'); // 可选，null时使用默认配置
 
             // 获取上传凭证（传入request用于记录用户信息和IP）
@@ -115,45 +116,63 @@ class ImageUploadController extends AbstractController
 
             // 获取Content-Type
             $contentType = $request->getHeaderLine('Content-Type');
-            if (empty($contentType)) {
-                return $this->error('缺少Content-Type', null, 400);
+            
+            // 判断是文件上传还是状态更新通知（S3上传后）
+            $isStatusUpdate = str_contains($contentType, 'application/json');
+            
+            if ($isStatusUpdate) {
+                // S3 上传后的状态更新通知
+                $body = json_decode($request->getBody()->getContents(), true);
+                $fileUrl = $body['file_url'] ?? null;
+                
+                if (empty($fileUrl)) {
+                    return $this->error('缺少文件URL', null, 400);
+                }
+                
+                // 更新文件上传状态
+                $file = $this->uploadService->markFileAsUploaded($token, $fileUrl);
+            } else {
+                // 本地存储的文件上传
+                if (empty($contentType)) {
+                    return $this->error('缺少Content-Type', null, 400);
+                }
+
+                // 获取文件大小
+                $contentLength = $request->getHeaderLine('Content-Length');
+                $fileSize = !empty($contentLength) ? (int) $contentLength : 0;
+
+                // 验证令牌
+                $params = [
+                    'content_type' => $contentType,
+                    'file_size' => $fileSize,
+                ];
+
+                if (!$this->uploadService->verifyUploadToken($token, $params)) {
+                    return $this->error('上传令牌无效或已过期', null, 401);
+                }
+
+                // 从文件记录获取存储驱动（优先从数据库记录获取，确保与实际使用的驱动一致）
+                $file = AdminUploadFile::where('upload_token', $token)->first();
+                $driver = $file?->storage_driver ?? null;
+
+                // 如果文件记录中没有驱动信息，从站点配置或系统配置获取
+                if ($driver === null) {
+                    $currentSite = \site();
+                    $driver = $currentSite?->getUploadDriver() ?? $this->config->get('upload.driver', 'local');
+                }
+
+                // 如果是本地存储，保存文件
+                if ($driver === 'local') {
+                    $this->saveLocalFile($relativePath, $request->getBody()->getContents());
+                }
+                // S3存储由客户端直接上传到S3，服务器端不需要处理
+
+                // 获取文件访问URL
+                $fileUrl = $this->uploadService->getFileUrl($relativePath, $driver);
+
+                // 更新文件上传状态
+                $file = $this->uploadService->markFileAsUploaded($token, $fileUrl);
             }
-
-            // 获取文件大小
-            $contentLength = $request->getHeaderLine('Content-Length');
-            $fileSize = !empty($contentLength) ? (int) $contentLength : 0;
-
-            // 验证令牌
-            $params = [
-                'content_type' => $contentType,
-                'file_size' => $fileSize,
-            ];
-
-            if (!$this->uploadService->verifyUploadToken($token, $params)) {
-                return $this->error('上传令牌无效或已过期', null, 401);
-            }
-
-            // 从文件记录获取存储驱动（优先从数据库记录获取，确保与实际使用的驱动一致）
-            $file = AdminUploadFile::where('upload_token', $token)->first();
-            $driver = $file?->storage_driver ?? null;
-
-            // 如果文件记录中没有驱动信息，从站点配置或系统配置获取
-            if ($driver === null) {
-                $currentSite = \site();
-                $driver = $currentSite?->getUploadDriver() ?? $this->config->get('upload.driver', 'local');
-            }
-
-            // 如果是本地存储，保存文件
-            if ($driver === 'local') {
-                $this->saveLocalFile($relativePath, $request->getBody()->getContents());
-            }
-            // S3存储由客户端直接上传到S3，服务器端不需要处理
-
-            // 获取文件访问URL
-            $fileUrl = $this->uploadService->getFileUrl($relativePath, $driver);
-
-            // 更新文件上传状态
-            $file = $this->uploadService->markFileAsUploaded($token, $fileUrl);
 
             return $this->success([
                 'url' => $fileUrl,

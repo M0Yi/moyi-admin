@@ -311,6 +311,60 @@
         });
     };
 
+    // 分组展开/折叠功能
+    const groupHeaders = sidebar.querySelectorAll('[data-group-toggle]');
+    groupHeaders.forEach(header => {
+        const groupId = header.getAttribute('data-target');
+        if (!groupId) return;
+
+        // 从 localStorage 读取分组状态
+        const savedState = localStorage.getItem(`sidebarGroup_${groupId.replace('#', '')}`);
+        const shouldExpand = savedState !== 'collapsed';
+        
+        const groupContent = sidebar.querySelector(groupId);
+        if (groupContent) {
+            if (!shouldExpand) {
+                groupContent.classList.remove('show');
+                header.setAttribute('aria-expanded', 'false');
+                const arrow = header.querySelector('.sidebar-group-arrow');
+                if (arrow) {
+                    arrow.style.transform = 'rotate(-90deg)';
+                }
+            }
+        }
+
+        header.addEventListener('click', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+
+            const groupContent = sidebar.querySelector(groupId);
+            if (!groupContent) {
+                return;
+            }
+
+            const isExpanded = groupContent.classList.contains('show');
+            const arrow = header.querySelector('.sidebar-group-arrow');
+            
+            if (isExpanded) {
+                groupContent.classList.remove('show');
+                header.setAttribute('aria-expanded', 'false');
+                if (arrow) {
+                    arrow.style.transform = 'rotate(-90deg)';
+                }
+                // 保存状态到 localStorage
+                localStorage.setItem(`sidebarGroup_${groupId.replace('#', '')}`, 'collapsed');
+            } else {
+                groupContent.classList.add('show');
+                header.setAttribute('aria-expanded', 'true');
+                if (arrow) {
+                    arrow.style.transform = 'rotate(0deg)';
+                }
+                // 保存状态到 localStorage
+                localStorage.removeItem(`sidebarGroup_${groupId.replace('#', '')}`);
+            }
+        });
+    });
+
     // 子菜单展开/折叠功能，支持多级菜单
     const submenuLinks = sidebar.querySelectorAll('.nav-link.has-children');
     submenuLinks.forEach(link => {
