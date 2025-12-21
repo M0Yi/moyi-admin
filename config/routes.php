@@ -43,6 +43,14 @@ Router::addGroup('/admin/{adminPath:[a-zA-Z0-9\-_]+}', function () {
     
     Router::get('/logout', 'App\Controller\Admin\AuthController@logout');
 
+    // Cookie 测试页面（无需登录，用于排查登录问题）
+    Router::addGroup('/cookie-test', function () {
+        Router::get('', 'App\Controller\Admin\CookieTestController@index');
+        Router::get('/guard-check', 'App\Controller\Admin\CookieTestController@guardCheck');
+        Router::post('/set', 'App\Controller\Admin\CookieTestController@setTestCookie');
+        Router::post('/delete', 'App\Controller\Admin\CookieTestController@deleteTestCookie');
+    });
+
     // ========================================
     // CRUD 代码生成器（系统管理，仅超级管理员可访问）
     // ========================================
@@ -77,12 +85,7 @@ Router::addGroup('/admin/{adminPath:[a-zA-Z0-9\-_]+}', function () {
         // 测试页面
         Router::get('/test', 'App\\Controller\\Admin\\TestController@index');
 
-        // Cookie 测试页面
-        Router::addGroup('/cookie-test', function () {
-            Router::get('', 'App\Controller\Admin\CookieTestController@index');
-            Router::post('/set', 'App\Controller\Admin\CookieTestController@setTestCookie');
-            Router::post('/delete', 'App\Controller\Admin\CookieTestController@deleteTestCookie');
-        });
+        // Cookie 测试页面（移至无需登录路由，用于排查登录问题）
 
         // iframe 模式体验页
         Router::get('/system/iframe-demo', 'App\Controller\Admin\System\IframeDemoController@index');
@@ -180,7 +183,6 @@ Router::addGroup('/admin/{adminPath:[a-zA-Z0-9\-_]+}', function () {
             Router::get('', 'App\Controller\Admin\System\OperationLogController@index');
             Router::get('/{id:\d+}', 'App\Controller\Admin\System\OperationLogController@show');
             Router::delete('/{id:\d+}', 'App\Controller\Admin\System\OperationLogController@destroy');
-            Router::post('/batch-destroy', 'App\Controller\Admin\System\OperationLogController@batchDestroy');
         });
 
         // ========================================
@@ -190,7 +192,6 @@ Router::addGroup('/admin/{adminPath:[a-zA-Z0-9\-_]+}', function () {
             Router::get('', 'App\Controller\Admin\System\LoginLogController@index');
             Router::get('/{id:\d+}', 'App\Controller\Admin\System\LoginLogController@show');
             Router::delete('/{id:\d+}', 'App\Controller\Admin\System\LoginLogController@destroy');
-            Router::post('/batch-destroy', 'App\Controller\Admin\System\LoginLogController@batchDestroy');
         });
 
         // ========================================

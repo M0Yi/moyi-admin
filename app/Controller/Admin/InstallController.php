@@ -1641,6 +1641,7 @@ class InstallController extends AbstractController
             });
             Db::statement("ALTER TABLE `admin_login_logs` COMMENT = '管理员登录日志表'");
         }
+        
 
         if (! Schema::hasTable('admin_operation_logs')) {
             Schema::create('admin_operation_logs', function (Blueprint $table) {

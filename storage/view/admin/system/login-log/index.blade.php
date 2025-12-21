@@ -57,9 +57,6 @@
                 ],
                 'data'=>[],
                 'emptyMessage'=>'暂无登录日志',
-                'leftButtons'=>[
-                    ['type'=>'button','onclick'=>'batchDelete_loginLogTable()','text'=>'批量删除','icon'=>'bi-trash','variant'=>'danger']
-                ],
             ])
         </div>
     </div>
@@ -86,22 +83,7 @@ document.addEventListener('DOMContentLoaded', function () {
         }).catch(()=>alert('删除失败'));
     };
 
-    window.batchDelete_loginLogTable = function() {
-        const table = window['_dataTable_loginLogTable'];
-        if (!table) { alert('表格未初始化'); return; }
-        const selected = table.getSelectedRows() || [];
-        if (!selected.length) { alert('请选择要删除的记录'); return; }
-        if (!confirm(`确定删除 ${selected.length} 条记录？`)) return;
-        const ids = selected.map(r=>r.id);
-        const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
-        fetch('{{ admin_route("system/login-logs") }}/batch-destroy', {
-            method: 'POST',
-            headers: {'Content-Type':'application/json','X-CSRF-TOKEN':csrfToken},
-            body: JSON.stringify({ids})
-        }).then(r=>r.json()).then(data=>{
-            if (data.code===200) { alert('删除成功'); location.reload(); } else { alert(data.msg||'删除失败'); }
-        }).catch(()=>alert('删除失败'));
-    };
+    // 批量删除功能已移除
 });
 </script>
 @endpush

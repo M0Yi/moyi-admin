@@ -136,6 +136,10 @@ git clone https://github.com/M0Yi/moyi-admin.git
 cd moyi-admin
 ```
 
+```bash
+docker run -dit  --name moyi-admin -v $(pwd):/data/project -w /data/project -p 6501:6501 hyperf/hyperf:8.3-alpine-v3.19-swoole sh
+```
+
 #### 2. 安装依赖
 
 ```bash

@@ -146,15 +146,7 @@
                 ],
                 'data' => [],
                 'emptyMessage' => '暂无操作日志',
-                'leftButtons' => [
-                    [
-                        'type' => 'button',
-                        'onclick' => 'batchDelete_operationLogTable()',
-                        'text' => '批量删除',
-                        'icon' => 'bi-trash',
-                        'variant' => 'danger',
-                    ]
-                ],
+                // 批量删除功能已移除
             ])
         </div>
     </div>
@@ -208,51 +200,7 @@ function renderDuration(value) {
     }
 }
 
-document.addEventListener('DOMContentLoaded', function () {
-    // 批量删除函数
-    window.batchDelete_operationLogTable = function() {
-        const table = window['_dataTable_operationLogTable'];
-        if (!table) {
-            alert('表格未初始化');
-            return;
-        }
-        
-        const selectedRows = table.getSelectedRows();
-        if (!selectedRows || selectedRows.length === 0) {
-            alert('请选择要删除的记录');
-            return;
-        }
-        
-        if (!confirm(`确定要删除选中的 ${selectedRows.length} 条记录吗？`)) {
-            return;
-        }
-        
-        const ids = selectedRows.map(row => row.id);
-        const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
-        
-        fetch('{{ admin_route("system/operation-logs") }}/batch-destroy', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-CSRF-TOKEN': csrfToken
-            },
-            body: JSON.stringify({ ids: ids })
-        })
-        .then(response => response.json())
-        .then(data => {
-            if (data.code === 200) {
-                alert(data.msg || '删除成功');
-                table.reload();
-            } else {
-                alert(data.msg || data.message || '删除失败');
-            }
-        })
-        .catch(error => {
-            console.error('Error:', error);
-            alert('删除失败');
-        });
-    };
-    
+    document.addEventListener('DOMContentLoaded', function () {
     // 删除单行函数
     window.deleteRow_operationLogTable = function(id) {
         if (!confirm('确定要删除这条记录吗？')) {

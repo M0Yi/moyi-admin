@@ -86,12 +86,8 @@ class LoginLogController extends BaseModelCrudController
 
     public function batchDestroy(RequestInterface $request): ResponseInterface
     {
-        $ids = $request->input('ids', []);
-        if (empty($ids)) {
-            return $this->error('请选择要删除的记录');
-        }
-        $count = $this->loginLogService->batchDelete($ids);
-        return $this->success(null, "成功删除 {$count} 条记录");
+        // 批量删除功能已禁用
+        return $this->error('批量删除功能已被禁用', null, 403);
     }
 }
 

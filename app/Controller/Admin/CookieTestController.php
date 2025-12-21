@@ -8,11 +8,70 @@ use App\Controller\AbstractController;
 use Hyperf\Contract\ConfigInterface;
 use Hyperf\Di\Annotation\Inject;
 use Hyperf\HttpMessage\Cookie\Cookie;
+use Hyperf\Contract\SessionInterface;
+use HyperfExtension\Auth\Contracts\AuthManagerInterface;
 
 class CookieTestController extends AbstractController
 {
     #[Inject]
     protected ConfigInterface $config;
+    #[Inject]
+    protected SessionInterface $session;
+    #[Inject]
+    protected AuthManagerInterface $auth;
+
+    /**
+     * Guard 检查（用于调试）
+     */
+    public function guardCheck()
+    {
+        try {
+            $guard = $this->auth->guard('admin');
+            $check = false;
+            $user = null;
+            try {
+                $check = $guard->check();
+            } catch (\Throwable $e) {
+                logger()->warning('CookieTestController guard->check() threw', ['error' => $e->getMessage()]);
+            }
+            try {
+                $u = $guard->user();
+                if ($u) {
+                    $user = is_object($u) && method_exists($u, 'toArray') ? $u->toArray() : $u;
+                }
+            } catch (\Throwable $e) {
+                logger()->warning('CookieTestController guard->user() threw', ['error' => $e->getMessage()]);
+            }
+
+            // 记录调试日志：guard 状态 + request headers + session keys
+            try {
+                $sessionInfo = [];
+                if (method_exists($this->session, 'getId')) {
+                    try {
+                        $sessionInfo['id'] = $this->session->getId();
+                    } catch (\Throwable $_) {}
+                }
+                try {
+                    $sessionInfo['admin_user_id'] = $this->session->get('admin_user_id');
+                    $sessionInfo['admin_user'] = $this->session->get('admin_user');
+                } catch (\Throwable $_) {}
+                logger()->info('CookieTestController guardCheck', [
+                    'guard_check' => $check,
+                    'auth_user' => $user,
+                    'request_headers' => $this->request->getHeaders(),
+                    'session_info' => $sessionInfo,
+                ]);
+            } catch (\Throwable $_) {}
+
+            return $this->success([
+                'guard_check' => $check,
+                'auth_user' => $user,
+            ], 'guard status');
+        } catch (\Throwable $e) {
+            logger()->error('CookieTestController guardCheck failed', ['error' => $e->getMessage()]);
+            return $this->error('guard check failed: ' . $e->getMessage(), null, 500);
+        }
+    }
     /**
      * Cookie 测试页面
      */
@@ -49,6 +108,25 @@ class CookieTestController extends AbstractController
         $host = $this->request->getHeaderLine('Host');
         $scheme = $this->request->getUri()->getScheme();
         $isSecure = ($scheme === 'https');
+        $serverParams = $this->request->getServerParams();
+
+        // 尝试获取更多 Session 信息（若实现提供）
+        $sessionDump = [];
+        try {
+            if (method_exists($this->session, 'getId')) {
+                $sessionDump['id'] = $this->session->getId();
+            }
+            if (method_exists($this->session, 'all')) {
+                $sessionDump['all'] = $this->session->all();
+            }
+        } catch (\Throwable $_) {
+            // 忽略读取 session 全量信息失败
+        }
+
+        // 常见 Session 键
+        $sessionDump['admin_user_id'] = $this->session->get('admin_user_id');
+        $sessionDump['admin_site_id'] = $this->session->get('admin_site_id');
+        $sessionDump['admin_user'] = $this->session->get('admin_user');
 
         return $this->renderAdmin('admin.cookie-test.index', [
             'cookies' => $cookiesInfo,
@@ -72,6 +150,11 @@ class CookieTestController extends AbstractController
                 'current_time' => time(),
                 'current_time_formatted' => date('Y-m-d H:i:s'),
             ],
+            'admin_user' => $this->session->get('admin_user'),
+            'admin_user_id' => $this->session->get('admin_user_id'),
+            'server_params' => $serverParams,
+            'request_headers' => $this->request->getHeaders(),
+            'session_dump' => $sessionDump,
         ]);
     }
 

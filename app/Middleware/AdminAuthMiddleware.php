@@ -42,26 +42,87 @@ class AdminAuthMiddleware implements MiddlewareInterface
     {
         $guard = $this->auth->guard('admin');
 
+        // 日志：开始认证检查
+        try {
+            logger()->info('AdminAuthMiddleware start', [
+                'path' => $request->getUri()->getPath(),
+                'method' => $request->getMethod(),
+                'accept' => $request->getHeaderLine('Accept'),
+            ]);
+        } catch (\Throwable $_) {
+            // 忽略记录日志错误
+        }
+        // 记录 guard 状态（check + user）以便排查
+        try {
+            $guardCheck = false;
+            $guardUser = null;
+            try {
+                $guardCheck = $guard->check();
+            } catch (\Throwable $e) {
+                // 记录 guard check 错误
+                logger()->warning('AdminAuthMiddleware guard->check() threw', ['error' => $e->getMessage()]);
+            }
+            try {
+                $u = $guard->user();
+                if ($u) {
+                    $guardUser = is_object($u) && method_exists($u, 'toArray') ? $u->toArray() : $u;
+                }
+            } catch (\Throwable $e) {
+                logger()->warning('AdminAuthMiddleware guard->user() threw', ['error' => $e->getMessage()]);
+            }
+            logger()->info('AdminAuthMiddleware guard state', [
+                'guard_check' => $guardCheck,
+                'guard_user' => $guardUser,
+            ]);
+        } catch (\Throwable $_) {}
+
         // 检查用户是否已登录
         if (!$guard->check()) {
-            // 用户未登录，判断是否为 API 请求
-            if ($this->isApiRequest($request)) {
-                return $this->response->json([
-                    'code' => 401,
-                    'message' => '未登录',
-                ])->withStatus(401);
+            // 如果 guard 未通过，尝试从 Session 回退获取用户（兼容手动设置 session 的登录逻辑）
+            try {
+                logger()->info('AdminAuthMiddleware guard check failed, attempting session fallback', [
+                    'path' => $request->getUri()->getPath(),
+                ]);
+            } catch (\Throwable $_) {}
+            $sessionUser = $this->getAuthUser($request);
+            if ($sessionUser) {
+                try {
+                    logger()->info('AdminAuthMiddleware session fallback succeeded', [
+                        'user_id' => $sessionUser['id'] ?? null,
+                        'username' => $sessionUser['username'] ?? null,
+                        'request_cookie' => $request->getHeaderLine('Cookie'),
+                        'server_params' => $request->getServerParams(),
+                    ]);
+                } catch (\Throwable $_) {}
+                // 将用户信息写入上下文，允许后续权限检查继续
+                Context::set('admin_user', $sessionUser);
+                Context::set('admin_user_id', $sessionUser['id'] ?? null);
+                // 继续处理请求
+            } else {
+                try {
+                    logger()->info('AdminAuthMiddleware session fallback failed', [
+                        'path' => $request->getUri()->getPath(),
+                    ]);
+                } catch (\Throwable $_) {}
+                // 用户未登录，判断是否为 API 请求
+                if ($this->isApiRequest($request)) {
+                    return $this->response->json([
+                        'code' => 401,
+                        'message' => '未登录',
+                    ])->withStatus(401);
+                }
+
+                // 页面请求：检查是否为 iframe 请求
+                if ($this->isEmbeddedRequest($request)) {
+                    // iframe 请求未登录时，返回特殊页面通知主页面刷新
+                    return $this->handleUnauthorizedInIframe($request);
+                }
+
+                // 普通页面请求重定向到登录页
+                $adminPath = Context::get('admin_entry_path', '/admin');
+                $loginUrl = $adminPath . '/login';
+                return $this->response->redirect($loginUrl);
             }
-            
-            // 页面请求：检查是否为 iframe 请求
-            if ($this->isEmbeddedRequest($request)) {
-                // iframe 请求未登录时，返回特殊页面通知主页面刷新
-                return $this->handleUnauthorizedInIframe($request);
-            }
-            
-            // 普通页面请求重定向到登录页
-            $adminPath = Context::get('admin_entry_path', '/admin');
-            $loginUrl = $adminPath . '/login';
-            return $this->response->redirect($loginUrl);
         }
 
         // 获取当前用户

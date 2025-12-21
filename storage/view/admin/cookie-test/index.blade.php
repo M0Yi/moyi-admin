@@ -71,6 +71,50 @@
                             </div>
                         </div>
                     </div>
+                    
+                    {{-- 当前登录用户信息 --}}
+                    <div class="mb-4">
+                        <h6 class="text-muted mb-3">当前登录用户</h6>
+                        @php
+                            $adminUser = $admin_user ?? null;
+                            $adminUserId = $admin_user_id ?? null;
+                        @endphp
+                        <div class="row">
+                            <div class="col-md-6">
+                                <p><strong>用户ID:</strong> {{ $adminUserId ?? '-' }}</p>
+                                <p><strong>用户名:</strong> {{ $adminUser['username'] ?? ($adminUser->username ?? '-') }}</p>
+                            </div>
+                            <div class="col-md-6">
+                                <p><strong>Guard 状态:</strong>
+                                    <button id="checkGuardBtn" class="btn btn-sm btn-outline-secondary">检查 guard</button>
+                                </p>
+                                <div id="guardCheckResult" class="mt-2"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    {{-- Session 与请求详细信息（调试） --}}
+                    <div class="mb-4">
+                        <h6 class="text-muted mb-3">Session 与请求详细信息（调试）</h6>
+                        <div class="table-responsive">
+                            <table class="table table-bordered cookie-table">
+                                <tbody>
+                                    <tr>
+                                        <th width="200">Server Params</th>
+                                        <td><pre style="white-space:pre-wrap;">@php echo json_encode($server_params ?? [], JSON_PRETTY_PRINT|JSON_UNESCAPED_UNICODE); @endphp</pre></td>
+                                    </tr>
+                                    <tr>
+                                        <th>Request Headers</th>
+                                        <td><pre style="white-space:pre-wrap;">@php echo json_encode($request_headers ?? [], JSON_PRETTY_PRINT|JSON_UNESCAPED_UNICODE); @endphp</pre></td>
+                                    </tr>
+                                    <tr>
+                                        <th>Session Dump</th>
+                                        <td><pre style="white-space:pre-wrap;">@php echo json_encode($session_dump ?? [], JSON_PRETTY_PRINT|JSON_UNESCAPED_UNICODE); @endphp</pre></td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
 
                     <hr>
 
@@ -409,6 +453,30 @@
                 '<div class="alert alert-danger"><i class="bi bi-exclamation-circle"></i> 请求失败</div>';
         });
     }
+
+    // 检查 guard 状态
+    document.getElementById('checkGuardBtn')?.addEventListener('click', function() {
+        fetch('{{ admin_route("cookie-test/guard-check") }}', {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+        })
+        .then(response => response.json())
+        .then(result => {
+            const container = document.getElementById('guardCheckResult');
+            if (result.code === 200) {
+                container.innerHTML = '<pre style="white-space:pre-wrap;">' + JSON.stringify(result.data, null, 2) + '</pre>';
+                container.className = 'alert alert-info';
+            } else {
+                container.innerHTML = '<div class="alert alert-warning">检查失败: ' + (result.msg || '') + '</div>';
+            }
+        })
+        .catch(err => {
+            const container = document.getElementById('guardCheckResult');
+            container.innerHTML = '<div class="alert alert-danger">请求失败</div>';
+        });
+    });
 </script>
 @endpush
 
