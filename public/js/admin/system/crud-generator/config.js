@@ -1,3 +1,4 @@
+
 // ==================== 常量定义 ====================
 const BADGE_COLORS = [
     { value: '', label: '自动（智能匹配）' },
@@ -76,7 +77,12 @@ const FORM_TYPES = [
     { value: 'icon', label: '图标选择' },
     { value: 'image', label: '单图上传' },
     { value: 'images', label: '多图上传' },
-    { value: 'file', label: '文件上传' }
+    { value: 'file', label: '文件上传' },
+    { value: 'key_value', label: '键值类型', modelType: 'array' }, // 仅在模型类型为array时可用
+    { value: 'multi_key_value', label: '多键值类型', modelType: 'array' }, // 仅在模型类型为array时可用
+    { value: 'object_key_value', label: '对象键值', modelType: 'array' }, // 仅在模型类型为array时可用
+    { value: 'color', label: '颜色选择器', modelType: 'string' }, // 仅在模型类型为string时可用
+    { value: 'gradient', label: '渐变色选择器', modelType: 'string' } // 仅在模型类型为string时可用
 ];
 
 const COLUMN_TYPES = [
@@ -91,6 +97,11 @@ const COLUMN_TYPES = [
     { value: 'code', label: '代码' },
     { value: 'link', label: '链接' },
     { value: 'relation', label: '关联' },
+    { value: 'key_value', label: '键值' },
+    { value: 'multi_key_value', label: '多键值' },
+    { value: 'object_key_value', label: '对象键值' },
+    { value: 'color', label: '颜色' },
+    { value: 'gradient', label: '渐变' },
     { value: 'columns', label: '列组' },
     { value: 'custom', label: '自定义' }
 ];
@@ -112,6 +123,7 @@ const SEARCH_TYPES = [
     { value: 'exact', label: '精确匹配' },
     { value: 'number_range', label: '数字区间' },
     { value: 'date_range', label: '日期区间' },
+    { value: 'datetime_range', label: '日期时间区间' },
     { value: 'select', label: '下拉选择' },
     { value: 'relation', label: '关联搜索' }
 ];
@@ -298,6 +310,23 @@ function hydrateBasicConfig(baseConfig = {}, meta = {}) {
     if (dbConnectionDisplay && dbConnectionDisplay.dataset.userModified !== 'true' && dbConnectionDisplay.value !== dbConnectionValue) {
         dbConnectionDisplay.value = dbConnectionValue;
     }
+    
+    // 设置 is_remote_connection 字段
+    const connectionTypes = PAGE_VARS.connectionTypes || {};
+    const isRemote = connectionTypes[dbConnectionValue]?.is_remote || false;
+    let isRemoteInput = document.getElementById('isRemoteConnectionInput');
+    if (!isRemoteInput) {
+        // 如果不存在，创建一个隐藏字段
+        isRemoteInput = document.createElement('input');
+        isRemoteInput.type = 'hidden';
+        isRemoteInput.name = 'is_remote_connection';
+        isRemoteInput.id = 'isRemoteConnectionInput';
+        const form = document.getElementById('configForm');
+        if (form) {
+            form.appendChild(isRemoteInput);
+        }
+    }
+    isRemoteInput.value = isRemote ? '1' : '0';
 
     // 前端推测：如果后端没有返回 model_name，从前端推测
     const modelInput = document.querySelector('input[name="model_name"]');
@@ -420,9 +449,20 @@ document.addEventListener('DOMContentLoaded', function() {
     loadFieldsConfig();
     
     // 重新加载按钮
-    document.getElementById('reloadFieldsBtn').addEventListener('click', function() {
-        loadFieldsConfig();
-    });
+    const reloadBtn = document.getElementById('reloadFieldsBtn');
+    if (reloadBtn) {
+        reloadBtn.addEventListener('click', function() {
+            loadFieldsConfig();
+        });
+    }
+    
+    // 打开列宽可视化编辑器
+    const colBtn = document.getElementById('openColVisualizerBtn');
+    if (colBtn) {
+        colBtn.addEventListener('click', function() {
+            openColVisualizer();
+        });
+    }
     
     // 表单提交
     document.getElementById('configForm').addEventListener('submit', function(e) {
@@ -643,21 +683,35 @@ function loadFieldsConfig() {
  *   - 如果不包含冒号，例如："用户名"，返回整个注释："用户名"
  * @returns {string} 字段名
  */
+function truncateByDelimiters(text, delimiters) {
+    if (!text || typeof text !== 'string') {
+        return '';
+    }
+    
+    let result = text.trim();
+    let nearestIndex = -1;
+    
+    delimiters.forEach(delimiter => {
+        const index = result.indexOf(delimiter);
+        if (index > -1 && (nearestIndex === -1 || index < nearestIndex)) {
+            nearestIndex = index;
+        }
+    });
+    
+    if (nearestIndex > -1) {
+        result = result.substring(0, nearestIndex).trim();
+    }
+    
+    return result;
+}
+
 function extractFieldNameFromComment(comment) {
     if (!comment || typeof comment !== 'string') {
         return '';
     }
     
-    // 查找第一个冒号的位置
-    const colonIndex = comment.indexOf(':');
-    
-    // 如果找到冒号，返回冒号前的部分（去除首尾空格）
-    if (colonIndex > 0) {
-        return comment.substring(0, colonIndex).trim();
-    }
-    
-    // 如果没有冒号，整个注释都是字段名称（去除首尾空格）
-    return comment.trim();
+    const delimiters = [':', '：', '(', '（'];
+    return truncateByDelimiters(comment, delimiters);
 }
 
 /**
@@ -673,7 +727,12 @@ function guessFormType(column) {
     const type = (column.type || '').toLowerCase();
     const comment = (column.comment || '').toLowerCase();
     
-    // site_id 使用专用站点选择组件
+    // *_config + longtext 默认使用键值类型
+    if (fieldName.endsWith('_config') && (dataType === 'longtext' || dataType === 'text' || dataType === 'mediumtext')) {
+        return 'key_value';
+    }
+    
+    // 0. 特殊字段：site_id 使用站点选择组件
     if (fieldName === 'site_id') {
         return 'site_select';
     }
@@ -806,6 +865,11 @@ function guessModelType(column) {
         return 'array';
     }
     
+    // *_config + longtext → array（键值配置字段）
+    if (fieldName.endsWith('_config') && (dataType === 'longtext' || dataType === 'text' || dataType === 'mediumtext')) {
+        return 'array';
+    }
+    
     // 整数类型
     if (['int', 'integer', 'tinyint', 'smallint', 'mediumint', 'bigint'].includes(dataType)) {
         return 'integer';
@@ -850,6 +914,11 @@ function guessRenderType(column) {
     const dataType = (column.data_type || '').toLowerCase();
     const type = (column.type || '').toLowerCase();
     const comment = (column.comment || '').toLowerCase();
+    
+    // *_config + longtext 默认使用键值渲染
+    if (fieldName.endsWith('_config') && (dataType === 'longtext' || dataType === 'text' || dataType === 'mediumtext')) {
+        return 'key_value';
+    }
     
     // 1. 字段名以 _id 或 _ids 结尾：关联渲染
     if (fieldName.endsWith('_id') || fieldName.endsWith('_ids')) {
@@ -1295,10 +1364,15 @@ function inferDefaultSearchType(column) {
         return 'select';
     }
     
-    // 日期时间类型：使用日期区间搜索
-    if (['date', 'datetime', 'datetime-local'].includes(formType) ||
-        ['date', 'datetime', 'timestamp', 'time'].includes(dataType)) {
+    // 日期时间类型：根据类型选择区间搜索
+    if (formType === 'datetime' || dataType === 'datetime' || dataType === 'timestamp') {
+        return 'datetime_range';
+    }
+    if (formType === 'date' || dataType === 'date') {
         return 'date_range';
+    }
+    if (dataType === 'time') {
+        return 'date_range'; // 时间类型也使用日期区间
     }
     
     // 数字类型：只有当字段名以 _count 结尾时才使用数字区间搜索
@@ -1332,10 +1406,6 @@ function renderFieldsConfig(columns) {
             <table class="table table-bordered table-hover">
                 <thead class="table-light">
                     <tr>
-                        {{-- 已禁用：拖动功能BUG太多，暂时禁用，待后续优化 --}}
-                        {{-- <th style="width: 50px;" class="text-center">
-                            <i class="bi bi-grip-vertical" title="拖拽排序"></i>
-                        </th> --}}
                         <th style="width: 120px;">字段名</th>
                         <th style="width: 120px;">数据库信息</th>
                         <th style="width: 100px;">模型类型</th>
@@ -1501,6 +1571,7 @@ function renderFieldsConfig(columns) {
                         <option value="file" ${column.form_type === 'file' ? 'selected' : ''}>文件上传</option>
                         ${modelType === 'array' ? `<option value="key_value" ${column.form_type === 'key_value' ? 'selected' : ''}>键值类型</option>` : ''}
                         ${modelType === 'array' ? `<option value="multi_key_value" ${column.form_type === 'multi_key_value' ? 'selected' : ''}>多键值类型</option>` : ''}
+                        ${modelType === 'array' ? `<option value="object_key_value" ${column.form_type === 'object_key_value' ? 'selected' : ''}>对象键值</option>` : ''}
                         ${modelType === 'string' ? `<option value="color" ${column.form_type === 'color' ? 'selected' : ''}>颜色选择器</option>` : ''}
                         ${modelType === 'string' ? `<option value="gradient" ${column.form_type === 'gradient' ? 'selected' : ''}>渐变色选择器</option>` : ''}
                     </select>
@@ -1630,6 +1701,8 @@ function renderFieldsConfig(columns) {
                                 <div class="col-md-6">
                                     <label class="form-label">列宽（col）</label>
                                     ${(() => {
+                                        // 如果表单类型是开关且未设置列宽，默认使用 col-12 col-md-3
+                                        // 如果表单类型是图片或多图且未设置列宽，默认使用 col-12 col-md-6
                                         let colValue = column.col || '';
                                         if (!colValue && column.form_type === 'switch') {
                                             colValue = 'col-12 col-md-3';
@@ -1685,6 +1758,7 @@ function renderFieldsConfig(columns) {
                                                 <option value="exact" ${searchType === 'exact' ? 'selected' : ''}>精确匹配</option>
                                                 <option value="number_range" ${searchType === 'number_range' ? 'selected' : ''}>数字区间</option>
                                                 <option value="date_range" ${searchType === 'date_range' ? 'selected' : ''}>日期区间</option>
+                                                <option value="datetime_range" ${searchType === 'datetime_range' ? 'selected' : ''}>日期时间区间</option>
                                                 <option value="select" ${searchType === 'select' ? 'selected' : ''}>下拉选择</option>
                                                 <option value="relation" ${searchType === 'relation' ? 'selected' : ''}>关联搜索</option>
                                             </select>
@@ -1741,6 +1815,52 @@ function renderFieldsConfig(columns) {
                                     </div>
                                 </div>
                                 
+                                <!-- AI 单独配置节（与 搜索配置 / 关联配置 同级） -->
+                                <div class="col-md-12">
+                                    <hr>
+                                    <h6 class="mb-3">
+                                        <i class="bi bi-robot text-primary"></i> AI 配置
+                                    </h6>
+                                    <div class="row g-3 align-items-center">
+                                        <div class="col-md-3">
+                                            <div class="form-check form-switch">
+                                                <input type="hidden" name="fields_config[${index}][ai][enabled]" value="0">
+                                                <input type="checkbox" class="form-check-input ai-enabled-toggle"
+                                                       id="ai_enabled_${index}"
+                                                       name="fields_config[${index}][ai][enabled]" value="1"
+                                                       ${column.ai && column.ai.enabled ? 'checked' : ''}>
+                                                <label class="form-check-label" for="ai_enabled_${index}">启用 AI 增强</label>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-9">
+                                            <div class="text-muted small mb-2">启用后，前端可为该字段显示 AI 生成功能（需要配置 AI 服务）。</div>
+                                            <div class="row g-2">
+                                                <div class="col-md-3">
+                                                    <label class="form-label small">AI 角色</label>
+                                                    <input type="hidden" name="fields_config[${index}][ai][role]" value="${(column.ai && column.ai.role) ? escapeHtml(column.ai.role) : 'system'}">
+                                                    <div class="mt-1">
+                                                        <small class="text-muted">角色：<strong>${(column.ai && column.ai.role) ? escapeHtml(column.ai.role) : 'system'}</strong></small>
+                                                    </div>
+                                                </div>
+                                                <div class="col-md-5">
+                                                    <label class="form-label small">系统提示词（system prompt）</label>
+                                                    <textarea class="form-control form-control-sm"
+                                                              name="fields_config[${index}][ai][system_prompt]"
+                                                              rows="2"
+                                                              placeholder="用于设定 AI 的系统角色与行为">${escapeHtml(column.ai && column.ai.system_prompt ? column.ai.system_prompt : '')}</textarea>
+                                                </div>
+                                                <div class="col-md-4">
+                                                    <label class="form-label small">默认提示词（用户提示）</label>
+                                                    <input type="text" class="form-control form-control-sm"
+                                                           name="fields_config[${index}][ai][default_prompt]"
+                                                           value="${escapeHtml(column.ai && column.ai.default_prompt ? column.ai.default_prompt : '')}"
+                                                           placeholder="例如：请生成一段站点描述">
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
                                 <!-- 类型特定属性 -->
                                 <div class="col-md-12">
                                     <hr>
@@ -2005,6 +2125,7 @@ function renderFieldsConfig(columns) {
             // 检查是否已有键值类型和多键值类型选项
             const keyValueOption = formTypeSelect.querySelector('option[value="key_value"]');
             const multiKeyValueOption = formTypeSelect.querySelector('option[value="multi_key_value"]');
+            const objectKeyValueOption = formTypeSelect.querySelector('option[value="object_key_value"]');
             // 检查是否已有颜色和渐变色类型选项
             const colorOption = formTypeSelect.querySelector('option[value="color"]');
             const gradientOption = formTypeSelect.querySelector('option[value="gradient"]');
@@ -2022,6 +2143,13 @@ function renderFieldsConfig(columns) {
                     const option = document.createElement('option');
                     option.value = 'multi_key_value';
                     option.textContent = '多键值类型';
+                    formTypeSelect.appendChild(option);
+                }
+                // 添加对象键值类型选项（如果不存在）
+                if (!objectKeyValueOption) {
+                    const option = document.createElement('option');
+                    option.value = 'object_key_value';
+                    option.textContent = '对象键值';
                     formTypeSelect.appendChild(option);
                 }
                 // 移除颜色和渐变色类型选项（如果不是string类型）
@@ -2064,6 +2192,12 @@ function renderFieldsConfig(columns) {
                     }
                     multiKeyValueOption.remove();
                 }
+                if (objectKeyValueOption) {
+                    if (currentFormType === 'object_key_value') {
+                        formTypeSelect.value = 'text';
+                    }
+                    objectKeyValueOption.remove();
+                }
             } else {
                 // 如果不是array或string类型，移除所有特殊类型选项
                 if (keyValueOption) {
@@ -2077,6 +2211,12 @@ function renderFieldsConfig(columns) {
                         formTypeSelect.value = 'text';
                     }
                     multiKeyValueOption.remove();
+                }
+                if (objectKeyValueOption) {
+                    if (currentFormType === 'object_key_value') {
+                        formTypeSelect.value = 'text';
+                    }
+                    objectKeyValueOption.remove();
                 }
                 if (colorOption) {
                     if (currentFormType === 'color') {
@@ -2092,6 +2232,94 @@ function renderFieldsConfig(columns) {
                 }
             }
         });
+    });
+    
+    // 初始化时也要检查表单类型选项的显示状态
+    document.querySelectorAll('.field-model-type').forEach(select => {
+        const index = parseInt(select.getAttribute('data-index'));
+        const modelType = select.value;
+        const row = select.closest('tr.field-row');
+        if (!row) return;
+        
+        const formTypeSelect = row.querySelector(`select.field-form-type[data-index="${index}"]`);
+        if (!formTypeSelect) return;
+        
+        // 检查是否已有键值类型和多键值类型选项
+        const keyValueOption = formTypeSelect.querySelector('option[value="key_value"]');
+        const multiKeyValueOption = formTypeSelect.querySelector('option[value="multi_key_value"]');
+        const objectKeyValueOption = formTypeSelect.querySelector('option[value="object_key_value"]');
+        // 检查是否已有颜色和渐变色类型选项
+        const colorOption = formTypeSelect.querySelector('option[value="color"]');
+        const gradientOption = formTypeSelect.querySelector('option[value="gradient"]');
+        
+        if (modelType === 'array') {
+            // 如果是array类型，添加键值类型选项（如果不存在）
+            if (!keyValueOption) {
+                const option = document.createElement('option');
+                option.value = 'key_value';
+                option.textContent = '键值类型';
+                formTypeSelect.appendChild(option);
+            }
+            // 添加多键值类型选项（如果不存在）
+            if (!multiKeyValueOption) {
+                const option = document.createElement('option');
+                option.value = 'multi_key_value';
+                option.textContent = '多键值类型';
+                formTypeSelect.appendChild(option);
+            }
+            // 添加对象键值类型选项（如果不存在）
+            if (!objectKeyValueOption) {
+                const option = document.createElement('option');
+                option.value = 'object_key_value';
+                option.textContent = '对象键值';
+                formTypeSelect.appendChild(option);
+            }
+            // 移除颜色和渐变色类型选项（如果不是string类型）
+            if (colorOption) {
+                colorOption.remove();
+            }
+            if (gradientOption) {
+                gradientOption.remove();
+            }
+        } else if (modelType === 'string') {
+            // 如果是string类型，添加颜色和渐变色类型选项（如果不存在）
+            if (!colorOption) {
+                const option = document.createElement('option');
+                option.value = 'color';
+                option.textContent = '颜色选择器';
+                formTypeSelect.appendChild(option);
+            }
+            if (!gradientOption) {
+                const option = document.createElement('option');
+                option.value = 'gradient';
+                option.textContent = '渐变色选择器';
+                formTypeSelect.appendChild(option);
+            }
+            // 移除键值类型和多键值类型选项（如果不是array类型）
+            if (keyValueOption) {
+                keyValueOption.remove();
+            }
+            if (multiKeyValueOption) {
+                multiKeyValueOption.remove();
+            }
+            if (objectKeyValueOption) {
+                objectKeyValueOption.remove();
+            }
+        } else {
+            // 如果不是array或string类型，移除所有特殊类型选项
+            if (keyValueOption) {
+                keyValueOption.remove();
+            }
+            if (multiKeyValueOption) {
+                multiKeyValueOption.remove();
+            }
+            if (colorOption) {
+                colorOption.remove();
+            }
+            if (gradientOption) {
+                gradientOption.remove();
+            }
+        }
     });
     
     // 为所有表单类型选择框添加事件监听，自动更新搜索类型
@@ -2155,7 +2383,32 @@ function renderFieldsConfig(columns) {
             if (detailSearchTypeSelect) {
                 detailSearchTypeSelect.value = newSearchType;
             }
+            
+            // 如果表单类型是开关，且列宽为空，自动设置为 col-12 col-md-3
+            if (formType === 'switch') {
+                const colSelect = row.querySelector(`select[name="fields_config[${index}][col]"]`);
+                if (colSelect && !colSelect.value) {
+                    colSelect.value = 'col-12 col-md-3';
+                }
+            }
+            
+            // 如果表单类型是图片或多图，且列宽为空，自动设置为 col-12 col-md-6
+            if (formType === 'image' || formType === 'images') {
+                const colSelect = row.querySelector(`select[name="fields_config[${index}][col]"]`);
+                if (colSelect && !colSelect.value) {
+                    colSelect.value = 'col-12 col-md-6';
+                }
+            }
+            
+            // 动态显示/隐藏值类型字段
+            toggleValueTypeFields(index, formType);
         });
+    });
+    
+    // 初始化时也要检查值类型字段的显示状态
+    document.querySelectorAll('.field-form-type').forEach(select => {
+        const index = parseInt(select.getAttribute('data-index'));
+        toggleValueTypeFields(index, select.value);
     });
     
     // 为所有列宽选择框添加事件监听
@@ -2193,38 +2446,42 @@ function parseOptionsData(options) {
     const rawOptions = options || [];
     
     if (Array.isArray(rawOptions)) {
-        // 数组格式：[{key: '1', value: '选项1', color: 'primary'}, ...] 或 ['选项1', '选项2']
+        // 数组格式：[{key: '1', value: '选项1', color: 'primary', value_type: 'text'}, ...] 或 ['选项1', '选项2']
         rawOptions.forEach((opt, optIndex) => {
             if (typeof opt === 'object' && opt !== null) {
                 optionsArray.push({
                     key: opt.key || optIndex.toString(),
                     value: opt.value || opt.label || '',
-                    color: opt.color || ''
+                    color: opt.color || '',
+                    value_type: opt.value_type || 'text' // 包含值类型
                 });
             } else {
                 // 简单值，使用索引作为 key
                 optionsArray.push({
                     key: optIndex.toString(),
                     value: opt.toString(),
-                    color: ''
+                    color: '',
+                    value_type: 'text' // 默认值类型
                 });
             }
         });
     } else if (typeof rawOptions === 'object' && rawOptions !== null) {
-        // 对象格式：{'1': '选项1', '2': '选项2'} 或 {'1': {value: '选项1', color: 'primary'}}
+        // 对象格式：{'1': '选项1', '2': '选项2'} 或 {'1': {value: '选项1', color: 'primary', value_type: 'text'}}
         Object.keys(rawOptions).forEach(key => {
             const value = rawOptions[key];
             if (typeof value === 'object' && value !== null) {
                 optionsArray.push({
                     key: key,
                     value: value.value || value.label || '',
-                    color: value.color || ''
+                    color: value.color || '',
+                    value_type: value.value_type || 'text' // 包含值类型
                 });
             } else {
                 optionsArray.push({
                     key: key,
                     value: value.toString(),
-                    color: ''
+                    color: '',
+                    value_type: 'text' // 默认值类型
                 });
             }
         });
@@ -2260,6 +2517,405 @@ function showFieldDetails(index) {
         const bsCollapse = new bootstrap.Collapse(collapseElement, {
             toggle: true
         });
+    }
+}
+
+// ==================== 列宽可视化编辑 ====================
+
+/**
+ * 将 col 字符串解析为 md 断点下的列宽（1-12）
+ * @param {string} colValue
+ * @returns {number}
+ */
+function parseColToMdSpan(colValue) {
+    if (!colValue || typeof colValue !== 'string') {
+        return 12;
+    }
+    const mdMatch = colValue.match(/col-md-(\d+)/);
+    if (mdMatch) {
+        const span = parseInt(mdMatch[1], 10);
+        return Number.isNaN(span) ? 12 : Math.max(1, Math.min(12, span));
+    }
+    const baseMatch = colValue.match(/col-(\d+)/);
+    if (baseMatch) {
+        const span = parseInt(baseMatch[1], 10);
+        return Number.isNaN(span) ? 12 : Math.max(1, Math.min(12, span));
+    }
+    return 12;
+}
+
+/**
+ * 将 md 断点列宽转换为 col 预设值
+ * @param {number} span
+ * @returns {string}
+ */
+function getPresetColFromSpan(span) {
+    const md = Math.max(1, Math.min(12, span || 12));
+    switch (md) {
+        case 12: return 'col-12';
+        case 9: return 'col-12 col-md-9';
+        case 8: return 'col-12 col-md-8';
+        case 6: return 'col-12 col-md-6';
+        case 4: return 'col-12 col-md-4';
+        case 3: return 'col-12 col-md-3';
+        case 2: return 'col-6 col-md-2';
+        default:
+            return `col-12 col-md-${md}`;
+    }
+}
+
+/**
+ * 将列宽更新同步到主表单中的 col / col_custom 控件
+ * @param {number} index
+ * @param {string} colValue
+ */
+function syncColToMainForm(index, colValue) {
+    console.log(`[同步列宽] 同步索引 ${index} 的列宽为: ${colValue}`);
+    
+    const form = document.getElementById('configForm');
+    if (!form) {
+        console.warn('[同步列宽] 找不到表单 #configForm');
+        return;
+    }
+    
+    // 查找下拉框（可能在详细配置面板中，即使未展开也能找到，因为 DOM 元素存在）
+    // 使用更精确的选择器：通过 data-index 属性查找字段行，然后在其内部查找下拉框
+    const fieldRow = form.querySelector(`tr.field-row[data-index="${index}"]`);
+    if (!fieldRow) {
+        console.warn(`[同步列宽] 找不到索引 ${index} 的字段行`);
+        return;
+    }
+    
+    // 在字段行所在的表格中查找下拉框（可能在详细配置面板中）
+    const select = form.querySelector(`select[name="fields_config[${index}][col]"]`);
+    const customInput = form.querySelector(`input[name="fields_config[${index}][col_custom]"]`);
+    
+    if (!select) {
+        console.warn(`[同步列宽] 找不到索引 ${index} 的列宽下拉框`);
+        return;
+    }
+    
+    console.log(`[同步列宽] 找到下拉框，当前值: ${select.value}`);
+    
+    const presetValues = [
+        '',
+        'col-12',
+        'col-12 col-md-6',
+        'col-12 col-md-4',
+        'col-12 col-md-3',
+        'col-12 col-md-8',
+        'col-12 col-md-9',
+        'col-6 col-md-2',
+    ];
+    
+    if (!colValue) {
+        select.value = '';
+        if (customInput) {
+            customInput.value = '';
+            customInput.style.display = 'none';
+        }
+        console.log(`[同步列宽] 设置为默认值（空）`);
+    } else if (presetValues.includes(colValue)) {
+        select.value = colValue;
+        if (customInput) {
+            customInput.value = '';
+            customInput.style.display = 'none';
+        }
+        console.log(`[同步列宽] 设置为预设值: ${colValue}`);
+    } else {
+        // 自定义列宽
+        select.value = 'custom';
+        if (customInput) {
+            customInput.value = colValue;
+            customInput.style.display = 'block';
+        }
+        console.log(`[同步列宽] 设置为自定义值: ${colValue}`);
+    }
+    
+    // 触发展开面板内已有的联动逻辑
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    
+    console.log(`[同步列宽] 同步完成，下拉框新值: ${select.value}`);
+}
+
+/**
+ * 构建单个字段的列宽可视化行 HTML
+ * @param {number} index
+ * @param {string} displayName
+ * @param {string} colValue
+ * @returns {string}
+ */
+function buildColVisualizerRow(index, displayName, colValue) {
+    const span = parseColToMdSpan(colValue);
+    const widthPercent = Math.round((span / 12) * 100);
+    const safeName = displayName || `字段 ${index + 1}`;
+    
+    return `
+        <div class="mb-3" data-col-index="${index}">
+            <div class="d-flex justify-content-between align-items-center mb-1">
+                <div class="small text-muted">
+                    <code>${escapeHtml(safeName)}</code>
+                </div>
+                <div class="btn-group btn-group-sm" role="group" aria-label="列宽预设">
+                    <button type="button" class="btn btn-outline-secondary col-preset-btn" data-index="${index}" data-col="">
+                        默认
+                    </button>
+                    <button type="button" class="btn btn-outline-secondary col-preset-btn" data-index="${index}" data-col="col-12">
+                        全宽 1/1
+                    </button>
+                    <button type="button" class="btn btn-outline-secondary col-preset-btn" data-index="${index}" data-col="col-12 col-md-6">
+                        1/2
+                    </button>
+                    <button type="button" class="btn btn-outline-secondary col-preset-btn" data-index="${index}" data-col="col-12 col-md-4">
+                        1/3
+                    </button>
+                    <button type="button" class="btn btn-outline-secondary col-preset-btn" data-index="${index}" data-col="col-12 col-md-3">
+                        1/4
+                    </button>
+                    <button type="button" class="btn btn-outline-secondary col-preset-btn" data-index="${index}" data-col="col-12 col-md-8">
+                        2/3
+                    </button>
+                </div>
+            </div>
+            <div class="bg-light border rounded position-relative" style="height: 26px; overflow: hidden;">
+                <div class="bg-primary bg-opacity-75 text-white small d-flex align-items-center justify-content-center col-width-preview-bar"
+                     data-index="${index}"
+                     style="height: 100%; width: ${widthPercent}%; transition: width 0.15s;">
+                    <span>${span}/12</span>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+/**
+ * 打开列宽可视化编辑器
+ */
+let colVisualizerInstance = null;
+
+function openColVisualizer() {
+    const modalEl = document.getElementById('colVisualizerModal');
+    const contentEl = document.getElementById('colVisualizerContent');
+    const form = document.getElementById('configForm');
+    
+    if (!modalEl || !contentEl || !form) {
+        console.error('列宽可视化编辑器：找不到必要的 DOM 元素');
+        return;
+    }
+    
+    // 检查 FormColVisualizer 类是否已加载
+    if (typeof window.FormColVisualizer === 'undefined') {
+        console.error('列宽可视化编辑器：FormColVisualizer 类库未加载，请检查 /js/components/form-col-visualizer.js 是否正确引入');
+        contentEl.innerHTML = '<div class="alert alert-danger">列宽可视化编辑器类库未加载，请刷新页面重试。</div>';
+        const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+        modal.show();
+        return;
+    }
+    
+    // 检查 fieldsData 是否已加载
+    if (!fieldsData || fieldsData.length === 0) {
+        console.warn('列宽可视化编辑器：字段数据未加载，请等待字段配置加载完成');
+        contentEl.innerHTML = '<div class="alert alert-warning">字段配置尚未加载，请稍候再试。</div>';
+        const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+        modal.show();
+        return;
+    }
+    
+    // 从 fieldsData 全局变量和表单中提取字段数据
+    // 优先使用 fieldsData（这是提交时的数据源），同时从表单中读取 col 值
+    const editableFields = [];
+    
+    fieldsData.forEach((column, index) => {
+        // 检查字段是否可编辑
+        // editable 字段的判断：如果明确设置为 false，则不可编辑；否则默认为可编辑
+        const editable = column.editable !== undefined ? column.editable : guessEditable(column);
+        
+        if (!editable) {
+            return; // 跳过不可编辑的字段
+        }
+        
+        // 从表单中读取当前的 col 值（因为用户可能在详细配置中修改过）
+        let currentCol = column.col || '';
+        
+        // 尝试从表单中读取最新的 col 值
+        const rows = form.querySelectorAll('tr.field-row');
+        rows.forEach(row => {
+            const rowIndexAttr = row.getAttribute('data-index');
+            const rowIndex = parseInt(rowIndexAttr, 10);
+            if (Number.isNaN(rowIndex) || rowIndex !== index) {
+                return;
+            }
+            
+            // 获取当前 col 值
+            const colSelect = row.querySelector(`select[name="fields_config[${rowIndex}][col]"]`);
+            if (colSelect) {
+                let colValue = colSelect.value || '';
+                if (colValue === 'custom') {
+                    const customInput = form.querySelector(`input[name="fields_config[${rowIndex}][col_custom]"]`);
+                    if (customInput && customInput.value.trim()) {
+                        colValue = customInput.value.trim();
+                    } else {
+                        colValue = '';
+                    }
+                }
+                currentCol = colValue;
+            }
+        });
+        
+        editableFields.push({
+            name: column.name,
+            field_name: column.field_name || column.comment || column.name,
+            comment: column.comment || '',
+            form_type: column.form_type || 'text',
+            editable: true, // 已经过滤了不可编辑的字段
+            col: currentCol
+        });
+    });
+    
+    console.log('[列宽可视化编辑器] 可编辑字段数量:', editableFields.length);
+    console.log('[列宽可视化编辑器] 字段列表:', editableFields.map(f => f.name));
+    
+    // 创建可视化编辑器实例
+    colVisualizerInstance = new window.FormColVisualizer({
+        container: contentEl,
+        fields: editableFields,
+        modal: modalEl, // 传入模态框元素，用于保存成功后关闭
+        onUpdate: (fieldName, colValue) => {
+            // 同步更新表单中的 col 值
+            syncColToMainFormByFieldName(fieldName, colValue);
+        }
+    });
+    
+    // 渲染编辑器
+    colVisualizerInstance.render();
+    
+    // 显示模态框
+    const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+    
+    // 在模态框显示后绑定 footer 中的按钮事件
+    modalEl.addEventListener('shown.bs.modal', function onModalShown() {
+        // 只绑定一次，然后移除监听器
+        modalEl.removeEventListener('shown.bs.modal', onModalShown);
+        
+        // 绑定保存按钮
+        const saveBtn = document.getElementById('colVisualizerSaveBtn');
+        if (saveBtn) {
+            // 移除旧的事件监听器
+            const newSaveBtn = saveBtn.cloneNode(true);
+            saveBtn.parentNode.replaceChild(newSaveBtn, saveBtn);
+            
+            newSaveBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                console.log('[列宽可视化编辑器] 点击保存按钮');
+                if (colVisualizerInstance) {
+                    colVisualizerInstance.saveCols();
+                }
+            });
+        }
+        
+        // 绑定重置按钮
+        const resetBtn = document.getElementById('colVisualizerResetBtn');
+        if (resetBtn) {
+            // 移除旧的事件监听器
+            const newResetBtn = resetBtn.cloneNode(true);
+            resetBtn.parentNode.replaceChild(newResetBtn, resetBtn);
+            
+            newResetBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (confirm('确定要重置所有字段的列宽为默认值吗？')) {
+                    if (colVisualizerInstance) {
+                        colVisualizerInstance.resetAllCols();
+                    }
+                }
+            });
+        }
+    }, { once: true });
+    
+    modal.show();
+}
+
+/**
+ * 根据字段名同步 col 值到主表单
+ */
+function syncColToMainFormByFieldName(fieldName, colValue) {
+    console.log(`[同步列宽] 开始同步字段 ${fieldName} 的列宽为: ${colValue}`);
+    
+    const form = document.getElementById('configForm');
+    if (!form) {
+        console.warn('[同步列宽] 找不到表单 #configForm');
+        return;
+    }
+    
+    // 方法1：直接使用 data-field-name 属性查找（更可靠）
+    const fieldRow = form.querySelector(`tr.field-row[data-field-name="${fieldName}"]`);
+    
+    if (fieldRow) {
+        const indexAttr = fieldRow.getAttribute('data-index');
+        const index = parseInt(indexAttr, 10);
+        
+        if (!Number.isNaN(index)) {
+            console.log(`[同步列宽] 通过 data-field-name 找到字段 ${fieldName}，索引: ${index}，更新列宽为: ${colValue}`);
+            
+            // 找到对应的字段，更新 col 值
+            syncColToMainForm(index, colValue);
+            
+            // 同时更新 fieldsData 全局变量
+            if (window.fieldsData && window.fieldsData[index]) {
+                window.fieldsData[index].col = colValue;
+                console.log(`[同步列宽] 已更新 fieldsData[${index}].col = ${colValue}`);
+            }
+            
+            return;
+        }
+    }
+    
+    // 方法2：如果方法1失败，尝试通过隐藏的 name input 查找（备用方案）
+    console.log(`[同步列宽] 方法1未找到，尝试方法2：通过 name input 查找`);
+    const rows = form.querySelectorAll('tr.field-row');
+    let found = false;
+    
+    rows.forEach(row => {
+        const indexAttr = row.getAttribute('data-index');
+        const index = parseInt(indexAttr, 10);
+        if (Number.isNaN(index)) return;
+        
+        const nameInput = row.querySelector(`input[name="fields_config[${index}][name]"]`);
+        if (!nameInput) return;
+        
+        // 检查字段名是否匹配
+        if (nameInput.value !== fieldName) return;
+        
+        console.log(`[同步列宽] 通过 name input 找到字段 ${fieldName}，索引: ${index}，更新列宽为: ${colValue}`);
+        
+        // 找到对应的字段，更新 col 值
+        syncColToMainForm(index, colValue);
+        
+        // 同时更新 fieldsData 全局变量
+        if (window.fieldsData && window.fieldsData[index]) {
+            window.fieldsData[index].col = colValue;
+            console.log(`[同步列宽] 已更新 fieldsData[${index}].col = ${colValue}`);
+        }
+        
+        found = true;
+    });
+    
+    if (!found) {
+        console.warn(`[同步列宽] 未找到字段名为 ${fieldName} 的字段行`);
+        console.warn(`[同步列宽] 调试信息：当前表单中有 ${rows.length} 个字段行`);
+        // 输出所有字段名用于调试
+        const allFieldNames = Array.from(rows).map(row => {
+            const dataFieldName = row.getAttribute('data-field-name');
+            const indexAttr = row.getAttribute('data-index');
+            const nameInput = row.querySelector(`input[name="fields_config[${indexAttr}][name]"]`);
+            return {
+                dataFieldName: dataFieldName,
+                nameInputValue: nameInput ? nameInput.value : null,
+                index: indexAttr
+            };
+        });
+        console.warn(`[同步列宽] 所有字段行信息:`, allFieldNames);
     }
 }
 
@@ -2347,6 +3003,22 @@ function saveConfig() {
                             fieldsConfig[fieldIndex].relation = {};
                         }
                         fieldsConfig[fieldIndex].relation[secondPart] = value;
+                    } else if (firstPart === 'ai' && secondPart !== undefined) {
+                        // fields_config[0][ai][enabled] or fields_config[0][ai][system_prompt] etc.
+                        if (!fieldsConfig[fieldIndex].ai) {
+                            fieldsConfig[fieldIndex].ai = {};
+                        }
+                        if (secondPart === 'enabled') {
+                            // 查找对应的复选框元素，直接检查其 checked 状态
+                            const checkbox = form.querySelector(`input[name="fields_config[${fieldIndex}][ai][enabled]"][type="checkbox"]`);
+                            if (checkbox) {
+                                fieldsConfig[fieldIndex].ai[secondPart] = checkbox.checked;
+                            } else {
+                                fieldsConfig[fieldIndex].ai[secondPart] = value === '1' || value === 'true';
+                            }
+                        } else {
+                            fieldsConfig[fieldIndex].ai[secondPart] = value;
+                        }
                     } else if (firstPart === 'search' && secondPart !== undefined) {
                         // fields_config[0][search][type] 或 fields_config[0][search][enabled] 等
                         if (!fieldsConfig[fieldIndex].search) {
@@ -2467,6 +3139,32 @@ function saveConfig() {
             field.options = field.options.filter(opt => opt && opt.key && opt.value);
             if (field.options.length === 0) {
                 delete field.options;
+            }
+        }
+        // 处理 ai 配置（规范化）
+        if (field.ai && typeof field.ai === 'object') {
+            // 规范 enabled 为布尔值
+            if (field.ai.enabled === undefined) {
+                field.ai.enabled = false;
+            } else {
+                field.ai.enabled = !!field.ai.enabled;
+            }
+            // 默认 role 为 system
+            if (field.ai.enabled && !field.ai.role) {
+                field.ai.role = 'system';
+            }
+            // 清理空提示词
+            if (field.ai.system_prompt === '' || field.ai.system_prompt === null) {
+                delete field.ai.system_prompt;
+            }
+            if (field.ai.default_prompt === '' || field.ai.default_prompt === null) {
+                delete field.ai.default_prompt;
+            }
+            // 如果 ai 对象最终为空或者未启用且无其他字段，则删除
+            if (!field.ai.enabled && Object.keys(field.ai).length === 1) {
+                delete field.ai;
+            } else if (Object.keys(field.ai).length === 0) {
+                delete field.ai;
             }
         }
         // 处理 search 配置，如果为空或只有默认值则删除
@@ -2709,156 +3407,6 @@ function saveConfig() {
         }
     });
 }
-
-// ==================== 拖拽排序功能 ====================
-
-/**
- * 初始化字段拖拽排序功能
- */
-/**
- * 字段拖拽排序功能
- * 
- * 已禁用：拖动功能BUG太多，暂时禁用，待后续优化
- * 
- * 已知问题：
- * 1. 拖拽后字段顺序保存和加载不一致
- * 2. 拖拽时字段数据可能丢失
- * 3. 拖拽后索引更新不及时
- * 4. 与字段配置合并逻辑冲突
- * 
- * 待优化方向：
- * 1. 重新设计字段顺序保存机制
- * 2. 优化拖拽事件处理逻辑
- * 3. 确保拖拽后数据完整性
- * 4. 改进字段配置合并算法
- */
-function initFieldSortable() {
-    // 已禁用：拖动功能BUG太多，暂时禁用，待后续优化
-    console.warn('[字段排序] 拖动功能已禁用，待后续优化');
-    return;
-    
-    /* 原始代码已注释，待后续优化
-    const tbody = document.getElementById('fieldsTableBody');
-    if (!tbody) {
-        console.warn('[字段排序] 未找到表格 tbody 元素');
-        return;
-    }
-
-    // 检查是否已加载 Sortable.js（通过插件加载）
-    if (typeof Sortable === 'undefined') {
-        console.error('[字段排序] Sortable.js 未加载，请确保已引入 components.plugin.sortable-js');
-        return;
-    }
-
-    // 如果已存在实例，先销毁
-    if (window.fieldsSortable) {
-        window.fieldsSortable.destroy();
-        window.fieldsSortable = null;
-    }
-
-    // 创建 Sortable 实例
-    const sortable = new Sortable(tbody, {
-        handle: '.drag-handle', // 指定拖拽手柄
-        animation: 150, // 动画时长
-        ghostClass: 'sortable-ghost', // 拖拽时的占位符样式
-        dragClass: 'sortable-drag', // 拖拽元素的样式
-        chosenClass: 'sortable-chosen', // 选中元素的样式
-        forceFallback: false, // 使用 HTML5 拖拽 API
-        fallbackOnBody: true, // 如果拖拽到 body 外，回退到 body
-        swapThreshold: 0.65, // 交换阈值
-        group: 'fields', // 分组名称
-        onEnd: function(evt) {
-            // 拖拽结束后的回调
-            console.log('[字段排序] onEnd 事件触发', evt);
-            const oldIndex = evt.oldIndex;
-            const newIndex = evt.newIndex;
-            
-            console.log('[字段排序] Sortable 索引变化:', { oldIndex, newIndex, changed: oldIndex !== newIndex });
-            
-            if (oldIndex !== newIndex) {
-                // 方法：根据 DOM 中字段行的实际顺序重新排列 fieldsData
-                // 这样更可靠，不依赖于 Sortable.js 的索引
-                const tbody = document.getElementById('fieldsTableBody');
-                if (!tbody) {
-                    console.error('[字段排序] 未找到 tbody 元素');
-                    return;
-                }
-                
-                // 获取所有字段行（按 DOM 顺序）
-                const fieldRows = tbody.querySelectorAll('tr.field-row');
-                console.log('[字段排序] 找到字段行数量:', fieldRows.length, 'fieldsData 长度:', fieldsData.length);
-                
-                if (fieldRows.length !== fieldsData.length) {
-                    console.warn('[字段排序] 字段行数量与数据数组长度不匹配，可能存在问题');
-                }
-                
-                // 根据 DOM 顺序创建新的 fieldsData 数组
-                const newFieldsData = [];
-                const fieldNameMap = new Map();
-                
-                // 先建立字段名到字段数据的映射
-                fieldsData.forEach(field => {
-                    if (field && field.name) {
-                        fieldNameMap.set(field.name, field);
-                    }
-                });
-                
-                // 按照 DOM 中的顺序重新排列
-                fieldRows.forEach((row, domIndex) => {
-                    const fieldName = row.getAttribute('data-field-name');
-                    if (fieldName && fieldNameMap.has(fieldName)) {
-                        const field = fieldNameMap.get(fieldName);
-                        // 不设置 sort 字段，直接按照数组顺序保存
-                        newFieldsData.push(field);
-                        console.log(`[字段排序] 字段 "${fieldName}" 移动到位置 ${domIndex}`);
-                    } else {
-                        console.warn(`[字段排序] 未找到字段 "${fieldName}" 的数据`);
-                    }
-                });
-                
-                // 检查是否有字段丢失
-                if (newFieldsData.length !== fieldsData.length) {
-                    console.error('[字段排序] 字段数量不匹配，可能存在数据丢失', {
-                        oldLength: fieldsData.length,
-                        newLength: newFieldsData.length
-                    });
-                    // 添加丢失的字段
-                    fieldsData.forEach(field => {
-                        if (field && field.name && !newFieldsData.find(f => f.name === field.name)) {
-                            console.warn(`[字段排序] 添加丢失的字段: ${field.name}`);
-                            newFieldsData.push(field);
-                        }
-                    });
-                }
-                
-                // 更新 fieldsData 数组
-                fieldsData.length = 0;
-                fieldsData.push(...newFieldsData);
-                
-                console.log('[字段排序] 已更新字段顺序:', fieldsData.map((f, i) => ({
-                    index: i,
-                    name: f.name
-                })));
-                
-                // 重新渲染表格以更新索引
-                reindexFieldRows();
-                
-                // 显示提示信息
-                console.log('[字段排序] 准备显示提示信息');
-                showSortHint('字段顺序已更新，保存后生效');
-            } else {
-                console.log('[字段排序] 索引未变化，不显示提示');
-            }
-        }
-    });
-
-    // 保存到全局变量，以便后续使用
-    window.fieldsSortable = sortable;
-    
-    console.log('[字段排序] 拖拽排序功能已初始化');
-    */
-}
-
 /**
  * 重新索引字段行（拖拽后调用）
  */
@@ -3002,6 +3550,21 @@ function escapeHtml(text) {
 function renderOptionsList(index, column) {
     // 使用统一的选项解析函数
     const optionsArray = parseOptionsData(column.options);
+    // 检查是否为多键值类型
+    const isMultiKeyValue = column.form_type === 'multi_key_value';
+    const isObjectKeyValue = column.form_type === 'object_key_value';
+    const showValueType = isMultiKeyValue || isObjectKeyValue;
+    // 值类型选项（在多键值类型和对象键值类型时使用）
+    const VALUE_TYPES = [
+        { value: 'text', label: '文本' },
+        { value: 'number', label: '数字' },
+        { value: 'textarea', label: '文本域' },
+        { value: 'date', label: '日期' },
+        { value: 'datetime', label: '日期时间' },
+        { value: 'email', label: '邮箱' },
+        { value: 'password', label: '密码' }
+    ];
+    
     let html = '';
     
     optionsArray.forEach((option, optIndex) => {
@@ -3031,6 +3594,20 @@ function renderOptionsList(index, column) {
                        data-option-index="${optIndex}"
                        onchange="updateBadgePreview(${index}, ${optIndex})"
                        oninput="updateBadgePreview(${index}, ${optIndex})">
+                ${showValueType ? `
+                <span class="input-group-text" title="值类型（多键值类型和对象键值类型）">
+                    <i class="bi bi-type"></i>
+                </span>
+                <select class="form-select form-select-sm option-value-type-select" 
+                        name="fields_config[${index}][options][${optIndex}][value_type]"
+                        data-index="${index}"
+                        data-option-index="${optIndex}"
+                        title="选择值类型">
+                    ${VALUE_TYPES.map(type => 
+                        `<option value="${type.value}" ${(option.value_type || 'text') === type.value ? 'selected' : ''}>${type.label}</option>`
+                    ).join('')}
+                </select>
+                ` : ''}
                 <span class="input-group-text option-color-wrapper">
                     <i class="bi bi-palette"></i>
                 </span>
@@ -3174,6 +3751,23 @@ function addOption(index) {
     const existingOptions = optionsList.querySelectorAll('.option-item');
     const optIndex = existingOptions.length;
     
+    // 检查是否为多键值类型
+    const formTypeSelect = document.querySelector(`select.field-form-type[data-index="${index}"]`);
+    const isMultiKeyValue = formTypeSelect && formTypeSelect.value === 'multi_key_value';
+    
+    // 值类型选项（仅在多键值类型时使用）
+    const VALUE_TYPES = [
+        { value: 'text', label: '文本' },
+        { value: 'number', label: '数字' },
+        { value: 'textarea', label: '文本域' },
+        { value: 'date', label: '日期' },
+        { value: 'datetime', label: '日期时间' },
+        { value: 'email', label: '邮箱' },
+        { value: 'password', label: '密码' },
+        { value: 'color', label: '颜色选择器' },
+        { value: 'gradient', label: '渐变色选择器' }
+    ];
+    
     // 创建新选项 HTML
     const optionHtml = `
         <div class="input-group input-group-sm mb-2 option-item">
@@ -3201,6 +3795,20 @@ function addOption(index) {
                    data-option-index="${optIndex}"
                    onchange="updateBadgePreview(${index}, ${optIndex})"
                    oninput="updateBadgePreview(${index}, ${optIndex})">
+            ${showValueType ? `
+            <span class="input-group-text" title="值类型（多键值类型和对象键值类型）">
+                <i class="bi bi-type"></i>
+            </span>
+            <select class="form-select form-select-sm option-value-type-select" 
+                    name="fields_config[${index}][options][${optIndex}][value_type]"
+                    data-index="${index}"
+                    data-option-index="${optIndex}"
+                    title="选择值类型">
+                ${VALUE_TYPES.map(type => 
+                    `<option value="${type.value}">${type.label}</option>`
+                ).join('')}
+            </select>
+            ` : ''}
             <span class="input-group-text option-color-wrapper">
                 <i class="bi bi-palette"></i>
             </span>
@@ -3234,6 +3842,25 @@ function addOption(index) {
     
     // 更新徽章预览
     updateBadgePreview(index);
+}
+
+/**
+ * 切换值类型字段的显示/隐藏
+ * @param {number} index - 字段索引
+ * @param {string} formType - 表单类型
+ */
+function toggleValueTypeFields(index, formType) {
+    const isMultiKeyValue = formType === 'multi_key_value';
+    const optionsList = document.querySelector(`.options-list[data-index="${index}"]`);
+    if (!optionsList) return;
+    
+    // 显示/隐藏所有选项中的值类型字段
+    optionsList.querySelectorAll('.option-item').forEach(item => {
+        const valueTypeWrapper = item.querySelector('.option-value-type-select')?.closest('.input-group-text')?.parentElement;
+        if (valueTypeWrapper) {
+            valueTypeWrapper.style.display = isMultiKeyValue ? '' : 'none';
+        }
+    });
 }
 
 /**

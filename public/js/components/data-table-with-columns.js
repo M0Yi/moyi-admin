@@ -18,6 +18,10 @@
         const searchFormId = config.searchFormId;
         const searchPanelId = config.searchPanelId;
         const batchDestroyRoute = config.batchDestroyRoute;
+        // 创建页面路由（用于批量复制时打开创建页并预填充）
+        const createRoute = config.createRoute;
+        // iframe shell 通道前缀（可选）
+        const iframeShellChannel = config.iframeShellChannel;
         const columns = config.columns;
         const editRouteTemplate = config.editRouteTemplate;
         const deleteModalId = config.deleteModalId;
@@ -2076,6 +2080,17 @@
                 }
             }
             
+            // 更新批量复制按钮状态
+            const batchCopyBtn = document.getElementById('batchCopyBtn_' + tableId);
+            if (batchCopyBtn) {
+                batchCopyBtn.disabled = selectedIds.length === 0;
+                if (selectedIds.length > 0) {
+                    batchCopyBtn.classList.remove('disabled');
+                } else {
+                    batchCopyBtn.classList.add('disabled');
+                }
+            }
+            
             // 更新批量恢复按钮状态（回收站使用）
             const batchRestoreBtn = document.getElementById('batchRestoreBtn_' + tableId);
             if (batchRestoreBtn) {
@@ -2178,19 +2193,19 @@
                     }
                     
                     // 检查批量删除路由是否配置
-                    console.log(`[DataTable ${tableId}] 批量删除路由:`, batchDestroyRoute);
+                    console.log(`[DataTable ${tableId}] 删除路由:`, batchDestroyRoute);
                     if (!batchDestroyRoute) {
-                        console.error(`[DataTable ${tableId}] 批量删除路由未配置：batchDestroyRoute 为空`);
+                        console.error(`[DataTable ${tableId}] 删除路由未配置：batchDestroyRoute 为空`);
                         if (typeof showToast === 'function') {
-                            showToast('danger', '批量删除路由未配置，请联系管理员');
+                            showToast('danger', '删除路由未配置，请联系管理员');
                         } else {
-                            alert('批量删除路由未配置，请联系管理员');
+                            alert('删除路由未配置，请联系管理员');
                         }
                         return;
                     }
                     
                     // 关闭模态框
-                    console.log(`[DataTable ${tableId}] 关闭批量删除确认模态框`);
+                    console.log(`[DataTable ${tableId}] 关闭删除确认模态框`);
                     const modalElement = document.getElementById(batchDeleteModalId);
                     if (modalElement) {
                         const modal = bootstrap.Modal.getInstance(modalElement);
@@ -2200,7 +2215,7 @@
                     }
                     
                     // 执行批量删除
-                    console.log(`[DataTable ${tableId}] 执行批量删除操作，记录数:`, selectedIds.length);
+                    console.log(`[DataTable ${tableId}] 执行删除操作，记录数:`, selectedIds.length);
                     executeBatchDelete(selectedIds);
                 };
                 
@@ -2250,11 +2265,11 @@
                 // 检查批量删除路由
                 if (!batchDestroyRoute) {
                     if (typeof showToast === 'function') {
-                        showToast('danger', '批量删除路由未配置，请联系管理员');
+                        showToast('danger', '删除路由未配置，请联系管理员');
                     } else {
-                        alert('批量删除路由未配置，请联系管理员');
+                        alert('删除路由未配置，请联系管理员');
                     }
-                    console.error('批量删除路由未配置：batchDestroyRoute 为空');
+                    console.error('删除路由未配置：batchDestroyRoute 为空');
                     return;
                 }
                 
@@ -2278,9 +2293,9 @@
                 .then(result => {
                     if (result.code === 200) {
                         if (typeof showToast === 'function') {
-                            showToast('success', result.msg || '批量删除成功');
+                            showToast('success', result.msg || '删除成功');
                         } else {
-                            alert(result.msg || '批量删除成功');
+                            alert(result.msg || '删除成功');
                         }
                         selectedIds = [];
                         const checkAll = document.getElementById('checkAll_' + tableId);
@@ -2293,18 +2308,18 @@
                         }
                     } else {
                         if (typeof showToast === 'function') {
-                            showToast('danger', result.msg || '批量删除失败');
+                            showToast('danger', result.msg || '删除失败');
                         } else {
-                            alert(result.msg || '批量删除失败');
+                            alert(result.msg || '删除失败');
                         }
                     }
                 })
                 .catch(error => {
                     console.error('Error:', error);
                     if (typeof showToast === 'function') {
-                        showToast('danger', '批量删除失败');
+                        showToast('danger', '删除失败');
                     } else {
-                        alert('批量删除失败');
+                        alert('删除失败');
                     }
                 })
                 .finally(() => {
@@ -2332,11 +2347,11 @@
                 // 检查批量删除路由
                 if (!batchDestroyRoute) {
                     if (typeof showToast === 'function') {
-                        showToast('danger', '批量删除路由未配置，请联系管理员');
+                        showToast('danger', '删除路由未配置，请联系管理员');
                     } else {
-                        alert('批量删除路由未配置，请联系管理员');
+                        alert('删除路由未配置，请联系管理员');
                     }
-                    console.error('批量删除路由未配置：batchDestroyRoute 为空');
+                    console.error('删除路由未配置：batchDestroyRoute 为空');
                     return;
                 }
                 
@@ -2413,6 +2428,80 @@
                 return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
             };
         }
+
+        // 批量复制：始终定义全局函数，若未配置 createRoute 会提示并返回（避免 ReferenceError）
+        window['batchCopy_' + tableId] = function() {
+            // 如果按钮已被禁用（例如页面加载顺序导致），直接返回，避免触发提示或打开窗口
+            const preBtn = document.getElementById('batchCopyBtn_' + tableId);
+            if (preBtn && preBtn.disabled) {
+                return;
+            }
+            // 重新收集选中的ID
+            const checkboxes = document.querySelectorAll('#' + tableId + ' .row-check:checked');
+            const currentSelectedIds = Array.from(checkboxes).map(cb => parseInt(cb.value));
+
+            if (currentSelectedIds.length === 0) {
+                if (typeof showToast === 'function') {
+                    showToast('warning', '请选择要复制的记录');
+                } else {
+                    alert('请选择要复制的记录');
+                }
+                return;
+            }
+
+            if (!createRoute) {
+                if (typeof showToast === 'function') {
+                    showToast('danger', '创建路由未配置，无法执行批量复制');
+                } else {
+                    alert('创建路由未配置，无法执行批量复制');
+                }
+                return;
+            }
+
+            const batchCopyBtn = document.getElementById('batchCopyBtn_' + tableId);
+            const originalHtml = batchCopyBtn ? batchCopyBtn.innerHTML : '';
+            if (batchCopyBtn) {
+                batchCopyBtn.disabled = true;
+                batchCopyBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> 打开中...';
+            }
+
+            // 如果只选中一条，保持使用 iframe shell modal；多条则使用 openTab / window.open 打开多个标签以避免复用单一 iframe
+            currentSelectedIds.forEach(id => {
+                try {
+                    const url = createRoute + (createRoute.includes('?') ? '&' : '?') + 'duplicate_from=' + encodeURIComponent(id);
+                    const title = `复制 #${id}`;
+
+                    if (currentSelectedIds.length === 1) {
+                        if (window.Admin && window.Admin.iframeShell && typeof window.Admin.iframeShell.open === 'function') {
+                            const channel = iframeShellChannel ? (iframeShellChannel + '-copy-' + id) : undefined;
+                            window.Admin.iframeShell.open({
+                                src: url,
+                                title: title,
+                                channel: channel,
+                                hideActions: true,
+                                autoClose: true
+                            });
+                        } else {
+                            window.open(url, '_blank');
+                        }
+                    } else {
+                        // 多选时：打开新标签（优先使用 TabManager via iframeShell.openTab）
+                        if (window.Admin && window.Admin.iframeShell && typeof window.Admin.iframeShell.openTab === 'function') {
+                            window.Admin.iframeShell.openTab(url, title, { fallbackToWindow: true });
+                        } else {
+                            window.open(url, '_blank');
+                        }
+                    }
+                } catch (e) {
+                    console.error('[DataTable] 复制时打开创建页失败', e);
+                }
+            });
+
+            if (batchCopyBtn) {
+                batchCopyBtn.disabled = false;
+                batchCopyBtn.innerHTML = originalHtml;
+            }
+        };
         
         // 注意：toggleStatus 函数定义在 admin.common.scripts 中
         // 这里不再重复定义，避免冲突
@@ -2455,6 +2544,15 @@
                             batchDeleteBtn.disabled = true;
                             batchDeleteBtn.classList.add('disabled');
                             console.log(`[DataTable ${tableId}] 初始化批量删除按钮为禁用状态`);
+                        }
+                    }
+                    // 初始化批量复制按钮状态
+                    if (createRoute) {
+                        const batchCopyBtn = document.getElementById('batchCopyBtn_' + tableId);
+                        if (batchCopyBtn) {
+                            batchCopyBtn.disabled = true;
+                            batchCopyBtn.classList.add('disabled');
+                            console.log(`[DataTable ${tableId}] 初始化批量复制按钮为禁用状态`);
                         }
                     }
                     

@@ -2658,7 +2658,14 @@
             console.warn('[AIInputEnhancer] 组件未加载');
             return;
         }
-
+        // 默认改为需要显式开启自动增强，避免在所有表单页面默认注入 AI 功能
+        // 开启条件：window.AI_INPUT_AUTO_ENHANCE === true 或者 window.AI_CONFIG?.autoEnhance === true
+        const autoEnabled = (typeof window.AI_INPUT_AUTO_ENHANCE !== 'undefined' && window.AI_INPUT_AUTO_ENHANCE === true)
+            || (window.AI_CONFIG && window.AI_CONFIG.autoEnhance === true);
+        if (!autoEnabled) {
+            // 不抛错，静默跳过；如果需要调试可将下面注释改为 console.info
+            return;
+        }
         // 获取站点信息用于生成提示词
         const getSiteInfo = () => {
             return {

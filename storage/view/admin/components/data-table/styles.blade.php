@@ -100,7 +100,7 @@
     transition: transform 0.2s ease;
 }
 
-/* 批量删除按钮禁用状态 */
+/* 删除按钮禁用状态 */
 #batchDeleteBtn_{{ $tableId }}.disabled {
     opacity: 0.6;
     cursor: not-allowed;

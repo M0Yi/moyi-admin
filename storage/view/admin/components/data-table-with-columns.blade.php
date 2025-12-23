@@ -975,7 +975,7 @@
     $batchDeleteModalId = $batchDeleteModalId ?? 'batchDeleteModal_' . $tableId;
     $batchDeleteConfirmMessage = $batchDeleteConfirmMessage ?? '确定要删除选中的 {count} 条记录吗？';
     $batchDeleteWarningMessage = $batchDeleteWarningMessage ?? '警告：删除后将无法恢复！';
-    $batchDeleteModalTitle = $batchDeleteModalTitle ?? '确认批量删除';
+    $batchDeleteModalTitle = $batchDeleteModalTitle ?? '确认删除';
     $batchDeleteConfirmButtonText = $batchDeleteConfirmButtonText ?? '确认删除';
     $batchDeleteCancelButtonText = $batchDeleteCancelButtonText ?? '取消';
     $showBatchDeleteModal = ($enableBatchDelete && ($batchDeleteModalId !== false));

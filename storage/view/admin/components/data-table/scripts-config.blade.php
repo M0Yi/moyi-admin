@@ -24,6 +24,8 @@
         searchFormId: '{{ $searchFormId }}',
         searchPanelId: '{{ $searchPanelId ?? 'searchPanel' }}',
         batchDestroyRoute: '{{ $batchDestroyRoute ?? '' }}',
+        createRoute: '{{ $createRoute ?? '' }}',
+        iframeShellChannel: '{{ $iframeShellChannel ?? '' }}',
         columns: @json($columns),
         editRouteTemplate: '{{ $editRouteTemplate ?? '' }}',
         deleteModalId: '{{ $deleteModalId }}',

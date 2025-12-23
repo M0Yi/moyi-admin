@@ -189,7 +189,7 @@
     <div class="card border-0 shadow-sm">
         <div class="card-body">
             {{-- 使用集成了工具栏和搜索表单的数据表格组件（AJAX 模式） --}}
-            <div id="dataTableContainer">
+                    <div id="dataTableContainer">
                 @include('admin.components.data-table-with-columns', [
                     'tableId' => 'dataTable',
                     'storageKey' => $storageKey,
@@ -199,6 +199,10 @@
                     'searchPanelId' => 'searchPanel_dataTable',
                     // 不传递 searchConfig，改为使用 JavaScript 渲染搜索表单
                     'model' => $model,  // 传递模型名称，用于关联模式字段的异步加载
+                            // 创建页面路由（用于批量复制打开创建页时使用）
+                            'createRoute' => $createRoute,
+                            // iframe shell 通道（用于打开 iframe 时的频道前缀）
+                            'iframeShellChannel' => $shellChannel,
                     'batchDestroyRoute' => $batchDestroyRoute,  // 批量删除路由
                     'defaultPageSize' => $config['default_page_size'] ?? 15,  // 默认分页尺寸
                     'pageSizeOptions' => $config['page_size_options'] ?? [10, 15, 20, 50, 100],  // 可选的每页数量选项
@@ -226,15 +230,28 @@
                                 'data-iframe-shell-hide-actions' => 'true',  // 隐藏"新标签"和"新窗口"按钮
                             ],
                         ] : null,
-                        // 批量删除按钮：需要有路由且受 delete 功能开关控制
+                        // 批量复制按钮：受 add 功能开关控制（用于基于选中项打开创建页并预填充）
+                        ($features['add'] ?? true) ? [
+                            'type' => 'button',
+                            'text' => '复制',
+                            'icon' => 'bi-files',
+                            'variant' => 'primary',
+                            'id' => 'batchCopyBtn_dataTable',
+                            'onclick' => 'batchCopy_dataTable()',
+                            'attributes' => [
+                                'disabled' => 'disabled',
+                            ],
+                            'title' => '复制选中的记录'
+                        ] : null,
+                        // 删除按钮：需要有路由且受 delete 功能开关控制
                         (!empty($batchDestroyRoute) && ($features['delete'] ?? true)) ? [
                             'type' => 'button',
-                            'text' => '批量删除',
+                            'text' => '删除',
                             'icon' => 'bi-trash',
                             'variant' => 'danger',
                             'id' => 'batchDeleteBtn_dataTable',
                             'onclick' => 'batchDelete_dataTable()',
-                            'title' => '批量删除选中的记录'
+                            'title' => '删除选中的记录'
                         ] : null
                     ] : []), function($item) {
                         return $item !== null;

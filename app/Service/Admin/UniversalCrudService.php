@@ -495,6 +495,15 @@ class UniversalCrudService
                 'col' => $field['col'] ?? null, // 列宽配置，用于前端表单布局
             ];
             
+            // 保留 AI 配置（仅当启用时），传递到前端供渲染器使用
+            if (isset($field['ai']) && is_array($field['ai'])) {
+                $enabled = $field['ai']['enabled'] ?? null;
+                $enabledBool = filter_var($enabled, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+                if ($enabledBool) {
+                    $fieldConfig['ai'] = $field['ai'];
+                }
+            }
+            
             // 类型特定属性
             // textarea 和 rich_text 类型：rows
             if (in_array($formType, ['textarea', 'rich_text'])) {

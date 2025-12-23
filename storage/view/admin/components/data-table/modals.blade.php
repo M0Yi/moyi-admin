@@ -33,7 +33,7 @@
 @endif
 
 @if($showBatchDeleteModal)
-{{-- 批量删除确认模态框 --}}
+{{-- 删除确认模态框 --}}
 <div class="modal fade" id="{{ $batchDeleteModalId }}" tabindex="-1" aria-labelledby="{{ $batchDeleteModalId }}Label" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content">

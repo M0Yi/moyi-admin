@@ -237,6 +237,31 @@ class UniversalCrudController extends AbstractController
             $endpoints['siteOptions'] = admin_route('system/sites/options');
         }
 
+        // 如果传入 duplicate_from 参数，尝试读取对应记录并将其值填充到字段默认值中（用于复制）
+        $duplicateFrom = (int) $request->input('duplicate_from', 0);
+        if ($duplicateFrom > 0) {
+            try {
+                $record = $this->service->find($model, $duplicateFrom);
+                if (!empty($record) && is_array($record)) {
+                    $fields = $this->populateFieldDefaults($fields, $record, $relationOptions);
+                    // 移除主键默认值，避免复制 ID 导致冲突
+                    foreach ($fields as &$f) {
+                        if (isset($f['name']) && $f['name'] === 'id' && isset($f['default'])) {
+                            unset($f['default']);
+                        }
+                    }
+                    unset($f);
+                }
+            } catch (\Throwable $e) {
+                // 记录错误但不中断创建页面渲染
+                logger()->warning('[UniversalCrudController] duplicate_from 填充数据失败', [
+                    'model' => $model,
+                    'duplicate_from' => $duplicateFrom,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
         $formSchema = [
             'model' => $model,
             'title' => $config['title'] ?? $model,

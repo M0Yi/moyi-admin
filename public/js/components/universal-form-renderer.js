@@ -450,6 +450,27 @@
             const requiredMark = field.required ? ' <span class="text-danger">*</span>' : '';
             const helpText = field.help ? `<div class="form-text">${this.escape(field.help)}</div>` : '';
             const controlHtml = this.renderFieldControl(field);
+            // 统一提取 AI 配置（如果存在），以便多处复用
+            let aiEnabled = '0';
+            let aiRole = '';
+            let aiSystemPrompt = '';
+            let aiDefaultPrompt = '';
+            if (field.ai) {
+                aiEnabled = field.ai.enabled ? '1' : '0';
+                aiRole = field.ai.role || 'system';
+                aiSystemPrompt = field.ai.system_prompt || '';
+                aiDefaultPrompt = field.ai.default_prompt || '';
+            }
+
+            // 如果字段启用了 AI，将 AI data 属性注入到控件的第一个元素上，保证增强器能直接读取到这些值
+            let renderedControlHtml = controlHtml;
+            if (field.ai) {
+                renderedControlHtml = this.insertAttributesToFirstElement(controlHtml, {
+                    'data-ai-role': aiRole,
+                    'data-ai-system-prompt': aiSystemPrompt,
+                    'data-ai-default-prompt': aiDefaultPrompt
+                });
+            }
 
             // 所有字段都显示外层 label，保持结构统一
             const labelHtml = `<label class="form-label" for="${this.escapeAttr(this.getFieldId(field))}">
@@ -466,10 +487,37 @@
             });
             const customAttrsStr = customAttrs.length > 0 ? ' ' + customAttrs.join(' ') : '';
 
+            // 字段级 AI 配置：注入 data-* 到字段容器并生成隐藏提交字段
+            let aiAttrs = '';
+            let aiHiddenInputs = '';
+            if (field.ai) {
+                const aiEnabledEsc = this.escapeAttr(aiEnabled);
+                const aiRoleEsc = this.escapeAttr(aiRole || '');
+                const aiSystemPromptEsc = this.escapeAttr(aiSystemPrompt || '');
+                const aiDefaultPromptEsc = this.escapeAttr(aiDefaultPrompt || '');
+                aiAttrs = ` data-ai-enabled="${aiEnabledEsc}" data-ai-role="${aiRoleEsc}" data-ai-system-prompt="${aiSystemPromptEsc}" data-ai-default-prompt="${aiDefaultPromptEsc}"`;
+
+                aiHiddenInputs = `
+                    <input type="hidden" name="ai_config[${this.escapeAttr(name)}][enabled]" value="${aiEnabledEsc}">
+                    <input type="hidden" name="ai_config[${this.escapeAttr(name)}][role]" value="${aiRoleEsc || this.escapeAttr('system')}">
+                    <input type="hidden" name="ai_config[${this.escapeAttr(name)}][system_prompt]" value="${aiSystemPromptEsc}">
+                    <input type="hidden" name="ai_config[${this.escapeAttr(name)}][default_prompt]" value="${aiDefaultPromptEsc}">
+                `;
+                // 前端实时验证输出：仅在 AI 启用时打印字段的 ai 配置，便于调试
+                try {
+                    if (aiEnabled === '1') {
+                        console.debug('[UniversalFormRenderer] AI config for field:', name, field.ai);
+                    }
+                } catch (e) {
+                    // ignore
+                }
+            }
+
             return `
-                <div class="universal-form-field mb-3" data-field-name="${this.escapeAttr(name)}"${customAttrsStr}>
+                <div class="universal-form-field mb-3" data-field-name="${this.escapeAttr(name)}"${aiAttrs}${customAttrsStr}>
                     ${labelHtml}
-                    ${controlHtml}
+                    ${renderedControlHtml}
+                    ${aiHiddenInputs}
                     ${helpText}
                 </div>
             `;
@@ -509,6 +557,10 @@
                     return this.renderImageField(field);
                 case 'images':
                     return this.renderImagesField(field);
+                case 'file':
+                    return this.renderFileField(field);
+                case 'files':
+                    return this.renderFilesField(field);
                 case 'rich_text':
                     return this.renderRichTextField(field);
                 case 'permission_tree':
@@ -524,6 +576,10 @@
                 case 'object_key_value':
                     return this.renderObjectKeyValueField(field);
                 default:
+                    // 未知或未实现的字段类型统一记录警告，便于前端定位渲染缺失
+                    console.error(
+                        `[universal-form-renderer] Unsupported field type "${type}" for field "${field.name || ''}". Falling back to text input.`
+                    );
                     return this.renderTextInput(field, 'text');
             }
         }
@@ -711,6 +767,30 @@
             const id = this.getFieldId(field);
             const value = this.getFieldValue(field);
             const rows = field.rows ? parseInt(field.rows, 10) : 4;
+            // 如果启用了 AI 配置，为 textarea 提供专用包装，显示 AI 配置徽章并为后续增强留位
+            if (field.ai) {
+                const aiRole = this.escape(field.ai.role || 'system');
+                const aiSystemPrompt = this.escapeAttr(field.ai.system_prompt || '');
+                const aiDefaultPrompt = this.escapeAttr(field.ai.default_prompt || '');
+
+                return `
+                    <div class="ai-input-wrapper" style="position: relative; width: 100%;">
+                        <textarea
+                            class="form-control"
+                            id="${id}"
+                            name="${this.escapeAttr(field.name)}"
+                            rows="${rows}"
+                            data-ai-role="${aiRole}"
+                            data-ai-system-prompt="${aiSystemPrompt}"
+                            data-ai-default-prompt="${aiDefaultPrompt}"
+                            ${this.buildCommonAttributes(field)}
+                        >${this.escape(value)}</textarea>
+                        <div class="ai-config-badge position-absolute" style="top: 6px; right: 8px; z-index:5; background: rgba(255,255,255,0.85); padding: 3px 8px; border-radius: 0.25rem; font-size: 0.75rem; border: 1px solid #e9ecef;">
+                            <i class="bi bi-robot me-1"></i>AI: <strong>${aiRole}</strong>
+                        </div>
+                    </div>
+                `;
+            }
 
             return `
                 <textarea
@@ -1064,6 +1144,58 @@
                     </div>
                     <input type="file" accept="image/*" multiple class="d-none" data-role="images-input">
                     <div class="text-muted small mt-1">可上传多张图片，将自动保存为 JSON 数组</div>
+                </div>
+            `;
+        }
+
+        renderFileField(field) {
+            const id = this.getFieldId(field);
+            const value = this.getFieldValue(field);
+
+            return `
+                <div class="universal-file-field" data-universal-file="${this.escapeAttr(field.name)}">
+                    <div class="input-group">
+                        <input
+                            type="text"
+                            class="form-control"
+                            id="${id}"
+                            name="${this.escapeAttr(field.name)}"
+                            placeholder="${this.escapeAttr(field.placeholder ?? '请输入或上传文件 URL')}"
+                            value="${this.escapeAttr(value)}"
+                            ${field.required ? 'required' : ''}
+                        >
+                        <button class="btn btn-outline-secondary" type="button" data-action="upload">
+                            <i class="bi bi-upload me-1"></i>上传
+                        </button>
+                        <button class="btn btn-outline-secondary" type="button" data-action="preview" ${value ? '' : 'disabled'}>
+                            <i class="bi bi-box-arrow-up-right me-1"></i>打开
+                        </button>
+                    </div>
+                    <input type="file" class="d-none" data-role="file-input">
+                    <div class="text-muted small mt-1">支持任意文件类型，单文件大小上限 50MB（具体以服务器配置为准）</div>
+                    <div class="mt-2" data-preview></div>
+                </div>
+            `;
+        }
+
+        renderFilesField(field) {
+            const id = this.getFieldId(field);
+            const value = this.normalizeArrayValue(this.getFieldValue(field));
+
+            return `
+                <div class="universal-files-field" data-universal-files="${this.escapeAttr(field.name)}">
+                    <input type="hidden" name="${this.escapeAttr(field.name)}" id="${id}" value="${this.escapeAttr(JSON.stringify(value))}">
+                    <div class="file-list" data-preview></div>
+                    <div class="d-flex gap-2 mt-2">
+                        <button class="btn btn-outline-secondary btn-sm" type="button" data-action="upload">
+                            <i class="bi bi-upload me-1"></i>上传文件
+                        </button>
+                        <button class="btn btn-outline-danger btn-sm" type="button" data-action="clear">
+                            <i class="bi bi-trash me-1"></i>清空
+                        </button>
+                    </div>
+                    <input type="file" multiple class="d-none" data-role="files-input">
+                    <div class="text-muted small mt-1">可上传多个文件，结果保存为 JSON 数组（URL 列表）</div>
                 </div>
             `;
         }
@@ -1847,12 +1979,15 @@
             this.initializeNumberRangeFields();
             this.initializeImageFields();
             this.initializeMultiImageFields();
+            this.initializeFileFields();
+            this.initializeMultiFileFields();
             this.initializeDateInputs();
             this.initializePermissionTreeFields();
             this.initializeSiteSelectors();
             this.initializeKeyValueFields();
             this.initializeMultiKeyValueFields();
             this.initializeObjectKeyValueFields();
+            this.initializeFieldAI();
         }
 
         initializeObjectKeyValueFields() {
@@ -1862,6 +1997,49 @@
             }
 
             wrappers.forEach((wrapper) => this.setupObjectKeyValueField(wrapper));
+        }
+
+        initializeFieldAI() {
+            if (typeof window.AIInputEnhancer === 'undefined' || !window.AIInputEnhancer) {
+                // AIInputEnhancer 不存在，跳过
+                return;
+            }
+
+            const wrappers = this.form.querySelectorAll('.universal-form-field[data-ai-enabled="1"]');
+            if (!wrappers.length) {
+                return;
+            }
+
+            wrappers.forEach((wrapper) => {
+                try {
+                    const inputEl = wrapper.querySelector('textarea, input[type="text"], input[type="search"], input[type="url"]');
+                    if (!inputEl) {
+                        return;
+                    }
+
+                    const aiRole = wrapper.getAttribute('data-ai-role') || undefined;
+                    const aiSystemPrompt = wrapper.getAttribute('data-ai-system-prompt') || undefined;
+                    const aiDefaultPrompt = wrapper.getAttribute('data-ai-default-prompt') || undefined;
+
+                    const options = {};
+                    if (aiDefaultPrompt) {
+                        options.defaultPrompt = function() { return aiDefaultPrompt; };
+                    }
+                    // 将系统提示词放入 aiConfig，AIInputEnhancer 内部会将 aiConfig 传递给 AI 服务
+                    options.aiConfig = Object.assign({}, window.AI_CONFIG || {}, aiSystemPrompt ? { system_prompt: aiSystemPrompt } : {});
+                    if (aiRole) {
+                        options.aiConfig.role = aiRole;
+                    }
+
+                    // 不要使用 auto 模式默认调用生成，使用 modal 为主（用户点击触发）
+                    options.mode = 'modal';
+
+                    // 调用增强器
+                    window.AIInputEnhancer.enhance(inputEl, options);
+                } catch (e) {
+                    console.error('[UniversalFormRenderer] 初始化字段 AI 增强失败', e);
+                }
+            });
         }
 
         setupObjectKeyValueField(wrapper) {
@@ -2330,6 +2508,133 @@
             });
         }
 
+        initializeFileFields() {
+            const wrappers = this.form.querySelectorAll('[data-universal-file]');
+
+            wrappers.forEach((wrapper) => {
+                const textInput = wrapper.querySelector('input[type="text"]');
+                const uploadBtn = wrapper.querySelector('[data-action="upload"]');
+                const previewBtn = wrapper.querySelector('[data-action="preview"]');
+                const fileInput = wrapper.querySelector('input[data-role="file-input"]');
+                const previewContainer = wrapper.querySelector('[data-preview]');
+
+                if (!textInput || !uploadBtn || !fileInput) {
+                    return;
+                }
+
+                if (textInput.value) {
+                    this.updateSingleFilePreview(previewContainer, textInput.value);
+                    if (previewBtn) {
+                        previewBtn.disabled = false;
+                    }
+                }
+
+                uploadBtn.addEventListener('click', () => fileInput.click());
+
+                fileInput.addEventListener('change', async (event) => {
+                    const file = event.target.files?.[0];
+                    if (!file) {
+                        return;
+                    }
+
+                    uploadBtn.disabled = true;
+                    if (previewBtn) {
+                        previewBtn.disabled = true;
+                    }
+                    this.updateSingleFilePreview(previewContainer, null, true);
+
+                    try {
+                        const url = await this.uploadFile(file);
+                        textInput.value = url;
+                        this.updateSingleFilePreview(previewContainer, url);
+                        if (previewBtn) {
+                            previewBtn.disabled = false;
+                        }
+                        this.notify('success', '文件上传成功');
+                    } catch (error) {
+                        console.error('[UniversalFormRenderer] 文件上传失败', error);
+                        this.notify('danger', error.message || '文件上传失败');
+                        this.updateSingleFilePreview(previewContainer, null);
+                    } finally {
+                        uploadBtn.disabled = false;
+                    }
+                });
+
+                if (previewBtn) {
+                    previewBtn.addEventListener('click', () => {
+                        if (!textInput.value) {
+                            return;
+                        }
+                        window.open(textInput.value, '_blank');
+                    });
+                }
+            });
+        }
+
+        initializeMultiFileFields() {
+            const wrappers = this.form.querySelectorAll('[data-universal-files]');
+
+            wrappers.forEach((wrapper) => {
+                const hiddenInput = wrapper.querySelector('input[type="hidden"]');
+                const uploadBtn = wrapper.querySelector('[data-action="upload"]');
+                const clearBtn = wrapper.querySelector('[data-action="clear"]');
+                const fileInput = wrapper.querySelector('input[data-role="files-input"]');
+                const previewContainer = wrapper.querySelector('[data-preview]');
+
+                if (!hiddenInput || !uploadBtn || !fileInput || !previewContainer) {
+                    return;
+                }
+
+                const files = this.normalizeArrayValue(hiddenInput.value);
+                this.renderMultiFilePreview(previewContainer, files, hiddenInput);
+
+                uploadBtn.addEventListener('click', () => fileInput.click());
+
+                fileInput.addEventListener('change', async (event) => {
+                    const selected = Array.from(event.target.files || []);
+                    if (!selected.length) {
+                        return;
+                    }
+
+                    uploadBtn.disabled = true;
+                    clearBtn.disabled = true;
+
+                    for (const file of selected) {
+                        try {
+                            const url = await this.uploadFile(file);
+                            files.push(url);
+                            this.renderMultiFilePreview(previewContainer, files, hiddenInput);
+                        } catch (error) {
+                            console.error('[UniversalFormRenderer] 多文件上传失败', error);
+                            this.notify('danger', error.message || '文件上传失败');
+                        }
+                    }
+
+                    uploadBtn.disabled = false;
+                    clearBtn.disabled = false;
+                    fileInput.value = '';
+                });
+
+                clearBtn.addEventListener('click', () => {
+                    files.length = 0;
+                    this.renderMultiFilePreview(previewContainer, files, hiddenInput);
+                });
+
+                previewContainer.addEventListener('click', (event) => {
+                    const removeBtn = event.target.closest('[data-remove-index]');
+                    if (!removeBtn) {
+                        return;
+                    }
+                    const index = parseInt(removeBtn.dataset.removeIndex, 10);
+                    if (Number.isNaN(index)) {
+                        return;
+                    }
+                    files.splice(index, 1);
+                    this.renderMultiFilePreview(previewContainer, files, hiddenInput);
+                });
+            });
+        }
+
         initializeDateInputs() {
             if (typeof window.flatpickr !== 'function') {
                 console.warn('[UniversalFormRenderer] Flatpickr 未加载，跳过日期选择器初始化');
@@ -2430,6 +2735,73 @@
             `;
         }
 
+        updateSingleFilePreview(container, url, isLoading) {
+            if (!container) {
+                return;
+            }
+
+            if (isLoading) {
+                container.innerHTML = '<div class="text-muted small"><span class="spinner-border spinner-border-sm me-1"></span>上传中...</div>';
+                return;
+            }
+
+            if (!url) {
+                container.innerHTML = '';
+                return;
+            }
+
+            // 尝试从 URL 中提取文件名
+            let filename = url;
+            try {
+                const u = new URL(url, window.location.origin);
+                filename = decodeURIComponent(u.pathname.split('/').pop() || url);
+            } catch (e) {
+                // ignore
+            }
+
+            container.innerHTML = `
+                <div class="border rounded p-2 d-inline-flex align-items-center gap-2">
+                    <i class="bi bi-file-earmark-text" style="font-size: 1.5rem;"></i>
+                    <div class="text-break small"><a href="${this.escapeAttr(url)}" target="_blank" rel="noopener">${this.escape(filename)}</a></div>
+                </div>
+            `;
+        }
+
+        renderMultiFilePreview(container, files, hiddenInput) {
+            if (!container) {
+                return;
+            }
+
+            hiddenInput.value = JSON.stringify(files);
+
+            if (!files.length) {
+                container.innerHTML = '<div class="text-muted small">暂无文件</div>';
+                return;
+            }
+
+            container.innerHTML = files
+                .map((url, index) => {
+                    let filename = url;
+                    try {
+                        const u = new URL(url, window.location.origin);
+                        filename = decodeURIComponent(u.pathname.split('/').pop() || url);
+                    } catch (e) {
+                        // ignore
+                    }
+
+                    return `
+                        <div class="d-flex align-items-center gap-2 mb-2" style="min-width: 200px;">
+                            <i class="bi bi-file-earmark-text" style="font-size: 1.25rem;"></i>
+                            <a href="${this.escapeAttr(url)}" target="_blank" rel="noopener" class="text-break small">${this.escape(filename)}</a>
+                            <button type="button" class="btn btn-sm btn-outline-danger ms-auto" data-remove-index="${index}" title="删除">
+                                <i class="bi bi-x"></i>
+                            </button>
+                        </div>
+                    `;
+                })
+                .join('');
+        }
+
         renderMultiImagePreview(container, images, hiddenInput) {
             if (!container) {
                 return;
@@ -2466,16 +2838,39 @@
                 throw new Error('未配置上传接口');
             }
 
-            if (!file.type.startsWith('image/')) {
-                throw new Error('请选择图片文件');
-            }
+            const isImage = typeof file.type === 'string' && file.type.startsWith('image/');
+            const maxSize = isImage ? 10 * 1024 * 1024 : 50 * 1024 * 1024; // 图片上限 10MB，其他文件上限 50MB
 
-            if (file.size > 10 * 1024 * 1024) {
-                throw new Error('图片大小不能超过 10MB');
+            if (file.size > maxSize) {
+                throw new Error(isImage ? '图片大小不能超过 10MB' : '文件大小不能超过 50MB');
             }
 
             // 获取上传接口地址（用于状态更新通知）
             const uploadUrl = this.endpoints.uploadUrl || (this.endpoints.uploadToken.replace('/token', ''));
+
+            // 如果浏览器没有提供 MIME 类型，尝试根据文件扩展名推断
+            let contentType = file.type;
+            if (!contentType || contentType === '') {
+                const ext = (file.name || '').split('.').pop().toLowerCase();
+                const extToMime = {
+                    'jpg': 'image/jpeg',
+                    'jpeg': 'image/jpeg',
+                    'png': 'image/png',
+                    'gif': 'image/gif',
+                    'webp': 'image/webp',
+                    'svg': 'image/svg+xml',
+                    'pdf': 'application/pdf',
+                    'doc': 'application/msword',
+                    'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                    'xls': 'application/vnd.ms-excel',
+                    'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                    'txt': 'text/plain',
+                    'csv': 'text/csv',
+                    'mp4': 'video/mp4',
+                    'mp3': 'audio/mpeg',
+                };
+                contentType = extToMime[ext] || 'application/octet-stream';
+            }
 
             const tokenResponse = await fetch(this.endpoints.uploadToken, {
                 method: 'POST',
@@ -2484,15 +2879,27 @@
                 },
                 body: JSON.stringify({
                     filename: file.name,
-                    content_type: file.type,
+                    content_type: contentType,
                     file_size: file.size,
-                    sub_path: 'images',
+                    sub_path: isImage ? 'images' : 'files',
                 }),
             });
 
             const tokenResult = await tokenResponse.json();
             if (tokenResult.code !== 200 || !tokenResult.data) {
-                throw new Error(tokenResult.msg || '获取上传令牌失败');
+                // 优先从 data.errors 中提取具体字段的验证信息（例如 content_type）
+                let errMsg = tokenResult.msg || '获取上传令牌失败';
+                if (tokenResult.data && tokenResult.data.errors) {
+                    const errors = tokenResult.data.errors;
+                    // 优先取 content_type 的错误信息，否则取第一个字段的第一个错误
+                    const preferred = errors.content_type || Object.values(errors)[0];
+                    if (Array.isArray(preferred) && preferred.length > 0) {
+                        errMsg = preferred[0];
+                    } else if (typeof preferred === 'string') {
+                        errMsg = preferred;
+                    }
+                }
+                throw new Error(errMsg);
             }
 
             const tokenData = tokenResult.data;
@@ -2515,7 +2922,7 @@
 
             // 构建上传请求头
             const uploadHeaders = {
-                'Content-Type': file.type,
+                'Content-Type': contentType,
             };
 
             // 如果是 S3 直传，使用 tokenData 中的 headers（预签名 URL 的签名信息）
@@ -3957,6 +4364,29 @@
                 .replace(/"/g, '&quot;')
                 .replace(/</g, '&lt;')
                 .replace(/>/g, '&gt;');
+        }
+
+        /**
+         * 在控件 HTML 的第一个元素标签上注入属性（用于把 data-ai-* 注入具体标签）
+         * @param {string} html
+         * @param {Object} attrs - key:value 对象，key 为属性名，value 为属性值
+         * @returns {string}
+         */
+        insertAttributesToFirstElement(html, attrs = {}) {
+            if (!html || typeof html !== 'string') return html;
+            const keys = Object.keys(attrs);
+            if (!keys.length) return html;
+
+            // 构建属性字符串
+            const attrsStr = keys.map(k => `${k}="${this.escapeAttr(attrs[k])}"`).join(' ');
+
+            // 匹配第一个开始标签，例如: <input ...> 或 <textarea ...>
+            const match = html.match(/^(\s*<\w+\b)([^>]*)>/);
+            if (!match) return html;
+
+            const original = match[0];
+            const replaced = `${match[1]}${match[2]} ${attrsStr}>`;
+            return html.replace(original, replaced);
         }
 
         notify(type, message) {
