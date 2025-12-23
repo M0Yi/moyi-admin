@@ -6,10 +6,12 @@
 --}}
 @php
     $resourcePath = "/js/components/data-table-with-columns.js";
+    $version = $version ?? (defined('APP_VERSION') ? APP_VERSION : '') ?? '';
+    $resourcePathWithVersion = $version ? $resourcePath . '?v=' . $version : $resourcePath;
     $cdn = site()?->resource_cdn;
     $src = !empty($cdn)
-        ? rtrim($cdn, '/') . $resourcePath
-        : $resourcePath;
+        ? rtrim($cdn, '/') . $resourcePathWithVersion
+        : $resourcePathWithVersion;
 @endphp
 
 <script src="{{ $src }}"></script>

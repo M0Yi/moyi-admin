@@ -6,10 +6,12 @@ Iframe Shell JS 脚本
 --}}
 @php
     $resourcePath = "/js/components/iframe-shell.js";
+    $version = $version ?? (defined('APP_VERSION') ? APP_VERSION : '') ?? '';
+    $resourcePathWithVersion = $version ? $resourcePath . '?v=' . $version : $resourcePath;
     $cdn = site()?->resource_cdn;
     $src = !empty($cdn)
-        ? rtrim($cdn, '/') . $resourcePath
-        : $resourcePath;
+        ? rtrim($cdn, '/') . $resourcePathWithVersion
+        : $resourcePathWithVersion;
 @endphp
 
 <script src="{{ $src }}"></script>

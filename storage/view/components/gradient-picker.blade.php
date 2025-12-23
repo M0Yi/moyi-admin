@@ -236,7 +236,7 @@
 </div>
 
 {{-- 引入渐变选择器脚本 --}}
-<script src="/js/components/gradient-picker.js"></script>
+@include('components.admin-script', ['path' => '/js/components/gradient-picker.js'])
 
 <style>
 .gradient-preview {

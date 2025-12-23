@@ -11,6 +11,45 @@ use Psr\Log\LoggerInterface;
 use function Hyperf\Config\config;
 use function Hyperf\Support\make;
 
+// 全局 PHP 常量：APP_VERSION，优先从配置读取（config/autoload/version.php）
+if (! defined('APP_VERSION')) {
+    $ver = null;
+    // 尝试通过框架的 config() 读取（在多数运行时可用）
+    try {
+        $ver = config('version.framework_version');
+    } catch (\Throwable $e) {
+        $ver = null;
+    }
+
+    // 如果通过 config() 未能读取到（例如在非常早的 bootstrap 阶段），尝试直接包含配置文件作为后备
+    if (empty($ver)) {
+        try {
+            if (defined('BASE_PATH')) {
+                $file = BASE_PATH . '/config/autoload/version.php';
+            } else {
+                // 如果没有 BASE_PATH，尝试相对路径回退
+                $file = __DIR__ . '/../config/autoload/version.php';
+            }
+
+            if (file_exists($file)) {
+                $cfg = include $file;
+                if (is_array($cfg) && isset($cfg['framework_version'])) {
+                    $ver = $cfg['framework_version'];
+                }
+            }
+        } catch (\Throwable $e) {
+            // 忽略错误，后续会使用默认值
+            $ver = $ver ?? null;
+        }
+    }
+
+    if (! is_string($ver)) {
+        $ver = $ver === null ? '' : (string) $ver;
+    }
+
+    define('APP_VERSION', $ver !== '' ? $ver : '0.0.0');
+}
+
 if (! function_exists('auth')) {
     /**
      * Auth认证辅助方法

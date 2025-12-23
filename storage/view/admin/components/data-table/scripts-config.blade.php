@@ -26,6 +26,7 @@
         batchDestroyRoute: '{{ $batchDestroyRoute ?? '' }}',
         createRoute: '{{ $createRoute ?? '' }}',
         iframeShellChannel: '{{ $iframeShellChannel ?? '' }}',
+        appVersion: '{{ config("version.framework_version") }}',
         columns: @json($columns),
         editRouteTemplate: '{{ $editRouteTemplate ?? '' }}',
         deleteModalId: '{{ $deleteModalId }}',
@@ -82,5 +83,7 @@
     
     // 设置当前表格ID，供第二个 script 标签使用
     window['_currentTableId'] = '{{ $tableId }}';
+    // 全局应用版本号（供前端脚本使用）
+    window.APP_VERSION = '{{ config("version.framework_version") }}';
 </script>
 

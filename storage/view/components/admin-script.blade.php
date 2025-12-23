@@ -10,7 +10,8 @@
 --}}
 @php
     $resourcePath = $path ?? '/js/admin.js';
-    $version = $version ?? '';
+    // 优先使用传入的版本参数，否则使用全局常量 APP_VERSION
+    $version = $version ?? (defined('APP_VERSION') ? APP_VERSION : '') ?? '';
     $resourcePathWithVersion = $version ? $resourcePath . '?v=' . $version : $resourcePath;
     $cdn = site()?->resource_cdn;
     $src = !empty($cdn)
