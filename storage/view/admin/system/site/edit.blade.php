@@ -247,11 +247,7 @@
 
 <!-- 引入通用表单渲染器 -->
 @php
-    $universalFormJsVersion = file_exists(BASE_PATH . '/public/js/components/universal-form-renderer.js')
-        ? filemtime(BASE_PATH . '/public/js/components/universal-form-renderer.js')
-        : time();
-@endphp
-@include('components.admin-script', ['path' => '/js/components/universal-form-renderer.js', 'version' => $universalFormJsVersion])
+@include('components.admin-script', ['path' => '/js/components/universal-form-renderer.js'])
 
 <!-- 站点表单特殊逻辑 -->
 @include('components.admin-script', ['path' => '/js/admin/system/site-form.js'])

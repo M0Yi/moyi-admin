@@ -935,10 +935,12 @@
                     if (value) {
                         const imageWidth = column.imageWidth || column.width || '80px';
                         const imageHeight = column.imageHeight || column.height || '80px';
+                        // escape single quotes and backslashes for safe embedding in single-quoted JS string
+                        const escValue = String(value).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
                         return `<img src="${value}" 
                                      alt="" 
-                                     style="width: ${imageWidth}; height: ${imageHeight}; object-fit: cover; max-width: 100%; cursor: pointer;" 
-                                     onclick="window.open('${value}', '_blank')" 
+                                     style="width: ${imageWidth}; height: ${imageHeight}; object-fit: contain; object-position: center; max-width: 100%; cursor: pointer;" 
+                                     onclick="openImagePreview('${escValue}')" 
                                      title="点击查看大图">`;
                     }
                     return '<span class="text-muted" style="font-size: 0.875rem;">-</span>';
@@ -998,12 +1000,15 @@
                             const imageWidth = column.imageWidth || '60px';
                             const imageHeight = column.imageHeight || '60px';
                             let html = '<div class="d-flex gap-1 flex-wrap">';
-                            images.forEach(img => {
+                            images.forEach((img, idx) => {
                                 if (img) {
+                                    // build a JSON-safe string for the images array and use JSON.parse in onclick
+                                    const imgsJson = JSON.stringify(images).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+                                    const escImg = String(img).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
                                     html += `<img src="${img}" 
                                                  alt="" 
-                                                 style="width: ${imageWidth}; height: ${imageHeight}; object-fit: cover; cursor: pointer;" 
-                                                 onclick="window.open('${img}', '_blank')" 
+                                                 style="width: ${imageWidth}; height: ${imageHeight}; object-fit: contain; object-position: center; cursor: pointer;" 
+                                                 onclick="openImagePreview(JSON.parse('${imgsJson}'), {startIndex: ${idx}})" 
                                                  title="点击查看大图">`;
                                 }
                             });

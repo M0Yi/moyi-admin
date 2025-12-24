@@ -68,7 +68,7 @@
         }
     </style>
 
-    @include('components.admin-style')
+    @include('components.admin-style', ['path' => '/css/admin_style.css'])
     {{-- 插槽：admin-styles
         功能：按需输出样式（CSS）
         来源：页面或组件通过 @push('admin-styles') 注入（如 admin-sidebar 组件）
@@ -79,6 +79,7 @@
 
     {{-- iframe-shell 组件：用于在弹窗中打开页面 --}}
     @include('components.iframe-shell')
+
 
     @if($isEmbedded)
         <main class="admin-embed-main">
@@ -199,7 +200,7 @@ window.AI_CONFIG = @json($aiConfig);
 })();
 </script>
 @endif
-    @include('components.admin-js')
+    @include('components.admin-script', ['path' => '/js/admin.js'])
     {{-- AI 配置工厂类（必须在 AI 服务类之前加载） --}}
     @include('components.admin-script', ['path' => '/js/components/ai-config-factory.js'])
     {{-- AI 服务类 --}}
@@ -214,6 +215,8 @@ window.AI_CONFIG = @json($aiConfig);
 
     {{-- iframe-shell.js：在所有页面加载，用于处理弹窗打开功能 --}}
     @include('components.iframe-shell-js')
+    {{-- 全局图片预览组件（放在 bootstrap/js 之后，确保 bootstrap.Modal 可用） --}}
+    @include('components.image-preview')
 
 @if (! $isEmbedded)
     @include('components.admin-tab-manager-js')

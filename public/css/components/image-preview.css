@@ -1,0 +1,51 @@
+/* Image preview modal styles */
+.image-preview-modal .modal-dialog { max-width: 900px; }
+.image-preview-modal .image-preview-stage {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #000;
+    min-height: 60vh;
+}
+.image-preview-modal .image-preview-stage img {
+    max-width: 100%;
+    max-height: 80vh;
+    object-fit: contain;
+    object-position: center;
+    display: block;
+}
+.image-preview-modal .preview-controls {
+    position: absolute;
+    top: 8px;
+    right: 12px;
+    z-index: 1200;
+}
+.image-preview-modal .preview-counter {
+    color: #fff;
+    font-size: 0.9rem;
+    margin-left: .5rem;
+}
+.image-preview-modal .preview-arrow {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    color: rgba(255,255,255,0.9);
+    background: rgba(0,0,0,0.35);
+    border: none;
+    width: 46px;
+    height: 70px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 6px;
+    cursor: pointer;
+}
+.image-preview-modal .preview-arrow:disabled { opacity: 0.4; cursor: default; }
+.image-preview-modal .preview-arrow.left { left: 8px; }
+.image-preview-modal .preview-arrow.right { right: 8px; }
+.image-preview-modal .preview-caption {
+    color: #fff;
+    padding: .75rem 1rem;
+    font-size: .95rem;
+    background: rgba(0,0,0,0.45);
+}

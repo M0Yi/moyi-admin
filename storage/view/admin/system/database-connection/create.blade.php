@@ -42,12 +42,7 @@
 @endsection
 
 @push('admin_scripts')
-@php
-    $universalFormJsVersion = file_exists(BASE_PATH . '/public/js/components/universal-form-renderer.js')
-        ? filemtime(BASE_PATH . '/public/js/components/universal-form-renderer.js')
-        : time();
-@endphp
-@include('components.admin-script', ['path' => '/js/components/universal-form-renderer.js', 'version' => $universalFormJsVersion])
+@include('components.admin-script', ['path' => '/js/components/universal-form-renderer.js'])
 
 <script>
 window.DatabaseConnectionFormPage = {
@@ -71,6 +66,8 @@ document.addEventListener('DOMContentLoaded', function () {
 });
 </script>
 @endpush
+
+
 
 
 

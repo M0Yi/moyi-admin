@@ -189,7 +189,7 @@
     <div class="card border-0 shadow-sm">
         <div class="card-body">
             {{-- 使用集成了工具栏和搜索表单的数据表格组件（AJAX 模式） --}}
-                    <div id="dataTableContainer">
+            <div id="dataTableContainer">
                 @include('admin.components.data-table-with-columns', [
                     'tableId' => 'dataTable',
                     'storageKey' => $storageKey,
