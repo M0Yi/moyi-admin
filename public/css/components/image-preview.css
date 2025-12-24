@@ -1,51 +1,84 @@
 /* Image preview modal styles */
-.image-preview-modal .modal-dialog { max-width: 900px; }
+.image-preview-modal .modal-dialog {
+    max-width: 900px;
+}
+
 .image-preview-modal .image-preview-stage {
     display: flex;
     align-items: center;
     justify-content: center;
-    background: #000;
+    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
     min-height: 60vh;
+    border-radius: 16px 16px 0 0;
 }
+
 .image-preview-modal .image-preview-stage img {
     max-width: 100%;
     max-height: 80vh;
     object-fit: contain;
     object-position: center;
     display: block;
+    border-radius: 8px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
 }
-.image-preview-modal .preview-controls {
-    position: absolute;
-    top: 8px;
-    right: 12px;
+
+.image-preview-modal .preview-counter-overlay {
+    color: #495057;
+    background: rgba(255, 255, 255, 0.9);
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    backdrop-filter: blur(4px);
     z-index: 1200;
 }
-.image-preview-modal .preview-counter {
-    color: #fff;
-    font-size: 0.9rem;
-    margin-left: .5rem;
-}
+
 .image-preview-modal .preview-arrow {
     position: absolute;
     top: 50%;
     transform: translateY(-50%);
-    color: rgba(255,255,255,0.9);
-    background: rgba(0,0,0,0.35);
-    border: none;
-    width: 46px;
-    height: 70px;
+    color: #495057;
+    background: rgba(255, 255, 255, 0.9);
+    border: 1px solid rgba(0, 0, 0, 0.1);
+    width: 48px;
+    height: 72px;
     display: flex;
     align-items: center;
     justify-content: center;
-    border-radius: 6px;
+    border-radius: 12px;
     cursor: pointer;
+    transition: all 0.2s ease;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
-.image-preview-modal .preview-arrow:disabled { opacity: 0.4; cursor: default; }
-.image-preview-modal .preview-arrow.left { left: 8px; }
-.image-preview-modal .preview-arrow.right { right: 8px; }
+
+.image-preview-modal .preview-arrow:hover {
+    background: rgba(255, 255, 255, 1);
+    transform: translateY(-50%) scale(1.05);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.image-preview-modal .preview-arrow:active {
+    transform: translateY(-50%) scale(0.95);
+}
+
+.image-preview-modal .preview-arrow:disabled {
+    opacity: 0.4;
+    cursor: default;
+    transform: translateY(-50%);
+}
+
+.image-preview-modal .preview-arrow:disabled:hover {
+    background: rgba(255, 255, 255, 0.9);
+    transform: translateY(-50%);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.image-preview-modal .preview-arrow.left { left: 16px; }
+.image-preview-modal .preview-arrow.right { right: 16px; }
+
 .image-preview-modal .preview-caption {
-    color: #fff;
-    padding: .75rem 1rem;
-    font-size: .95rem;
-    background: rgba(0,0,0,0.45);
+    color: #212529;
+    font-size: 0.95rem;
+    font-weight: 500;
 }

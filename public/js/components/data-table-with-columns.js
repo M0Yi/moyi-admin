@@ -999,21 +999,31 @@
                         if (images.length > 0) {
                             const imageWidth = column.imageWidth || '60px';
                             const imageHeight = column.imageHeight || '60px';
-                            let html = '<div class="d-flex gap-1 flex-wrap">';
-                            images.forEach((img, idx) => {
-                                if (img) {
-                                    // build a JSON-safe string for the images array and use JSON.parse in onclick
-                                    const imgsJson = JSON.stringify(images).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-                                    const escImg = String(img).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-                                    html += `<img src="${img}" 
-                                                 alt="" 
-                                                 style="width: ${imageWidth}; height: ${imageHeight}; object-fit: contain; object-position: center; cursor: pointer;" 
-                                                 onclick="openImagePreview(JSON.parse('${imgsJson}'), {startIndex: ${idx}})" 
+
+                            // 预处理图片数组，确保每个图片都是字符串格式
+                            const processedImages = images.map(img => String(img || '')).filter(img => img);
+
+                            if (processedImages.length > 0) {
+                                // 为整个图片组创建一个安全的 onclick 处理
+                                const imagesJson = JSON.stringify(processedImages);
+                                // 对 JSON 字符串进行 HTML 属性安全的转义
+                                const safeImagesJson = imagesJson.replace(/&/g, '&amp;')
+                                                                .replace(/</g, '&lt;')
+                                                                .replace(/>/g, '&gt;')
+                                                                .replace(/"/g, '&quot;')
+                                                                .replace(/'/g, '&#x27;');
+
+                                let html = '<div class="d-flex gap-1 flex-wrap">';
+                                processedImages.forEach((img, idx) => {
+                                    html += `<img src="${img.replace(/"/g, '&quot;')}"
+                                                 alt=""
+                                                 style="width: ${imageWidth}; height: ${imageHeight}; object-fit: contain; object-position: center; cursor: pointer;"
+                                                 onclick="openImagePreview(${safeImagesJson}, {startIndex: ${idx}})"
                                                  title="点击查看大图">`;
-                                }
-                            });
-                            html += '</div>';
-                            return html;
+                                });
+                                html += '</div>';
+                                return html;
+                            }
                         }
                     }
                     return '<span class="text-muted" style="font-size: 0.875rem;">-</span>';

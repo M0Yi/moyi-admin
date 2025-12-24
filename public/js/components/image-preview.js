@@ -113,8 +113,25 @@
             this.container.appendChild(img);
 
             // update controls
-            this.counterEl.textContent = `${this.currentIndex + 1} / ${this.images.length}`;
+            // 当只有一张图片时，不显示序号
+            if (this.images.length === 1) {
+                this.counterEl.style.display = 'none';
+            } else {
+                this.counterEl.style.display = '';
+                this.counterEl.textContent = `${this.currentIndex + 1} / ${this.images.length}`;
+            }
+
             this.captionEl.textContent = imgInfo.caption || '';
+
+            // 动态显示/隐藏标题区域
+            const captionContainer = document.getElementById('imagePreviewCaptionContainer');
+            if (captionContainer) {
+                if (imgInfo.caption && imgInfo.caption.trim()) {
+                    captionContainer.classList.remove('d-none');
+                } else {
+                    captionContainer.classList.add('d-none');
+                }
+            }
 
             // 当只有一张图片时，隐藏左右按钮
             if (this.images.length === 1) {
