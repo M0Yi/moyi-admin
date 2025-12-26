@@ -1086,29 +1086,6 @@ class InstallController extends AbstractController
         );
 
         AdminMenu::query()->firstOrCreate(
-            ['site_id' => $siteId, 'name' => 'system.divider1'],
-            [
-                'parent_id' => $system->id,
-                'title' => '-',
-                'icon' => null,
-                'path' => null,
-                'component' => null,
-                'redirect' => null,
-                'type' => AdminMenu::TYPE_DIVIDER,
-                'target' => AdminMenu::TARGET_SELF,
-                'badge' => null,
-                'badge_type' => null,
-                'permission' => null,
-                'visible' => 1,
-                'status' => 1,
-                'sort' => 1090,
-                'cache' => 1,
-                'config' => null,
-                'remark' => null,
-            ]
-        );
-
-        AdminMenu::query()->firstOrCreate(
             ['site_id' => $siteId, 'path' => '/system/crud-generator'],
             [
                 'parent_id' => $system->id,

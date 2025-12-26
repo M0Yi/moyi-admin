@@ -491,7 +491,8 @@ class AdminSite extends Model
         // 默认主题配置
         $defaults = [
             'primary_color' => '#6366f1',
-            'secondary_color' => '#8b5cf6',
+            // 辅助色（默认设置为灰色，便于 UI 中的次要/禁用状态显示）
+            'secondary_color' => '#94a3b8',
             'primary_gradient' => 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
             'primary_hover' => '#764ba2',
             'success_color' => '#10b981',

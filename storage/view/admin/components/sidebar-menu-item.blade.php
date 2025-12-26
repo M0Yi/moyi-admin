@@ -30,6 +30,22 @@
                  role="button"
                  aria-expanded="true"
                  aria-controls="{{ $groupId }}">
+                {{-- 分组图标（优先显示自定义图标） --}}
+                @if(!empty($menu['icon']))
+                    @if(str_starts_with($menu['icon'], 'bi '))
+                        <i class="{{ $menu['icon'] }} group-icon" aria-hidden="true"></i>
+                    @elseif(str_starts_with($menu['icon'], '#'))
+                        <svg class="bi group-icon" width="18" height="18" aria-hidden="true">
+                            <use xlink:href="{{ $menu['icon'] }}"/>
+                        </svg>
+                    @else
+                        <i class="{{ $menu['icon'] }} group-icon" aria-hidden="true"></i>
+                    @endif
+                @else
+                    {{-- 如果没有图标，保留一个占位以保证排版稳定 --}}
+                    <i class="bi bi-circle group-icon" aria-hidden="true" style="opacity:0.12;"></i>
+                @endif
+
                 <span class="sidebar-group-title">{{ $menu['title'] }}</span>
                 <i class="bi bi-chevron-down sidebar-group-arrow" style="font-size: 0.75rem; transition: transform 0.2s ease;"></i>
             </div>

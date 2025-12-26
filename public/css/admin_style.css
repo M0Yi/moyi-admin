@@ -327,7 +327,8 @@ thead .sticky-column {
     bottom: 0;
     left: var(--sidebar-width, 260px);
     right: 0;
-    background: linear-gradient(135deg, var(--primary-color) 0%, var(--primary-hover) 100%);
+    /* 使用主题主渐变色（优先使用 CSS 变量），并提供回退渐变 */
+    background: var(--primary-gradient, linear-gradient(135deg, var(--primary-color, #6366f1) 0%, var(--primary-hover, #764ba2) 100%));
     box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.1);
     padding: 1rem 0;
     z-index: 1030;
@@ -899,13 +900,15 @@ img.sidebar-brand__logo {
 }
 .sidebar .nav-link.active {
     color: #fff;
-    background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
-    box-shadow: 0 2px 8px rgba(59, 130, 246, 0.25);
+    /* 使用主题主渐变色（来自 layout 的 --primary-gradient） */
+    background: var(--primary-gradient);
+    box-shadow: 0 2px 12px rgba(15, 23, 42, 0.12);
 }
 .sidebar .nav-link.active-parent {
-    color: #2563eb;
-    background: rgba(37, 99, 235, 0.12);
-    border-left: 3px solid #2563eb;
+    /* 次级激活状态使用主题主色作为强调色 */
+    color: var(--primary-color);
+    background: rgba(37, 99, 235, 0.08); /* 轻微背景，保留阅读层级 */
+    border-left: 3px solid var(--primary-color);
 }
 .sidebar.collapsed .nav-link.active-parent { color: #fff; background: #2563eb; }
 .sidebar .nav-link svg { margin-right: 0.75rem; color: currentColor; transition: all 0.2s ease; flex-shrink: 0; }
@@ -956,6 +959,24 @@ img.sidebar-brand__logo {
 .sidebar-group-arrow {
     margin-left: 0.5rem;
     transition: transform 0.2s ease;
+}
+
+/* 分组图标样式 */
+.sidebar-group-header .group-icon,
+.sidebar-heading .group-icon {
+    width: 18px;
+    height: 18px;
+    margin-right: 0.75rem;
+    flex-shrink: 0;
+    color: currentColor;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.sidebar-group-header .group-icon.bi,
+.sidebar-heading .group-icon.bi {
+    font-size: 1.125rem;
 }
 
 .sidebar-group-content {

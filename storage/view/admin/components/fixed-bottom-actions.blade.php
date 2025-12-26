@@ -41,7 +41,16 @@
     // 基础参数
     $formId = $formId ?? null;
     $submitBtnId = $submitBtnId ?? 'submitBtn';
-    $cancelUrl = $cancelUrl ?? '#';
+    $cancelUrl = $cancelUrl ?? null;
+    // 如果未传 cancelUrl，尝试智能推断：优先使用 HTTP_REFERER，其次使用后台首页
+    if (empty($cancelUrl)) {
+        $referer = $_SERVER['HTTP_REFERER'] ?? null;
+        if (!empty($referer)) {
+            $cancelUrl = $referer;
+        } else {
+            $cancelUrl = admin_route('dashboard');
+        }
+    }
     $cancelText = $cancelText ?? '取消';
     $submitText = $submitText ?? '保存';
     $infoText = $infoText ?? '填写完成后点击保存按钮提交';
