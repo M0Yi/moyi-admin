@@ -68,6 +68,7 @@
            data-admin-tab="{{ $shouldOpenTab ? '1' : '0' }}"
            data-tab-mode="{{ $isExternalLink ? 'external' : 'internal' }}"
            data-tab-title="{{ $menu['title'] ?? '' }}"
+           data-title="{{ $menu['title'] ?? '' }}"
            @if($hasChildren)
                data-toggle="collapse"
                data-target="#{{ $submenuId }}"

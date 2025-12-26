@@ -193,7 +193,7 @@
                 @include('admin.components.data-table-with-columns', [
                     'tableId' => 'dataTable',
                     'storageKey' => $storageKey,
-                    'emptyMessage' => '加载中...',
+                    'emptyMessage' => '暂无数据',
                     'ajaxUrl' => $indexRoute,  // 启用 AJAX 模式
                     'searchFormId' => 'searchForm_dataTable',
                     'searchPanelId' => 'searchPanel_dataTable',

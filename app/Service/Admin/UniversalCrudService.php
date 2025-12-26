@@ -29,12 +29,6 @@ class UniversalCrudService
     #[Inject]
     protected CrudService $crudService;
 
-    /**
-     * 缓存“连接.表”是否包含 site_id 列，避免重复查询信息架构
-     *
-     * @var array<string, bool>
-     */
-    private array $tableSiteIdColumnCache = [];
 
     /**
      * 从数据库获取 CRUD 配置
@@ -2817,6 +2811,83 @@ class UniversalCrudService
         // 过滤字段
         $data = $this->filterFields($model, $data);
 
+        // 处理 site_id 字段
+        $hasSiteIdField = $this->configHasSiteIdField($config);
+
+        logger()->info('site_id 处理条件检查 (创建)', [
+            'model' => $model,
+            'table' => $tableName,
+            'has_site_id_field' => $hasSiteIdField,
+            'current_site_id' => site_id(),
+            'is_super_admin' => is_super_admin()
+        ]);
+
+        if ($hasSiteIdField) {
+            $currentSiteId = site_id();
+            $isSuperAdmin = is_super_admin();
+            $originalSiteId = $data['site_id'] ?? null;
+
+            logger()->info('处理 site_id 字段 (创建)', [
+                'model' => $model,
+                'table' => $tableName,
+                'is_site_enabled' => $this->isSiteEnabled(),
+                'has_site_id_field' => $this->configHasSiteIdField($config),
+                'current_site_id' => $currentSiteId,
+                'is_super_admin' => $isSuperAdmin,
+                'original_site_id' => $originalSiteId,
+                'data_keys' => array_keys($data),
+            ]);
+
+            if (!isset($data['site_id'])) {
+                // 如果数据中没有 site_id，所有用户（包括超级管理员）都自动使用当前站点ID
+                if ($currentSiteId !== null) {
+                    $data['site_id'] = $currentSiteId;
+                    logger()->info('自动赋值 site_id (创建)', [
+                        'model' => $model,
+                        'assigned_site_id' => $currentSiteId,
+                        'reason' => '数据中没有 site_id 字段'
+                    ]);
+                } else {
+                    logger()->warning('无法自动赋值 site_id (创建)', [
+                        'model' => $model,
+                        'reason' => '当前用户没有站点ID'
+                    ]);
+                }
+            } elseif (!$isSuperAdmin) {
+                // 如果数据中有 site_id 但不是超级管理员，强制使用当前站点ID
+                $oldSiteId = $data['site_id'];
+                if ($currentSiteId !== null) {
+                    $data['site_id'] = $currentSiteId;
+                    logger()->info('强制替换 site_id (创建)', [
+                        'model' => $model,
+                        'old_site_id' => $oldSiteId,
+                        'new_site_id' => $currentSiteId,
+                        'reason' => '非超级管理员尝试设置 site_id'
+                    ]);
+                } else {
+                    unset($data['site_id']);
+                    logger()->info('移除无效 site_id (创建)', [
+                        'model' => $model,
+                        'removed_site_id' => $oldSiteId,
+                        'reason' => '非超级管理员且当前用户没有站点ID'
+                    ]);
+                }
+            } else {
+                // 超级管理员可以自由设置 site_id 值（当明确提交时）
+                logger()->info('超级管理员设置 site_id (创建)', [
+                    'model' => $model,
+                    'site_id' => $data['site_id'],
+                    'reason' => '超级管理员明确提交了 site_id'
+                ]);
+            }
+
+            logger()->info('site_id 处理完成 (创建)', [
+                'model' => $model,
+                'final_site_id' => $data['site_id'] ?? null,
+                'data_has_site_id' => isset($data['site_id'])
+            ]);
+        }
+
         return $this->crudService->create($tableName, $data, [
             'fillable' => $config['fillable'] ?? null,
             'has_site_id' => !empty($config['has_site_id']),
@@ -2854,6 +2925,91 @@ class UniversalCrudService
 
         // 将空字符串转换为 null
         $data = $this->convertEmptyStringsToNull($data);
+
+        // 处理 site_id 字段
+        $hasSiteIdField = $this->configHasSiteIdField($config);
+
+        logger()->info('site_id 处理条件检查 (更新)', [
+            'model' => $model,
+            'table' => $tableName,
+            'record_id' => $id,
+            'has_site_id_field' => $hasSiteIdField,
+            'current_site_id' => site_id(),
+            'is_super_admin' => is_super_admin()
+        ]);
+
+        if ($hasSiteIdField) {
+            $currentSiteId = site_id();
+            $isSuperAdmin = is_super_admin();
+            $originalSiteId = $data['site_id'] ?? null;
+
+            logger()->info('处理 site_id 字段 (更新)', [
+                'model' => $model,
+                'table' => $tableName,
+                'record_id' => $id,
+                'is_site_enabled' => $this->isSiteEnabled(),
+                'has_site_id_field' => $this->configHasSiteIdField($config),
+                'current_site_id' => $currentSiteId,
+                'is_super_admin' => $isSuperAdmin,
+                'original_site_id' => $originalSiteId,
+                'data_keys' => array_keys($data),
+            ]);
+
+            if (!isset($data['site_id'])) {
+                // 如果数据中没有 site_id，所有用户（包括超级管理员）都自动使用当前站点ID
+                if ($currentSiteId !== null) {
+                    $data['site_id'] = $currentSiteId;
+                    logger()->info('自动赋值 site_id (更新)', [
+                        'model' => $model,
+                        'record_id' => $id,
+                        'assigned_site_id' => $currentSiteId,
+                        'reason' => '数据中没有 site_id 字段'
+                    ]);
+                } else {
+                    logger()->warning('无法自动赋值 site_id (更新)', [
+                        'model' => $model,
+                        'record_id' => $id,
+                        'reason' => '当前用户没有站点ID'
+                    ]);
+                }
+            } elseif (!$isSuperAdmin) {
+                // 如果数据中有 site_id 但不是超级管理员，强制使用当前站点ID
+                $oldSiteId = $data['site_id'];
+                if ($currentSiteId !== null) {
+                    $data['site_id'] = $currentSiteId;
+                    logger()->info('强制替换 site_id (更新)', [
+                        'model' => $model,
+                        'record_id' => $id,
+                        'old_site_id' => $oldSiteId,
+                        'new_site_id' => $currentSiteId,
+                        'reason' => '非超级管理员尝试设置 site_id'
+                    ]);
+                } else {
+                    unset($data['site_id']);
+                    logger()->info('移除无效 site_id (更新)', [
+                        'model' => $model,
+                        'record_id' => $id,
+                        'removed_site_id' => $oldSiteId,
+                        'reason' => '非超级管理员且当前用户没有站点ID'
+                    ]);
+                }
+            } else {
+                // 超级管理员可以自由设置 site_id 值（当明确提交时）
+                logger()->info('超级管理员设置 site_id (更新)', [
+                    'model' => $model,
+                    'record_id' => $id,
+                    'site_id' => $data['site_id'],
+                    'reason' => '超级管理员明确提交了 site_id'
+                ]);
+            }
+
+            logger()->info('site_id 处理完成 (更新)', [
+                'model' => $model,
+                'record_id' => $id,
+                'final_site_id' => $data['site_id'] ?? null,
+                'data_has_site_id' => isset($data['site_id'])
+            ]);
+        }
 
         // 自动更新时间戳
         if (!empty($config['timestamps'])) {
@@ -3109,6 +3265,11 @@ class UniversalCrudService
         $fields = [];
         $skipFields = ['id', 'created_at', 'updated_at', 'deleted_at'];
 
+        // 如果站点功能未开启，跳过 site_id 字段
+        if (!$this->isSiteEnabled()) {
+            $skipFields[] = 'site_id';
+        }
+
         foreach ($columns as $column) {
             $name = $column['name'];
 
@@ -3168,6 +3329,11 @@ class UniversalCrudService
     protected function filterFieldsByScene(array $fields, string $scene): array
     {
         $filtered = array_filter($fields, function ($field) use ($scene) {
+            // 0. 如果站点功能未开启，过滤掉 site_id 字段
+            if (!$this->isSiteEnabled() && isset($field['name']) && $field['name'] === 'site_id') {
+                return false;
+            }
+
             // 1. 场景过滤：如果字段定义了 scenes，只显示在指定场景中
             if (isset($field['scenes'])) {
                 if (!in_array($scene, $field['scenes'])) {
@@ -3300,41 +3466,10 @@ class UniversalCrudService
 
     protected function shouldApplyRelationSiteFilter(bool $hasSiteId, ?int $siteId, string $connectionName, ?string $table = null): bool
     {
-        if (! $hasSiteId || $siteId === null || $siteId <= 0) {
-            return false;
-        }
-
-        if (empty($table)) {
-            return true;
-        }
-
-        return $this->tableHasSiteIdColumn($table, $connectionName);
+        // 如果配置中声明了 has_site_id 且站点ID有效，就应用过滤
+        return $hasSiteId && $siteId !== null && $siteId > 0;
     }
 
-    protected function tableHasSiteIdColumn(string $table, string $connectionName): bool
-    {
-        $normalizedTable = $this->normalizeTableName($table);
-        if ($normalizedTable === '') {
-            return false;
-        }
-
-        $cacheKey = "{$connectionName}.{$normalizedTable}";
-        if (! array_key_exists($cacheKey, $this->tableSiteIdColumnCache)) {
-            try {
-                $this->tableSiteIdColumnCache[$cacheKey] = Schema::connection($connectionName)
-                    ->hasColumn($normalizedTable, 'site_id');
-            } catch (\Throwable $throwable) {
-                logger()->warning('[UniversalCrudService] 检查表的 site_id 字段失败', [
-                    'table' => $normalizedTable,
-                    'connection' => $connectionName,
-                    'error' => $throwable->getMessage(),
-                ]);
-                $this->tableSiteIdColumnCache[$cacheKey] = false;
-            }
-        }
-
-        return $this->tableSiteIdColumnCache[$cacheKey];
-    }
 
     protected function normalizeTableName(string $table): string
     {
@@ -3566,6 +3701,176 @@ class UniversalCrudService
                 throw new \InvalidArgumentException('ID 必须为正整数');
             }
         }
+    }
+
+    /**
+     * 检查站点功能是否开启
+     */
+    protected function isSiteEnabled(): bool
+    {
+        return (bool) $this->config->get('site.enabled', true);
+    }
+
+    /**
+     * 检查配置中是否包含 site_id 字段
+     *
+     * 检测逻辑：
+     * 1. 优先检查：配置中的 fields 数组是否包含 name: 'site_id' 的字段
+     * 2. 检查原始字段配置：fields_config 中是否包含 site_id
+     * 3. 兼容检查：配置中的 has_site_id 标记是否为true
+     * 4. 不再检查：数据库表结构（避免数据库连接问题）
+     */
+    protected function configHasSiteIdField(array $config): bool
+    {
+        $model = $config['model'] ?? 'unknown';
+
+        // 记录检测开始
+        logger()->debug('[site_id检测] 开始检测配置中的 site_id 字段', [
+            'model' => $model,
+            'config_keys' => array_keys($config),
+            'has_fields' => isset($config['fields']),
+            'has_fields_config' => isset($config['fields_config']),
+            'has_site_id_config' => isset($config['has_site_id']),
+            'site_id_config_value' => $config['has_site_id'] ?? 'not_set',
+            'fields_count' => isset($config['fields']) ? count($config['fields']) : 0,
+            'fields_config_count' => isset($config['fields_config']) ? count($config['fields_config']) : 0
+        ]);
+
+        // 步骤1：优先检查配置中的 fields 数组（处理后的字段）
+        logger()->debug('[site_id检测] 步骤1：检查配置中的 fields 数组', [
+            'model' => $model,
+            'has_fields' => !empty($config['fields']),
+            'fields_count' => !empty($config['fields']) ? count($config['fields']) : 0
+        ]);
+
+        if (!empty($config['fields'])) {
+            foreach ($config['fields'] as $index => $field) {
+                logger()->debug('[site_id检测] 检查处理后的字段配置', [
+                    'model' => $model,
+                    'field_index' => $index,
+                    'field_name' => $field['name'] ?? 'unknown',
+                    'field_type' => $field['type'] ?? 'unknown',
+                    'is_site_id' => isset($field['name']) && $field['name'] === 'site_id'
+                ]);
+
+                if (isset($field['name']) && $field['name'] === 'site_id') {
+                    logger()->debug('[site_id检测] ✓ 在配置的 fields 数组中发现 site_id 字段', [
+                        'model' => $model,
+                        'source' => 'config_fields',
+                        'field_name' => $field['name'],
+                        'field_index' => $index,
+                        'result' => true
+                    ]);
+                    return true;
+                }
+            }
+
+            logger()->debug('[site_id检测] ✗ 配置的 fields 数组中未找到 site_id 字段', [
+                'model' => $model,
+                'checked_fields_count' => count($config['fields']),
+                'field_names' => array_column($config['fields'], 'name')
+            ]);
+        } else {
+            logger()->debug('[site_id检测] 跳过 fields 数组检查：配置中没有定义 fields', [
+                'model' => $model
+            ]);
+        }
+
+        // 步骤2：检查原始字段配置 fields_config（CRUD生成器的配置）
+        logger()->debug('[site_id检测] 步骤2：检查原始字段配置 fields_config', [
+            'model' => $model,
+            'has_fields_config' => isset($config['fields_config']),
+            'fields_config_count' => isset($config['fields_config']) ? count($config['fields_config']) : 0
+        ]);
+
+        if (!empty($config['fields_config'])) {
+            foreach ($config['fields_config'] as $index => $fieldConfig) {
+                logger()->debug('[site_id检测] 检查原始字段配置', [
+                    'model' => $model,
+                    'field_index' => $index,
+                    'field_name' => $fieldConfig['field_name'] ?? $fieldConfig['name'] ?? 'unknown',
+                    'field_type' => $fieldConfig['form_type'] ?? $fieldConfig['type'] ?? 'unknown',
+                    'is_site_id' => (isset($fieldConfig['field_name']) && $fieldConfig['field_name'] === 'site_id') ||
+                                   (isset($fieldConfig['name']) && $fieldConfig['name'] === 'site_id')
+                ]);
+
+                if ((isset($fieldConfig['field_name']) && $fieldConfig['field_name'] === 'site_id') ||
+                    (isset($fieldConfig['name']) && $fieldConfig['name'] === 'site_id')) {
+                    logger()->debug('[site_id检测] ✓ 在原始字段配置 fields_config 中发现 site_id 字段', [
+                        'model' => $model,
+                        'source' => 'config_fields_config',
+                        'field_name' => $fieldConfig['field_name'] ?? $fieldConfig['name'],
+                        'field_index' => $index,
+                        'result' => true
+                    ]);
+                    return true;
+                }
+            }
+
+            logger()->debug('[site_id检测] ✗ 原始字段配置 fields_config 中未找到 site_id 字段', [
+                'model' => $model,
+                'checked_fields_count' => count($config['fields_config']),
+                'field_names' => array_map(function($field) {
+                    return $field['field_name'] ?? $field['name'] ?? 'unknown';
+                }, $config['fields_config'])
+            ]);
+        } else {
+            logger()->debug('[site_id检测] 跳过 fields_config 检查：配置中没有定义 fields_config', [
+                'model' => $model
+            ]);
+        }
+
+        // 步骤3：兼容检查配置中的 has_site_id 标记
+        logger()->debug('[site_id检测] 步骤3：检查配置中的 has_site_id 标记', [
+            'model' => $model,
+            'has_site_id_exists' => isset($config['has_site_id']),
+            'has_site_id_value' => $config['has_site_id'] ?? 'not_set',
+            'has_site_id_truthy' => isset($config['has_site_id']) && $config['has_site_id']
+        ]);
+
+        if (isset($config['has_site_id']) && $config['has_site_id']) {
+            logger()->debug('[site_id检测] ✓ 通过 has_site_id 配置标记发现 site_id 字段', [
+                'model' => $model,
+                'source' => 'config_has_site_id',
+                'has_site_id_value' => $config['has_site_id'],
+                'result' => true
+            ]);
+            return true;
+        }
+
+        // 步骤4：不再检查数据库表结构
+        logger()->debug('[site_id检测] 步骤4：跳过数据库表结构检查（已禁用）', [
+            'model' => $model,
+            'reason' => '避免数据库连接问题，完全基于配置检测'
+        ]);
+
+        // 最终结果：未发现 site_id 字段
+        logger()->debug('[site_id检测] ✗ 检测完成，未发现 site_id 字段', [
+            'model' => $model,
+            'config_has_fields' => !empty($config['fields']),
+            'config_has_fields_config' => !empty($config['fields_config']),
+            'config_has_site_id' => isset($config['has_site_id']) ? $config['has_site_id'] : 'not_set',
+            'result' => false
+        ]);
+
+        return false;
+    }
+
+    /**
+     * 从配置中获取表名
+     */
+    protected function getTableNameFromConfig(array $config): ?string
+    {
+        if (!empty($config['table'])) {
+            return $config['table'];
+        }
+
+        // 如果没有明确指定表名，尝试从模型名推断
+        if (!empty($config['model'])) {
+            return $this->getTableName($config['model']);
+        }
+
+        return null;
     }
 }
 

@@ -74,12 +74,15 @@ const FORM_TYPES = [
     { value: 'checkbox', label: '复选框' },
     { value: 'select', label: '下拉选择' },
     { value: 'relation', label: '关联选择' },
+    { value: 'relation_multi', label: '关联多选' },
+    { value: 'site_select', label: '站点选择' },
     { value: 'icon', label: '图标选择' },
     { value: 'image', label: '单图上传' },
     { value: 'images', label: '多图上传' },
     { value: 'file', label: '文件上传' },
     { value: 'key_value', label: '键值类型', modelType: 'array' }, // 仅在模型类型为array时可用
     { value: 'multi_key_value', label: '多键值类型', modelType: 'array' }, // 仅在模型类型为array时可用
+    { value: 'text_array', label: '文本数组', modelType: 'array' }, // 字符串数组类型，仅在模型类型为array时可用
     { value: 'object_key_value', label: '对象键值', modelType: 'array' }, // 仅在模型类型为array时可用
     { value: 'color', label: '颜色选择器', modelType: 'string' }, // 仅在模型类型为string时可用
     { value: 'gradient', label: '渐变色选择器', modelType: 'string' } // 仅在模型类型为string时可用
@@ -140,6 +143,47 @@ const IS_EMBEDDED_PAGE = document.documentElement?.dataset?.embed === '1';
 const { tableName = '', dbConnection = '' } = PAGE_VARS;
 let fieldsData = []; // 存储字段数据
 let hasRegisteredUserInputTracking = false;
+
+/**
+ * 生成表单类型选项HTML
+ * @param {string} modelType - 模型类型
+ * @param {string} selectedValue - 当前选中的值
+ * @returns {string} HTML选项字符串
+ */
+function generateFormTypeOptions(modelType, selectedValue) {
+    let options = [];
+
+    // 基础表单类型（所有模型类型都可用）
+    const baseTypes = FORM_TYPES.filter(type => !type.modelType);
+    options = options.concat(baseTypes);
+
+    // 根据模型类型添加特定选项
+    if (modelType === 'array') {
+        const arrayTypes = FORM_TYPES.filter(type => type.modelType === 'array');
+        options = options.concat(arrayTypes);
+    } else if (modelType === 'string') {
+        const stringTypes = FORM_TYPES.filter(type => type.modelType === 'string');
+        options = options.concat(stringTypes);
+    }
+
+    // 生成HTML选项
+    return options.map(type => {
+        const selected = selectedValue === type.value ? 'selected' : '';
+        return `<option value="${type.value}" ${selected}>${type.label}</option>`;
+    }).join('\n                        ');
+}
+
+/**
+ * 生成列类型选项HTML
+ * @param {string} selectedValue - 当前选中的值
+ * @returns {string} HTML选项字符串
+ */
+function generateColumnTypeOptions(selectedValue) {
+    return COLUMN_TYPES.map(type => {
+        const selected = selectedValue === type.value ? 'selected' : '';
+        return `<option value="${type.value}" ${selected}>${type.label}</option>`;
+    }).join('\n                        ');
+}
 
 // ==================== 基础配置辅助函数 ====================
 
@@ -721,14 +765,46 @@ function extractFieldNameFromComment(comment) {
  */
 function guessFormType(column) {
     if (!column) return 'text';
-    
+
     const fieldName = (column.name || '').toLowerCase();
     const dataType = (column.data_type || '').toLowerCase();
     const type = (column.type || '').toLowerCase();
     const comment = (column.comment || '').toLowerCase();
-    
-    // *_config + longtext 默认使用键值类型
-    if (fieldName.endsWith('_config') && (dataType === 'longtext' || dataType === 'text' || dataType === 'mediumtext')) {
+
+    // 获取模型类型，用于辅助判断
+    const modelType = guessModelType(column);
+
+    // 1. 字段名以 _ids 结尾：关联多选（优先级最高）
+    if (fieldName.endsWith('_ids')) {
+        return 'relation_multi';
+    }
+
+    // 2. 字段名以 _id 结尾：关联选择
+    if (fieldName.endsWith('_id')) {
+        return 'relation';
+    }
+
+    // 数组类型字段：根据字段名判断具体类型
+    if (modelType === 'array') {
+        // 特殊字段：hobbies（爱好）字段使用文本数组
+        if (fieldName === 'hobbies') {
+            return 'text_array';
+        }
+
+        // *_config + longtext 默认使用键值类型
+        if (fieldName.endsWith('_config') && (dataType === 'longtext' || dataType === 'text' || dataType === 'mediumtext')) {
+            return 'key_value';
+        }
+
+        // 标签、分类、关键词等字段使用文本数组
+        if (fieldName.includes('tag') || fieldName.includes('tags') ||
+            fieldName.includes('category') || fieldName.includes('categories') ||
+            fieldName.includes('keyword') || fieldName.includes('keywords') ||
+            fieldName.includes('label') || fieldName.includes('labels')) {
+            return 'text_array';
+        }
+
+        // 其他数组字段默认使用键值类型
         return 'key_value';
     }
     
@@ -736,12 +812,12 @@ function guessFormType(column) {
     if (fieldName === 'site_id') {
         return 'site_select';
     }
-    
-    // 1. 字段名以 _id 或 _ids 结尾：关联选择
-    if (fieldName.endsWith('_id') || fieldName.endsWith('_ids')) {
-        return 'relation';
+
+    // 特殊字段：status 使用单选框
+    if (fieldName === 'status') {
+        return 'radio';
     }
-    
+
     // 2. 字段名包含特定关键词
     if (fieldName.includes('password') || fieldName.includes('pwd')) {
         return 'password';
@@ -919,7 +995,12 @@ function guessRenderType(column) {
     if (fieldName.endsWith('_config') && (dataType === 'longtext' || dataType === 'text' || dataType === 'mediumtext')) {
         return 'key_value';
     }
-    
+
+    // 特殊字段：status 使用徽章渲染
+    if (fieldName === 'status') {
+        return 'badge';
+    }
+
     // 1. 字段名以 _id 或 _ids 结尾：关联渲染
     if (fieldName.endsWith('_id') || fieldName.endsWith('_ids')) {
         return 'relation';
@@ -987,6 +1068,30 @@ function guessRenderType(column) {
     
     // 默认返回文本
     return 'text';
+}
+
+/**
+ * 根据数据库字段信息推断列表默认显示状态（前端自动识别）
+ * @param {Object} column - 字段配置对象（原始数据库字段信息）
+ * @returns {boolean} 是否默认作为默认显示列
+ */
+function guessListDefault(column) {
+    if (!column) return false;
+
+    const fieldName = (column.name || '').toLowerCase();
+
+    // 特殊字段：id、content、updated_at 默认作为默认显示列
+    if (fieldName === 'id' || fieldName === 'content' || fieldName === 'updated_at') {
+        return true;
+    }
+
+    // site_id 字段：默认不作为默认显示列（多站点系统中的站点标识，通常不需要默认显示）
+    if (fieldName === 'site_id') {
+        return false;
+    }
+
+    // 其他字段默认作为默认显示列
+    return true;
 }
 
 /**
@@ -1473,12 +1578,8 @@ function renderFieldsConfig(columns) {
         const showInList = column.show_in_list !== undefined ? column.show_in_list : 
                           (column.listable !== undefined ? column.listable : guessShowInList(column, columns));
         
-        // 列表默认显示：如果已有保存的值，使用保存的；否则默认为 true（除非明确设置为 false）
-        // 特殊字段：id、content、updated_at 在初始化时默认显示，但用户可以修改
-        const isSpecialField = columnName === 'id' || columnName === 'content' || columnName === 'updated_at';
-        // 优先使用已保存的值，只有在没有保存值时才使用特殊字段的默认值
-        const listDefault = column.list_default !== undefined ? column.list_default : 
-                          (isSpecialField ? true : true);
+        // 列表默认显示：如果已有保存的值，使用保存的；否则使用智能识别
+        const listDefault = column.list_default !== undefined ? column.list_default : guessListDefault(column);
         
         // 可排序：如果已有保存的值，使用保存的；否则使用智能识别
         const sortable = column.sortable !== undefined ? column.sortable : guessSortable(column);
@@ -1548,54 +1649,15 @@ function renderFieldsConfig(columns) {
                            placeholder="字段显示名称">
                 </td>
                 <td>
-                    <select name="fields_config[${index}][form_type]" class="form-select form-select-sm field-form-type" 
+                    <select name="fields_config[${index}][form_type]" class="form-select form-select-sm field-form-type"
                             data-index="${index}">
-                        <option value="text" ${column.form_type === 'text' ? 'selected' : ''}>文本框</option>
-                        <option value="textarea" ${column.form_type === 'textarea' ? 'selected' : ''}>文本域</option>
-                        <option value="rich_text" ${column.form_type === 'rich_text' ? 'selected' : ''}>富文本</option>
-                        <option value="number" ${column.form_type === 'number' ? 'selected' : ''}>数字</option>
-                        <option value="number_range" ${column.form_type === 'number_range' ? 'selected' : ''}>区间数字</option>
-                        <option value="email" ${column.form_type === 'email' ? 'selected' : ''}>邮箱</option>
-                        <option value="password" ${column.form_type === 'password' ? 'selected' : ''}>密码</option>
-                        <option value="date" ${column.form_type === 'date' ? 'selected' : ''}>日期</option>
-                        <option value="datetime" ${column.form_type === 'datetime' ? 'selected' : ''}>日期时间</option>
-                        <option value="switch" ${column.form_type === 'switch' ? 'selected' : ''}>开关</option>
-                        <option value="radio" ${column.form_type === 'radio' ? 'selected' : ''}>单选框</option>
-                        <option value="checkbox" ${column.form_type === 'checkbox' ? 'selected' : ''}>复选框</option>
-                        <option value="select" ${column.form_type === 'select' ? 'selected' : ''}>下拉选择</option>
-                        <option value="relation" ${column.form_type === 'relation' ? 'selected' : ''}>关联选择</option>
-                        <option value="site_select" ${column.form_type === 'site_select' ? 'selected' : ''}>站点选择</option>
-                        <option value="icon" ${column.form_type === 'icon' ? 'selected' : ''}>图标选择</option>
-                        <option value="image" ${column.form_type === 'image' ? 'selected' : ''}>单图上传</option>
-                        <option value="images" ${column.form_type === 'images' ? 'selected' : ''}>多图上传</option>
-                        <option value="file" ${column.form_type === 'file' ? 'selected' : ''}>文件上传</option>
-                        ${modelType === 'array' ? `<option value="key_value" ${column.form_type === 'key_value' ? 'selected' : ''}>键值类型</option>` : ''}
-                        ${modelType === 'array' ? `<option value="multi_key_value" ${column.form_type === 'multi_key_value' ? 'selected' : ''}>多键值类型</option>` : ''}
-                        ${modelType === 'array' ? `<option value="object_key_value" ${column.form_type === 'object_key_value' ? 'selected' : ''}>对象键值</option>` : ''}
-                        ${modelType === 'string' ? `<option value="color" ${column.form_type === 'color' ? 'selected' : ''}>颜色选择器</option>` : ''}
-                        ${modelType === 'string' ? `<option value="gradient" ${column.form_type === 'gradient' ? 'selected' : ''}>渐变色选择器</option>` : ''}
+                        ${generateFormTypeOptions(modelType, column.form_type)}
                     </select>
                 </td>
                 <td>
-                    <select name="fields_config[${index}][column_type]" class="form-select form-select-sm column-type-select" 
+                    <select name="fields_config[${index}][column_type]" class="form-select form-select-sm column-type-select"
                             data-index="${index}">
-                        <option value="text" ${columnType === 'text' ? 'selected' : ''}>文本</option>
-                        <option value="number" ${columnType === 'number' ? 'selected' : ''}>数字</option>
-                        <option value="date" ${columnType === 'date' ? 'selected' : ''}>日期</option>
-                        <option value="icon" ${columnType === 'icon' ? 'selected' : ''}>图标</option>
-                        <option value="image" ${columnType === 'image' ? 'selected' : ''}>单图</option>
-                        <option value="images" ${columnType === 'images' ? 'selected' : ''}>多图</option>
-                        <option value="switch" ${columnType === 'switch' ? 'selected' : ''}>开关</option>
-                        <option value="badge" ${columnType === 'badge' ? 'selected' : ''}>徽章</option>
-                        <option value="code" ${columnType === 'code' ? 'selected' : ''}>代码</option>
-                        <option value="link" ${columnType === 'link' ? 'selected' : ''}>链接</option>
-                        <option value="relation" ${columnType === 'relation' ? 'selected' : ''}>关联</option>
-                        <option value="key_value" ${columnType === 'key_value' ? 'selected' : ''}>键值</option>
-                        <option value="multi_key_value" ${columnType === 'multi_key_value' ? 'selected' : ''}>多键值</option>
-                        <option value="color" ${columnType === 'color' ? 'selected' : ''}>颜色</option>
-                        <option value="gradient" ${columnType === 'gradient' ? 'selected' : ''}>渐变</option>
-                        <option value="columns" ${columnType === 'columns' ? 'selected' : ''}>列组</option>
-                        <option value="custom" ${columnType === 'custom' ? 'selected' : ''}>自定义</option>
+                        ${generateColumnTypeOptions(columnType)}
                     </select>
                 </td>
                 <td>

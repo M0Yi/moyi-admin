@@ -7,6 +7,17 @@ use function Hyperf\Support\env;
 return [
     /*
     |--------------------------------------------------------------------------
+    | Site Management
+    |--------------------------------------------------------------------------
+    |
+    | Enable or disable multi-site functionality.
+    | When disabled, site-related fields (like site_id) will be hidden from CRUD forms.
+    |
+    */
+    'enabled' => (bool) env('ENABLE_SITE', true),
+
+    /*
+    |--------------------------------------------------------------------------
     | Public Site Creation
     |--------------------------------------------------------------------------
     |

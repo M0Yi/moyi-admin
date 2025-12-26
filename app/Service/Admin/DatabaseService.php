@@ -6,7 +6,6 @@ namespace App\Service\Admin;
 
 use App\Model\Admin\AdminDatabaseConnection;
 use Hyperf\Context\ApplicationContext;
-use Hyperf\Contract\ConfigInterface;
 use Hyperf\DbConnection\Db;
 use function Hyperf\Config\config;
 

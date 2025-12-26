@@ -1228,16 +1228,55 @@ class InstallController extends AbstractController
         ];
 
         try {
+            // 获取数据库基本信息
             $dbNameRow = Db::select('SELECT DATABASE() AS db');
             $database = isset($dbNameRow[0]) ? (array) $dbNameRow[0] : [];
             $dbName = $database['db'] ?? '';
 
+            // 获取MySQL版本信息
+            $versionRow = Db::select('SELECT VERSION() AS version, @@version_comment AS version_comment');
+            $mysqlVersion = isset($versionRow[0]) ? (array) $versionRow[0] : [];
+            $versionString = $mysqlVersion['version'] ?? '';
+            $versionComment = $mysqlVersion['version_comment'] ?? '';
+
+            // 解析版本号，支持各种MySQL版本格式
+            $versionNumber = $this->parseMySQLVersion($versionString);
+            $minRequiredVersion = '5.7.8'; // JSON类型支持的最低版本
+            $recommendedVersion = '8.0.0'; // 推荐版本
+
+            // 解析MySQL客户端类型
+            $clientInfo = $this->parseMySQLClient($versionString, $versionComment);
+
             $tables = Db::select('SHOW TABLES');
             $tableCount = is_array($tables) ? count($tables) : 0;
+
+            // 检查MySQL版本
+            $versionCheck = [
+                'name' => 'MySQL 版本',
+                'current' => $versionString,
+                'required' => ">= {$minRequiredVersion}",
+                'recommended' => ">= {$recommendedVersion}",
+                'passed' => version_compare($versionNumber, $minRequiredVersion, '>='),
+                'is_recommended' => version_compare($versionNumber, $recommendedVersion, '>='),
+            ];
+
+            // 添加版本警告信息
+            if (!$versionCheck['passed']) {
+                $versionCheck['error'] = "MySQL 版本过低。需要 {$minRequiredVersion} 或更高版本以支持 JSON 字段、utf8mb4 字符集等功能。";
+            } elseif (!$versionCheck['is_recommended']) {
+                $versionCheck['warning'] = "建议使用 MySQL {$recommendedVersion} 或更高版本以获得最佳性能。";
+            }
+
+            $checks['mysql_version'] = $versionCheck;
 
             $checks['database'] = [
                 'name' => '数据库状态',
                 'database' => $dbName,
+                'version' => $versionString,
+                'version_parsed' => $versionNumber,
+                'version_status' => $versionCheck['passed'] ? ($versionCheck['is_recommended'] ? 'recommended' : 'acceptable') : 'too_low',
+                'client_type' => $clientInfo['type'],
+                'client_name' => $clientInfo['name'],
                 'table_count' => $tableCount,
                 'empty' => $tableCount === 0,
                 'passed' => $tableCount === 0,
@@ -1245,7 +1284,20 @@ class InstallController extends AbstractController
                     ? '当前数据库为空，适合进行安装'
                     : '检测到当前数据库已有数据，建议在空数据库上安装以避免冲突',
             ];
+
+            // 检查是否支持所需的MySQL特性
+            $featureChecks = $this->checkMySQLFeatures($versionNumber);
+            $checks['mysql_features'] = $featureChecks;
+
         } catch (\Throwable $e) {
+            $checks['mysql_version'] = [
+                'name' => 'MySQL 版本',
+                'current' => '',
+                'required' => '>= 5.7.8',
+                'passed' => false,
+                'error' => '无法获取数据库版本：' . $e->getMessage(),
+            ];
+
             $checks['database'] = [
                 'name' => '数据库状态',
                 'database' => '',
@@ -1254,6 +1306,12 @@ class InstallController extends AbstractController
                 'passed' => false,
                 'error' => '无法连接到数据库：' . $e->getMessage(),
                 'suggest' => '请检查数据库连接配置是否正确',
+            ];
+
+            $checks['mysql_features'] = [
+                'name' => 'MySQL 特性支持',
+                'passed' => false,
+                'error' => '无法检查数据库特性：' . $e->getMessage(),
             ];
         }
 
@@ -1728,16 +1786,61 @@ class InstallController extends AbstractController
                 $table->collation = 'utf8mb4_general_ci';
                 $table->bigIncrements('id')->comment('id');
                 $table->unsignedBigInteger('site_id')->nullable()->comment('站点ID');
-                $table->unsignedBigInteger('user_id')->comment('用户');
-                $table->longText('user_ids')->nullable()->comment('用户合集');
-                $table->string('image', 255)->nullable()->comment('图片');
-                $table->longText('images')->nullable()->comment('图片组');
-                $table->boolean('is_show')->comment('显示状态:0=隐藏,1=显示');
-                $table->string('status', 20)->default('active')->comment('状态:active=启用, inactive=禁用');
-                $table->string('title', 200)->comment('标题');
-                $table->longText('content')->comment('内容');
-                $table->integer('view_count')->default(0)->comment('浏览次数');
+
+                // 关联选择字段
+                $table->unsignedBigInteger('user_id')->comment('用户（关联选择）');
+                $table->longText('user_ids')->nullable()->comment('用户合集（多选关联）');
+
+                // 图片上传字段
+                $table->string('image', 255)->nullable()->comment('图片（单图上传）');
+                $table->longText('images')->nullable()->comment('图片组（多图上传）');
+
+                // 开关字段
+                $table->boolean('is_show')->comment('显示状态（开关）:0=隐藏,1=显示');
+
+                // 下拉选择字段
+                $table->string('status', 20)->default('active')->comment('状态（下拉选择）:active=启用, inactive=禁用');
+
+                // 文本字段
+                $table->string('title', 200)->comment('标题（文本框）');
+                $table->longText('content')->comment('内容（文本域）');
+
+                // 数字字段
+                $table->integer('view_count')->default(0)->comment('浏览次数（数字）');
+                $table->decimal('price', 10, 2)->nullable()->comment('价格（数字）');
+                $table->integer('min_age')->nullable()->comment('最小年龄（区间数字-起始）');
+                $table->integer('max_age')->nullable()->comment('最大年龄（区间数字-结束）');
+
+                // 邮箱和密码字段
+                $table->string('email', 100)->nullable()->comment('邮箱（邮箱字段）');
+                $table->string('password', 255)->nullable()->comment('密码（密码字段）');
+
+                // 手机号字段
+                $table->string('mobile', 20)->nullable()->comment('手机号（手机号字段）');
+
+                // 图标字段
+                $table->string('icon', 100)->nullable()->comment('图标（图标选择）');
+
+                // 富文本字段
+                $table->longText('rich_content')->nullable()->comment('富文本内容（富文本编辑器）');
+
+                // 单选框字段
+                $table->string('gender', 10)->nullable()->comment('性别（单选框）:male=男,female=女');
+
+                // 复选框字段
+                $table->json('hobbies')->nullable()->comment('兴趣爱好（复选框，多选）');
+
+                // 日期字段
+                $table->date('birth_date')->nullable()->comment('出生日期（日期选择）');
+
+                // 文件上传字段
+                $table->string('attachment', 255)->nullable()->comment('附件（文件上传）');
+
+                // 键值类型字段
                 $table->longText('setting_config')->nullable()->comment('设置配置（键值测试字段）');
+                $table->longText('multi_config')->nullable()->comment('多键值配置（多键值类型）');
+
+                // 时间戳字段
                 $table->dateTime('published_at')->nullable()->comment('发布时间');
                 $table->dateTime('created_at')->nullable()->comment('创建时间');
                 $table->dateTime('updated_at')->nullable()->comment('更新时间');
@@ -1831,17 +1934,34 @@ class InstallController extends AbstractController
                 'id' => 1,
                 'site_id' => $siteId,
                 'user_id' => $userId,
-                'user_ids' => null,
+                'user_ids' => json_encode([$userId]), // 多选关联测试
                 'image' => 'https://inkakofenghui.oss-cn-shenzhen.aliyuncs.com/inkako/meeting/images/user-1/1763287317-b6a262c586998312.jpg',
                 'images' => '["https://inkakofenghui.oss-cn-shenzhen.aliyuncs.com/inkako/meeting/images/user-1/1763287317-f02bf714faed7258.jpg","https://inkakofenghui.oss-cn-shenzhen.aliyuncs.com/inkako/meeting/images/user-1/1763287318-4d1ca3f323f43571.jpg"]',
                 'is_show' => 0,
                 'status' => 'active',
                 'title' => '测试文章：云端后台发布体验',
                 'content' => '一段瞎编的文章文案，介绍后台 CRUD 配置如何一键生成表单、列表和权限。',
+                'price' => 99.99,
+                'min_age' => 18,
+                'max_age' => 65,
+                'email' => 'test1@example.com',
+                'password' => password_hash('test123', PASSWORD_DEFAULT),
+                'mobile' => '13800138001',
+                'icon' => 'bi bi-star-fill',
+                'rich_content' => '<p><strong>富文本内容测试</strong></p><p>这是一个富文本编辑器的测试内容，包含<strong>粗体</strong>、<em>斜体</em>等格式。</p>',
+                'gender' => 'male',
+                'hobbies' => json_encode(['reading', 'coding', 'sports']),
+                'birth_date' => '1990-01-01',
+                'attachment' => 'https://example.com/files/test.pdf',
                 'view_count' => 222,
                 'setting_config' => json_encode([
                     'banner_title' => '首页横幅',
                     'banner_enabled' => true,
+                ], JSON_UNESCAPED_UNICODE),
+                'multi_config' => json_encode([
+                    ['key' => 'site_title', 'value' => '网站标题', 'type' => 'text'],
+                    ['key' => 'site_description', 'value' => '网站描述', 'type' => 'textarea'],
+                    ['key' => 'enable_comments', 'value' => '1', 'type' => 'switch'],
                 ], JSON_UNESCAPED_UNICODE),
                 'published_at' => '2025-11-06 18:01:38',
                 'created_at' => '2025-11-05 10:03:34',
@@ -1852,17 +1972,34 @@ class InstallController extends AbstractController
                 'id' => 2,
                 'site_id' => $siteId,
                 'user_id' => $userId,
-                'user_ids' => null,
+                'user_ids' => json_encode([$userId]),
                 'image' => 'https://inkakofenghui.oss-cn-shenzhen.aliyuncs.com/inkako/meeting/images/user-1/1763287317-229f8e96dc80ae75.jpg',
                 'images' => '["https://inkakofenghui.oss-cn-shenzhen.aliyuncs.com/inkako/meeting/images/user-1/1763287318-aa76a192cc466b58.jpg","https://inkakofenghui.oss-cn-shenzhen.aliyuncs.com/inkako/meeting/images/user-1/1763287318-b6d5cb42c70c57e4.jpg"]',
                 'is_show' => 1,
                 'status' => 'active',
                 'title' => '测试文章：运营活动即时上线',
                 'content' => '这段文案描述了一个虚构的活动专题，强调 CRUD 流程中键值配置字段的实用性。',
+                'price' => 199.99,
+                'min_age' => 20,
+                'max_age' => 50,
+                'email' => 'test2@example.com',
+                'password' => password_hash('test456', PASSWORD_DEFAULT),
+                'mobile' => '13800138002',
+                'icon' => 'bi bi-heart-fill',
+                'rich_content' => '<p><em>富文本编辑器测试</em></p><ul><li>列表项1</li><li>列表项2</li><li>列表项3</li></ul>',
+                'gender' => 'female',
+                'hobbies' => json_encode(['music', 'travel', 'cooking']),
+                'birth_date' => '1985-05-15',
+                'attachment' => 'https://example.com/files/document.docx',
                 'view_count' => 555,
                 'setting_config' => json_encode([
                     'banner_title' => '专题页横幅',
                     'banner_enabled' => false,
+                ], JSON_UNESCAPED_UNICODE),
+                'multi_config' => json_encode([
+                    ['key' => 'theme_color', 'value' => '#007bff', 'type' => 'color'],
+                    ['key' => 'max_upload_size', 'value' => '10', 'type' => 'number'],
+                    ['key' => 'allow_registration', 'value' => '0', 'type' => 'switch'],
                 ], JSON_UNESCAPED_UNICODE),
                 'published_at' => '2025-11-06 18:01:38',
                 'created_at' => '2025-11-05 10:03:34',
@@ -1880,11 +2017,24 @@ class InstallController extends AbstractController
                 'status' => 'inactive',
                 'title' => '测试文章：已删除的历史稿件',
                 'content' => '这是一篇模拟被删除的文章，用于验证 CRUD 生成的回收站或软删除流程。',
+                'price' => 0.00,
+                'min_age' => null,
+                'max_age' => null,
+                'email' => null,
+                'password' => null,
+                'mobile' => null,
+                'icon' => 'bi bi-trash',
+                'rich_content' => null,
+                'gender' => null,
+                'hobbies' => null,
+                'birth_date' => null,
+                'attachment' => null,
                 'view_count' => 12,
                 'setting_config' => json_encode([
                     'banner_title' => '历史稿件横幅',
                     'banner_enabled' => false,
                 ], JSON_UNESCAPED_UNICODE),
+                'multi_config' => null,
                 'published_at' => '2025-11-01 09:00:00',
                 'created_at' => '2025-11-01 08:55:00',
                 'updated_at' => '2025-11-10 11:11:11',
@@ -1895,5 +2045,182 @@ class InstallController extends AbstractController
         foreach ($testData as $data) {
             Db::table('test')->insert($data);
         }
+    }
+
+    /**
+     * 解析MySQL版本字符串
+     *
+     * @param string $versionString 版本字符串，如 "8.0.33-0ubuntu0.20.04.2" 或 "5.7.42-log"
+     * @return string 返回标准版本号，如 "8.0.33" 或 "5.7.42"
+     */
+    private function parseMySQLVersion(string $versionString): string
+    {
+        // 移除常见的后缀，如 -0ubuntu0.20.04.2, -log 等
+        $cleanVersion = preg_replace('/-[a-zA-Z0-9._-]+/', '', $versionString);
+
+        // 提取主版本号（只保留数字和点号）
+        if (preg_match('/^(\d+\.\d+\.\d+)/', $cleanVersion, $matches)) {
+            return $matches[1];
+        }
+
+        // 如果无法解析，返回原始字符串的前三个部分
+        $parts = explode('.', $cleanVersion);
+        return implode('.', array_slice($parts, 0, 3));
+    }
+
+    /**
+     * 解析MySQL客户端类型
+     *
+     * @param string $versionString 版本字符串
+     * @param string $versionComment 版本注释
+     * @return array 返回客户端信息 ['type' => 'mysql|mariadb|percona', 'name' => '显示名称']
+     */
+    private function parseMySQLClient(string $versionString, string $versionComment): array
+    {
+        $versionLower = strtolower($versionString);
+        $commentLower = strtolower($versionComment);
+
+        // 检查MariaDB
+        if (strpos($versionLower, 'mariadb') !== false || strpos($commentLower, 'mariadb') !== false) {
+            return [
+                'type' => 'mariadb',
+                'name' => 'MariaDB',
+            ];
+        }
+
+        // 检查Percona Server
+        if (strpos($versionLower, 'percona') !== false || strpos($commentLower, 'percona') !== false) {
+            return [
+                'type' => 'percona',
+                'name' => 'Percona Server',
+            ];
+        }
+
+        // 检查AWS Aurora
+        if (strpos($versionLower, 'aurora') !== false || strpos($commentLower, 'aurora') !== false) {
+            return [
+                'type' => 'aurora',
+                'name' => 'Amazon Aurora',
+            ];
+        }
+
+        // 检查TiDB
+        if (strpos($versionLower, 'tidb') !== false || strpos($commentLower, 'tidb') !== false) {
+            return [
+                'type' => 'tidb',
+                'name' => 'TiDB',
+            ];
+        }
+
+        // 检查Galera Cluster
+        if (strpos($versionLower, 'galera') !== false || strpos($commentLower, 'galera') !== false) {
+            return [
+                'type' => 'galera',
+                'name' => 'Galera Cluster',
+            ];
+        }
+
+        // 检查Drizzle
+        if (strpos($versionLower, 'drizzle') !== false || strpos($commentLower, 'drizzle') !== false) {
+            return [
+                'type' => 'drizzle',
+                'name' => 'Drizzle',
+            ];
+        }
+
+        // 默认认为是MySQL
+        return [
+            'type' => 'mysql',
+            'name' => 'MySQL',
+        ];
+    }
+
+    /**
+     * 检查MySQL特性支持
+     *
+     * @param string $version MySQL版本号
+     * @return array
+     */
+    private function checkMySQLFeatures(string $version): array
+    {
+        $features = [
+            'name' => 'MySQL 特性支持',
+            'features' => [],
+            'passed' => true,
+            'warnings' => [],
+        ];
+
+        // JSON类型支持（MySQL 5.7.8+）
+        $jsonSupport = version_compare($version, '5.7.8', '>=');
+        $features['features']['json'] = [
+            'name' => 'JSON 数据类型',
+            'required_version' => '>= 5.7.8',
+            'supported' => $jsonSupport,
+            'description' => '用于存储复杂的配置数据',
+        ];
+        if (!$jsonSupport) {
+            $features['passed'] = false;
+            $features['warnings'][] = 'JSON数据类型不支持，系统中的配置字段将无法正常工作';
+        }
+
+        // utf8mb4字符集完整支持（MySQL 5.5.3+，但早期版本有bug）
+        $utf8mb4Support = version_compare($version, '5.5.3', '>=');
+        $features['features']['utf8mb4'] = [
+            'name' => 'utf8mb4 字符集',
+            'required_version' => '>= 5.5.3',
+            'supported' => $utf8mb4Support,
+            'description' => '支持完整的Unicode字符集',
+        ];
+        if (!$utf8mb4Support) {
+            $features['passed'] = false;
+            $features['warnings'][] = 'utf8mb4字符集不支持，可能导致字符编码问题';
+        }
+
+        // 窗口函数支持（MySQL 8.0+）
+        $windowFunctions = version_compare($version, '8.0.0', '>=');
+        $features['features']['window_functions'] = [
+            'name' => '窗口函数',
+            'required_version' => '>= 8.0.0',
+            'supported' => $windowFunctions,
+            'description' => '用于复杂的数据查询和分析',
+        ];
+        if (!$windowFunctions) {
+            $features['warnings'][] = '窗口函数不支持，某些高级查询功能受限';
+        }
+
+        // CTE (Common Table Expressions) 支持（MySQL 8.0.1+）
+        $cteSupport = version_compare($version, '8.0.1', '>=');
+        $features['features']['cte'] = [
+            'name' => '公共表表达式 (CTE)',
+            'required_version' => '>= 8.0.1',
+            'supported' => $cteSupport,
+            'description' => '支持递归查询和复杂的数据处理',
+        ];
+        if (!$cteSupport) {
+            $features['warnings'][] = 'CTE不支持，某些递归查询无法使用';
+        }
+
+        // 检查COLLATION支持
+        try {
+            $collationCheck = Db::select("SHOW COLLATION LIKE 'utf8mb4_unicode_ci'");
+            $collationSupport = !empty($collationCheck);
+            $features['features']['collation'] = [
+                'name' => 'utf8mb4_unicode_ci 排序规则',
+                'supported' => $collationSupport,
+                'description' => 'Unicode字符的正确排序',
+            ];
+            if (!$collationSupport) {
+                $features['warnings'][] = 'utf8mb4_unicode_ci排序规则不可用，可能影响字符排序';
+            }
+        } catch (\Throwable $e) {
+            $features['features']['collation'] = [
+                'name' => 'utf8mb4_unicode_ci 排序规则',
+                'supported' => false,
+                'description' => '无法检查排序规则支持',
+                'error' => $e->getMessage(),
+            ];
+        }
+
+        return $features;
     }
 }

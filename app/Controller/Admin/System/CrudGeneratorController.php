@@ -126,39 +126,9 @@ class CrudGeneratorController extends AbstractController
             'currentConnInfo' => $connections[$dbConnection] ?? null,
         ]);
     }
-//
-//    /**
-//     * 配置页面 V2 - 优化版本，字段配置分离加载
-//     */
-//    #[GetMapping('configv2/{tableName}')]
-//    public function configV2(string $tableName): ResponseInterface
-//    {
-//    }
-//
-//    /**
-//     * 获取原始字段配置（未经过后端处理，用于前端自动识别）
-//     */
-//    #[GetMapping('raw-fields-config/{tableName}')]
-//    public function getRawFieldsConfig(string $tableName): ResponseInterface
-//    {
-//        // 从请求参数获取数据库连接名称
-//        $requestConnection = $this->request->query('connection');
-//        $dbConnection = $requestConnection ?? key($this->databaseService->getAllConnections());
-//
-//        // 获取原始表结构（未经过后端处理）
-//        $columns = $this->databaseService->getRawTableColumns($tableName, $dbConnection);
-//
-//        return $this->success([
-//            'columns' => $columns,
-//            'total' => count($columns),
-//            'db_connection' => $dbConnection,
-//        ], '原始字段配置加载成功');
-//    }
-//
-//    /**
-//     * 获取字段配置（分离加载 API）
-//     */
-//    #[GetMapping('fields-config/{tableName}')]
+    /**
+     * 获取字段配置（分离加载 API）
+     */
     public function getFieldsConfig(string $tableName): ResponseInterface
     {
         // 获取所有数据库连接
@@ -403,103 +373,9 @@ class CrudGeneratorController extends AbstractController
         return $column;
     }
 //
-//    /**
-//     * 保存配置
-//     */
-//    #[PostMapping('save-config')]
-//    public function saveConfig(): ResponseInterface
-//    {
-//        $data = $this->request->all();
-//
-//        // 查询配置（超级管理员跳过站点筛选）
-//        $query = AdminCrudConfig::query()->where('table_name', $data['table_name']);
-//        if (!is_super_admin()) {
-//            $query->where('site_id', site_id());
-//        }
-//        $config = $query->first();
-//
-//        // 处理字段配置中的默认值
-//        $fieldsConfig = $this->processDefaultValues($data['fields_config']);
-//
-//        // 记录旧的模型名称（用于判断是否需要更新菜单）
-//        $oldModelName = $config?->model_name;
-//        $newModelName = $data['model_name'];
-//
-//        // 获取菜单同步配置（默认为1，即默认勾选）
-//        $syncToMenu = isset($data['sync_to_menu']) ? filter_var($data['sync_to_menu'], FILTER_VALIDATE_BOOLEAN) : true;
-//
-//        // 获取 options（不再需要将 icon 保存到 options 中）
-//        $options = $data['options'] ?? [];
-//
-//        // 处理 options 中的布尔字段
-//        if (isset($options['soft_delete'])) {
-//            $options['soft_delete'] = filter_var($options['soft_delete'], FILTER_VALIDATE_BOOLEAN);
-//        }
-//
-//        // 获取数据库连接名称（默认为 'default'）
-//        $dbConnection = $data['db_connection'] ?? 'default';
-//
-//        if ($config) {
-//            $config->update([
-//                'db_connection' => $dbConnection,
-//                'model_name' => $data['model_name'],
-//                'controller_name' => $data['controller_name'],
-//                'module_name' => $data['module_name'],
-//                'route_slug' => $data['route_slug'],
-//                'icon' => $data['icon'] ?? null,
-//                'fields_config' => $fieldsConfig,
-//                'options' => $options,
-//                'sync_to_menu' => $syncToMenu,
-//            ]);
-//        } else {
-//            $config = AdminCrudConfig::create([
-//                'site_id' => site_id(),
-//                'table_name' => $data['table_name'],
-//                'db_connection' => $dbConnection,
-//                'model_name' => $data['model_name'],
-//                'controller_name' => $data['controller_name'],
-//                'module_name' => $data['module_name'],
-//                'route_slug' => $data['route_slug'],
-//                'icon' => $data['icon'] ?? null,
-//                'fields_config' => $fieldsConfig,
-//                'options' => $options,
-//                'sync_to_menu' => $syncToMenu,
-//                'status' => AdminCrudConfig::STATUS_CONFIGURING,
-//            ]);
-//        }
-//
-//        // 自动管理菜单规则
-//        // 只有在启用菜单同步且模型名称变化时才更新菜单
-//        if ($syncToMenu && $oldModelName !== $newModelName) {
-//            logger()->info('[CRUD配置保存] 准备同步菜单', [
-//                'config_id' => $config->id,
-//                'sync_to_menu' => $syncToMenu,
-//                'old_model_name' => $oldModelName,
-//                'new_model_name' => $newModelName,
-//            ]);
-//
-//            $this->syncMenuForConfig($config, $oldModelName);
-//        } elseif (!$syncToMenu) {
-//            logger()->info('[CRUD配置保存] 未启用菜单同步，跳过菜单操作', [
-//                'config_id' => $config->id,
-//                'sync_to_menu' => $syncToMenu,
-//            ]);
-//        } elseif ($oldModelName === $newModelName) {
-//            logger()->info('[CRUD配置保存] 模型名称未变化，跳过菜单同步', [
-//                'config_id' => $config->id,
-//                'model_name' => $newModelName,
-//            ]);
-//        }
-//
-//        return $this->success([
-//            'config_id' => $config->id,
-//        ], '配置保存成功');
-//    }
-//
-//    /**
-//     * 保存配置 V2 版本
-//     */
-//    #[PostMapping('save-config-v2')]
+    /**
+     * 保存配置 V2 版本
+     */
     public function saveConfig(): ResponseInterface
     {
         $data = $this->request->all();
@@ -786,11 +662,11 @@ class CrudGeneratorController extends AbstractController
 
         return $defaults;
     }
-//
-//    /**
-//     * 验证和清理字段配置数据 V2 版本
-//     * V2 版本的数据格式可能包含 type_attrs 等新字段
-//     */
+
+    /**
+     * 验证和清理字段配置数据 V2 版本
+     * V2 版本的数据格式可能包含 type_attrs 等新字段
+     */
     protected function processDefaultValues(array $fieldsConfig): array
     {
         foreach ($fieldsConfig as &$field) {
@@ -856,103 +732,6 @@ class CrudGeneratorController extends AbstractController
 
         return $fieldsConfig;
     }
-//
-//    /**
-//     * 预览生成的代码
-//     */
-//    #[GetMapping('preview/{id:\d+}')]
-//    public function preview(int $id): ResponseInterface
-//    {
-//        // 查询配置（超级管理员跳过站点筛选）
-//        $query = AdminCrudConfig::query();
-//        if (!is_super_admin()) {
-//            $query->where('site_id', site_id());
-//        }
-//        $config = $query->findOrFail($id);
-//
-//        // 生成代码
-//        $files = $this->crudGeneratorService->generate($config);
-//
-//        return $this->render->render('admin.system.crud-generator.preview', [
-//            'config' => $config,
-//            'files' => $files,
-//        ]);
-//    }
-//
-//    /**
-//     * 生成代码到项目中
-//     */
-//    #[PostMapping('generate/{id:\d+}')]
-//    public function generate(int $id): ResponseInterface
-//    {
-//        // 查询配置（超级管理员跳过站点筛选）
-//        $query = AdminCrudConfig::query();
-//        if (!is_super_admin()) {
-//            $query->where('site_id', site_id());
-//        }
-//        $config = $query->findOrFail($id);
-//
-//        try {
-//            // 生成代码
-//            $files = $this->crudGeneratorService->generate($config);
-//
-//            // 写入文件
-//            $createdFiles = [];
-//            foreach ($files as $type => $content) {
-//                $filePath = $this->getFilePath($config, $type);
-//                if ($filePath) {
-//                    $this->writeFile($filePath, $content);
-//                    $createdFiles[] = $filePath;
-//                }
-//            }
-//
-//            // 标记为已生成
-//            $config->markAsGenerated();
-//
-//            return $this->success([
-//                'files' => $createdFiles,
-//            ], 'CRUD代码生成成功');
-//        } catch (\Throwable $e) {
-//            return $this->error($e->getMessage());
-//        }
-//    }
-//
-//    /**
-//     * 下载生成的代码包
-//     */
-//    #[GetMapping('download/{id:\d+}')]
-//    public function download(int $id): ResponseInterface
-//    {
-//        // 查询配置（超级管理员跳过站点筛选）
-//        $query = AdminCrudConfig::query();
-//        if (!is_super_admin()) {
-//            $query->where('site_id', site_id());
-//        }
-//        $config = $query->findOrFail($id);
-//
-//        // 生成代码
-//        $files = $this->crudGeneratorService->generate($config);
-//
-//        // 创建 ZIP 压缩包
-//        $zipPath = BASE_PATH . '/runtime/crud_' . $config->table_name . '_' . time() . '.zip';
-//        $zip = new \ZipArchive();
-//
-//        if ($zip->open($zipPath, \ZipArchive::CREATE | \ZipArchive::OVERWRITE) !== true) {
-//            return $this->error('无法创建压缩包');
-//        }
-//
-//        foreach ($files as $type => $content) {
-//            $filename = $this->getZipFilename($config, $type);
-//            if ($filename) {
-//                $zip->addFromString($filename, $content);
-//            }
-//        }
-//
-//        $zip->close();
-//
-//        // 返回下载
-//        return $this->response->download($zipPath, 'crud_' . $config->table_name . '.zip');
-//    }
 //
     /**
      * 删除配置
@@ -1113,59 +892,8 @@ class CrudGeneratorController extends AbstractController
         return implode('/', $segments);
     }
 
-//    /**
-//     * 获取文件路径
-//     */
-//    protected function getFilePath(AdminCrudConfig $config, string $type): ?string
-//    {
-//        $basePath = BASE_PATH;
 //
-//        return match ($type) {
-//            'model' => "{$basePath}/app/Model/Admin/{$config->model_name}.php",
-//            'controller' => "{$basePath}/app/Controller/Admin/System/{$config->controller_name}.php",
-//            'request_store' => "{$basePath}/app/Request/Admin/{$config->model_name}StoreRequest.php",
-//            'request_update' => "{$basePath}/app/Request/Admin/{$config->model_name}UpdateRequest.php",
-//            'view_index' => "{$basePath}/storage/view/admin/system/{$config->route_slug}/index.blade.php",
-//            'view_create' => "{$basePath}/storage/view/admin/system/{$config->route_slug}/create.blade.php",
-//            'view_edit' => "{$basePath}/storage/view/admin/system/{$config->route_slug}/edit.blade.php",
-//            'route' => null, // 路由需要手动添加到 routes.php
-//            'menu_sql' => null, // SQL 需要手动执行
-//            default => null,
-//        };
-//    }
 //
-//    /**
-//     * 获取 ZIP 文件名
-//     */
-//    protected function getZipFilename(AdminCrudConfig $config, string $type): ?string
-//    {
-//        return match ($type) {
-//            'model' => "Model/{$config->model_name}.php",
-//            'controller' => "Controller/{$config->controller_name}.php",
-//            'request_store' => "Request/{$config->model_name}StoreRequest.php",
-//            'request_update' => "Request/{$config->model_name}UpdateRequest.php",
-//            'view_index' => "View/{$config->route_slug}/index.blade.php",
-//            'view_create' => "View/{$config->route_slug}/create.blade.php",
-//            'view_edit' => "View/{$config->route_slug}/edit.blade.php",
-//            'route' => "routes.php",
-//            'menu_sql' => "menu.sql",
-//            default => null,
-//        };
-//    }
-//
-//    /**
-//     * 写入文件
-//     */
-//    protected function writeFile(string $filePath, string $content): void
-//    {
-//        $dir = dirname($filePath);
-//
-//        if (!is_dir($dir)) {
-//            mkdir($dir, 0755, true);
-//        }
-//
-//        file_put_contents($filePath, $content);
-//    }
 //
     /**
      * 为 CRUD 配置同步菜单

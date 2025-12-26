@@ -46,6 +46,26 @@
             font-size: 16px;
         }
 
+        .header-content {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+        }
+
+        .header-main {
+            flex: 1;
+        }
+
+        .header-version {
+            margin-top: 10px;
+        }
+
+        .header-version small {
+            color: rgba(255, 255, 255, 0.7);
+            font-size: 12px;
+            font-weight: 500;
+        }
+
         .install-body {
             padding: 40px 30px;
         }
@@ -225,6 +245,16 @@
             font-size: 13px;
         }
 
+        .powered-by {
+            color: #6c757d;
+            font-size: 12px;
+        }
+
+        .powered-by small {
+            color: #adb5bd;
+            margin-left: 8px;
+        }
+
         .modal-overlay {
             position: fixed;
             top: 0;
@@ -355,24 +385,173 @@
         .check-category:first-child {
             margin-top: 0;
         }
+
+        /* 环境检查动画样式 */
+        .env-check-loading {
+            text-align: center;
+            padding: 20px;
+        }
+
+        .loading-spinner {
+            width: 40px;
+            height: 40px;
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 15px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .loading-text {
+            color: #666;
+            margin-bottom: 15px;
+            font-size: 14px;
+        }
+
+        .loading-progress {
+            width: 200px;
+            height: 4px;
+            background-color: #f0f0f0;
+            border-radius: 2px;
+            overflow: hidden;
+            margin: 0 auto;
+        }
+
+        .progress-bar-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            width: 0;
+            transition: width 0.3s ease;
+            animation: progress-pulse 1.5s ease-in-out infinite;
+        }
+
+        @keyframes progress-pulse {
+            0% { width: 0%; }
+            50% { width: 100%; }
+            100% { width: 0%; }
+        }
+
+        .env-check-result {
+            text-align: center;
+            padding: 20px;
+        }
+
+        .result-icon {
+            font-size: 48px;
+            color: #28a745;
+            margin-bottom: 10px;
+        }
+
+        .result-text {
+            color: #28a745;
+            font-weight: 600;
+            margin-bottom: 15px;
+        }
+
+        .env-check-error {
+            text-align: center;
+            padding: 20px;
+        }
+
+        .error-icon {
+            font-size: 48px;
+            color: #dc3545;
+            margin-bottom: 10px;
+        }
+
+        .error-text {
+            color: #dc3545;
+            font-weight: 600;
+            margin-bottom: 15px;
+        }
+
+        .btn-sm {
+            padding: 8px 16px;
+            font-size: 13px;
+            border-radius: 6px;
+        }
+
+        .btn-link {
+            background: transparent;
+            color: #667eea;
+            border: none;
+            text-decoration: none;
+            padding: 8px 16px;
+            font-size: 13px;
+            cursor: pointer;
+            border-radius: 6px;
+            transition: all 0.3s;
+        }
+
+        .btn-link:hover {
+            background-color: rgba(102, 126, 234, 0.1);
+            color: #5a67d8;
+        }
+
+        .result-actions, .error-actions {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            margin-top: 15px;
+        }
     </style>
 </head>
 <body>
     <div class="install-container">
         <div class="install-card">
             <div class="install-header">
-                <h1>🚀 系统初始化</h1>
-                <p>欢迎使用 MoYi Admin，请填写以下信息完成初始化</p>
+                <div class="header-content">
+                    <div class="header-main">
+                        <h1>🚀 系统初始化</h1>
+                        <p>欢迎使用 MoYi Admin，请填写以下信息完成初始化</p>
+                    </div>
+                    <div class="header-version">
+                        <small>v<?php echo APP_VERSION; ?></small>
+                    </div>
+                </div>
             </div>
 
             <div class="install-body">
                 <div id="alertContainer"></div>
 
                 <!-- 环境检查 -->
-                <div class="env-check-section">
-                    <button type="button" class="btn btn-secondary" id="checkEnvBtn" onclick="checkEnvironment()">
-                        🔍 检查系统环境
-                    </button>
+                <div class="env-check-section" id="envCheckSection">
+                    <div class="env-check-loading" id="envCheckLoading">
+                        <div class="loading-spinner"></div>
+                        <div class="loading-text">正在检查系统环境...</div>
+                        <div class="loading-progress">
+                            <div class="progress-bar-fill" id="envCheckProgress"></div>
+                        </div>
+                    </div>
+                    <div class="env-check-result" id="envCheckResult" style="display: none;">
+                        <div class="result-icon" id="envCheckIcon">✓</div>
+                        <div class="result-text" id="envCheckText">环境检查通过</div>
+                        <div class="result-actions">
+                            <button type="button" class="btn btn-secondary btn-sm" onclick="showEnvironmentDetails()">
+                                查看详情
+                            </button>
+                            <button type="button" class="btn btn-link btn-sm" onclick="recheckEnvironment()">
+                                重新检查
+                            </button>
+                        </div>
+                    </div>
+                    <div class="env-check-error" id="envCheckError" style="display: none;">
+                        <div class="error-icon">✗</div>
+                        <div class="error-text" id="envCheckErrorText">环境检查失败</div>
+                        <div class="error-actions">
+                            <button type="button" class="btn btn-danger btn-sm" onclick="showEnvironmentDetails()">
+                                查看详情
+                            </button>
+                            <button type="button" class="btn btn-link btn-sm" onclick="recheckEnvironment()">
+                                重新检查
+                            </button>
+                        </div>
+                    </div>
                 </div>
 
                 <form id="installForm">
@@ -512,13 +691,80 @@
             </div>
 
             <div class="install-footer">
-
-                Powered by MoYi Admin &copy; 2025
+                <div class="powered-by">
+                    Powered by MoYi Admin &copy; 2025 <small>v<?php echo APP_VERSION; ?></small>
+                </div>
             </div>
         </div>
     </div>
 
     <script>
+        // 系统版本信息
+        window.APP_VERSION = '<?php echo APP_VERSION; ?>';
+        console.log(`🚀 MoYi Admin ${window.APP_VERSION} - 系统初始化页面`);
+
+        // 自动环境检查（页面加载时执行）
+        async function autoCheckEnvironment() {
+            const loadingDiv = document.getElementById('envCheckLoading');
+            const resultDiv = document.getElementById('envCheckResult');
+            const errorDiv = document.getElementById('envCheckError');
+            const progressBar = document.getElementById('envCheckProgress');
+
+            // 显示加载状态
+            loadingDiv.style.display = 'block';
+            resultDiv.style.display = 'none';
+            errorDiv.style.display = 'none';
+
+            // 模拟进度条动画
+            progressBar.style.animation = 'progress-pulse 1.5s ease-in-out infinite';
+
+            try {
+                const response = await fetch('/install/check-environment');
+                const result = await response.json();
+
+                if (result.code === 200) {
+                    // 检查是否所有项目都通过
+                    const allPassed = checkAllRequirementsPassed(result.data);
+
+                    // 存储检查结果供详情查看
+                    window.envCheckData = result.data;
+
+                    if (allPassed) {
+                        // 所有检查通过，显示成功状态后自动隐藏
+                        loadingDiv.style.display = 'none';
+                        resultDiv.style.display = 'block';
+                        errorDiv.style.display = 'none';
+
+                        // 3秒后自动隐藏成功提示
+                        setTimeout(() => {
+                            const section = document.getElementById('envCheckSection');
+                            if (section) {
+                                section.style.display = 'none';
+                            }
+                        }, 1000);
+                    } else {
+                        // 有检查项未通过，显示错误状态
+                        loadingDiv.style.display = 'none';
+                        resultDiv.style.display = 'none';
+                        errorDiv.style.display = 'block';
+                    }
+                } else {
+                    // API调用失败
+                    loadingDiv.style.display = 'none';
+                    resultDiv.style.display = 'none';
+                    errorDiv.style.display = 'block';
+                    document.getElementById('envCheckErrorText').textContent = result.message || '环境检查失败';
+                }
+            } catch (error) {
+                // 网络错误
+                loadingDiv.style.display = 'none';
+                resultDiv.style.display = 'none';
+                errorDiv.style.display = 'block';
+                document.getElementById('envCheckErrorText').textContent = '网络错误：' + error.message;
+            }
+        }
+
+        // 手动环境检查（按钮点击时执行）
         async function checkEnvironment() {
             const checkBtn = document.getElementById('checkEnvBtn');
             const modal = document.getElementById('envCheckModal');
@@ -545,6 +791,75 @@
                 checkBtn.disabled = false;
                 checkBtn.textContent = '🔍 检查系统环境';
             }
+        }
+
+        // 检查所有必需项目是否通过
+        function checkAllRequirementsPassed(data) {
+            // 检查PHP版本
+            if (data.php_version && !data.php_version.passed) {
+                return false;
+            }
+
+            // 检查PHP扩展
+            if (data.extensions) {
+                for (const [key, ext] of Object.entries(data.extensions)) {
+                    if (!ext.passed) {
+                        return false;
+                    }
+                }
+            }
+
+            // 检查目录权限
+            if (data.directories) {
+                for (const [key, dir] of Object.entries(data.directories)) {
+                    if (!dir.writable) {
+                        return false;
+                    }
+                }
+            }
+
+            // 检查数据库状态
+            if (data.database && !data.database.passed) {
+                return false;
+            }
+
+            // 检查MySQL版本
+            if (data.mysql_version && !data.mysql_version.passed) {
+                return false;
+            }
+
+            // 检查MySQL特性
+            if (data.mysql_features && !data.mysql_features.passed) {
+                return false;
+            }
+
+            return true;
+        }
+
+        // 重新检查环境
+        function recheckEnvironment() {
+            // 隐藏当前状态，重新开始自动检查
+            const section = document.getElementById('envCheckSection');
+            if (section) {
+                section.style.display = 'block';
+            }
+            autoCheckEnvironment();
+        }
+
+        // 显示环境检查详情
+        function showEnvironmentDetails() {
+            const modal = document.getElementById('envCheckModal');
+            const resultsDiv = document.getElementById('modalEnvResults');
+
+            if (window.envCheckData) {
+                displayEnvironmentResults(window.envCheckData);
+            } else {
+                // 如果没有缓存数据，重新检查
+                checkEnvironment();
+                return;
+            }
+
+            openModal('envCheckModal');
         }
 
         function displayEnvironmentResults(data) {
@@ -628,6 +943,20 @@
                     statusText = '✗ 非空数据库';
                 }
 
+                // MySQL版本信息
+                let versionStatusText = '';
+                let versionStatusClass = '';
+                if (db.version_status === 'recommended') {
+                    versionStatusText = '✓ 推荐版本';
+                    versionStatusClass = 'passed';
+                } else if (db.version_status === 'acceptable') {
+                    versionStatusText = '⚠ 可接受版本';
+                    versionStatusClass = 'passed';
+                } else if (db.version_status === 'too_low') {
+                    versionStatusText = '✗ 版本过低';
+                    versionStatusClass = 'failed';
+                }
+
                 html += `
                     <div class="check-item">
                         <div>
@@ -635,6 +964,20 @@
                             <div class="check-item-value">${db.database || '未知'}</div>
                         </div>
                         <span class="check-status ${statusClass}">${statusText}</span>
+                    </div>
+                    <div class="check-item">
+                        <div>
+                            <div class="check-item-name">数据库类型</div>
+                            <div class="check-item-value">${db.client_name || '未知'}</div>
+                        </div>
+                        <span class="check-status passed">ℹ️ ${db.client_type || 'unknown'}</span>
+                    </div>
+                    <div class="check-item">
+                        <div>
+                            <div class="check-item-name">MySQL 版本</div>
+                            <div class="check-item-value">${db.version || '未知'}</div>
+                        </div>
+                        <span class="check-status ${versionStatusClass}">${versionStatusText}</span>
                     </div>
                     <div class="check-item">
                         <div class="check-item-name">数据表数量</div>
@@ -702,6 +1045,9 @@
             const alertContainer = document.getElementById('alertContainer');
             const siteDomainInput = document.getElementById('site_domain');
 
+            // 页面加载完成后自动开始环境检查
+            autoCheckEnvironment();
+
             if (siteDomainInput && !siteDomainInput.value) {
                 const hostname = window.location.hostname || '';
                 const port = window.location.port;
@@ -740,7 +1086,7 @@
                     const result = await response.json();
 
                     if (result.code === 200) {
-                        showAlert('success', '初始化成功！正在跳转到登录页面...');
+                        showAlert('success', `初始化成功！MoYi Admin ${window.APP_VERSION} 已就绪，正在跳转到登录页面...`);
                         setTimeout(() => {
                             const adminPath = result && result.data && result.data.admin_path ? result.data.admin_path : '';
                             const target = adminPath ? `/admin/${adminPath}/login` : '/admin/login';

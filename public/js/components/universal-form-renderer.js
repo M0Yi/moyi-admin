@@ -537,6 +537,7 @@
                     return this.renderTextarea(field);
                 case 'select':
                 case 'relation':
+                case 'relation_multi':
                     return this.renderSelect(field);
                 case 'site_select':
                     return this.renderSiteSelector(field);
@@ -569,12 +570,16 @@
                     return this.renderColorField(field);
                 case 'gradient':
                     return this.renderGradientField(field);
+                case 'icon':
+                    return this.renderIconField(field);
                 case 'key_value':
                     return this.renderKeyValueField(field);
                 case 'multi_key_value':
                     return this.renderMultiKeyValueField(field);
                 case 'object_key_value':
                     return this.renderObjectKeyValueField(field);
+                case 'text_array':
+                    return this.renderTextArrayField(field);
                 default:
                     // 未知或未实现的字段类型统一记录警告，便于前端定位渲染缺失
                     console.error(
@@ -805,7 +810,7 @@
 
         renderSelect(field) {
             const id = this.getFieldId(field);
-            const isRelation = field.type === 'relation';
+            const isRelation = field.type === 'relation' || field.type === 'relation_multi';
             const multiple = this.isMultiple(field);
             const selectName = multiple ? `${field.name}[]` : field.name;
             const options = this.getOptions(field);
@@ -1314,6 +1319,47 @@
                         </button>
                     </div>
                     ${field.help ? `<div class="form-text">${this.escape(field.help)}</div>` : ''}
+                </div>
+            `;
+        }
+
+        renderIconField(field) {
+            const id = this.getFieldId(field);
+            const value = this.getFieldValue(field);
+            const previewId = `${id}_preview`;
+
+            return `
+                <div class="icon-input-group">
+                    <div class="input-group">
+                        <span class="input-group-text" id="${this.escapeAttr(previewId)}">
+                            <i class="${this.escapeAttr(value || 'bi bi-star')}"></i>
+                        </span>
+                        <input
+                            type="text"
+                            class="form-control"
+                            id="${this.escapeAttr(id)}"
+                            name="${this.escapeAttr(field.name)}"
+                            placeholder="${this.escapeAttr(field.placeholder ?? '选择图标')}"
+                            value="${this.escapeAttr(value)}"
+                            ${field.required ? 'required' : ''}
+                            ${field.disabled ? 'disabled' : ''}
+                            ${field.readonly ? 'readonly' : ''}
+                        >
+                        <button
+                            class="btn btn-outline-secondary"
+                            type="button"
+                            data-bs-toggle="modal"
+                            data-bs-target="#iconPickerModal"
+                            data-target-input="${this.escapeAttr(id)}"
+                            ${field.disabled || field.readonly ? 'disabled' : ''}
+                        >
+                            <i class="bi bi-search"></i> 选择
+                        </button>
+                    </div>
+                    <div class="form-text">
+                        选择 Bootstrap Icons 图标，或手动输入如：bi bi-house、bi bi-person 等
+                        <a href="https://icons.getbootstrap.com/" target="_blank" class="ms-2">查看图标库</a>
+                    </div>
                 </div>
             `;
         }
@@ -1973,6 +2019,93 @@
             `;
         }
 
+        renderTextArrayField(field) {
+            const id = this.getFieldId(field);
+            const fieldName = field.name || 'text_array';
+            const value = this.getFieldValue(field);
+
+            // 解析文本数组数据：支持数组格式 ['item1', 'item2', ...] 或 JSON 字符串
+            let textArray = [];
+            if (value) {
+                try {
+                    const parsed = typeof value === 'string' ? JSON.parse(value) : value;
+                    if (Array.isArray(parsed)) {
+                        // 确保都是字符串类型
+                        textArray = parsed.map(item => String(item || ''));
+                    } else if (typeof parsed === 'string') {
+                        // 如果是单个字符串，转换为单元素数组
+                        textArray = [parsed];
+                    }
+                } catch (e) {
+                    // 解析失败，如果是字符串则按换行符分割
+                    if (typeof value === 'string') {
+                        textArray = value.split('\n').map(item => item.trim()).filter(item => item);
+                    }
+                }
+            }
+
+            // 至少保留一个空的输入框用于添加
+            if (textArray.length === 0) {
+                textArray = [''];
+            }
+
+            const itemsHtml = textArray.map((item, index) => {
+                const itemId = `${id}_item_${index}`;
+                return `
+                    <div class="input-group input-group-sm mb-2 text-array-item" data-text-array-index="${index}">
+                        <input
+                            type="text"
+                            class="form-control form-control-sm"
+                            placeholder="请输入文本内容"
+                            value="${this.escapeAttr(item)}"
+                            data-text-array-input
+                        >
+                        <button
+                            class="btn btn-outline-danger btn-sm"
+                            type="button"
+                            data-text-array-remove
+                            title="删除此项"
+                            ${textArray.length === 1 ? 'disabled' : ''}
+                        >
+                            <i class="bi bi-trash"></i>
+                        </button>
+                        ${index === textArray.length - 1 ? `
+                            <button
+                                class="btn btn-outline-success btn-sm"
+                                type="button"
+                                data-text-array-add
+                                title="添加新项"
+                            >
+                                <i class="bi bi-plus"></i>
+                            </button>
+                        ` : ''}
+                    </div>
+                `;
+            }).join('');
+
+            return `
+                <div class="text-array-field-wrapper"
+                     data-text-array-field="${this.escapeAttr(fieldName)}">
+                    <div class="text-array-container">
+                        ${itemsHtml}
+                    </div>
+                    <input
+                        type="hidden"
+                        id="${id}"
+                        name="${this.escapeAttr(fieldName)}"
+                        value="${this.escapeAttr(JSON.stringify(textArray.filter(item => item.trim())))}"
+                        data-text-array-hidden
+                    >
+                    <div class="form-text">
+                        <small class="text-muted">
+                            <i class="bi bi-info-circle me-1"></i>
+                            支持添加多个文本项，可以使用 + 按钮添加新项，或使用 - 按钮删除项目。
+                        </small>
+                    </div>
+                </div>
+            `;
+        }
+
         initializeEnhancements() {
             this.initializeSelects();
             this.initializeSwitches();
@@ -1987,6 +2120,7 @@
             this.initializeKeyValueFields();
             this.initializeMultiKeyValueFields();
             this.initializeObjectKeyValueFields();
+            this.initializeTextArrayFields();
             this.initializeFieldAI();
         }
 
@@ -1997,6 +2131,15 @@
             }
 
             wrappers.forEach((wrapper) => this.setupObjectKeyValueField(wrapper));
+        }
+
+        initializeTextArrayFields() {
+            const wrappers = this.form.querySelectorAll('[data-text-array-field]');
+            if (!wrappers.length) {
+                return;
+            }
+
+            wrappers.forEach((wrapper) => this.setupTextArrayField(wrapper));
         }
 
         initializeFieldAI() {
@@ -2046,7 +2189,7 @@
             const fieldName = wrapper.dataset.objectKeyValueField;
             const hiddenInput = wrapper.querySelector('input[type="hidden"][data-object-key-value-hidden]');
             const container = wrapper.querySelector('.object-key-value-container');
-            
+
             if (!hiddenInput || !container) {
                 console.warn('[ObjectKeyValueField] 缺少必要的 DOM 元素');
                 return;
@@ -2163,7 +2306,143 @@
                 });
             }
         }
-        
+
+        setupTextArrayField(wrapper) {
+            const fieldName = wrapper.dataset.textArrayField;
+            const hiddenInput = wrapper.querySelector('input[type="hidden"][data-text-array-hidden]');
+            const container = wrapper.querySelector('.text-array-container');
+
+            if (!hiddenInput || !container) {
+                console.warn('[TextArrayField] 缺少必要的 DOM 元素');
+                return;
+            }
+
+            // 更新隐藏输入框的值
+            const updateHiddenValue = () => {
+                const inputs = container.querySelectorAll('[data-text-array-input]');
+                const values = Array.from(inputs)
+                    .map(input => input.value.trim())
+                    .filter(value => value !== ''); // 过滤空值
+
+                hiddenInput.value = JSON.stringify(values);
+            };
+
+            // 绑定所有输入框的输入事件
+            const inputs = container.querySelectorAll('[data-text-array-input]');
+            inputs.forEach((input) => {
+                input.addEventListener('input', updateHiddenValue);
+            });
+
+            // 绑定添加按钮事件
+            const addButtons = container.querySelectorAll('[data-text-array-add]');
+            addButtons.forEach((button) => {
+                button.addEventListener('click', () => {
+                    const itemIndex = parseInt(button.closest('.text-array-item').dataset.textArrayIndex) + 1;
+                    const newItemHtml = `
+                        <div class="input-group input-group-sm mb-2 text-array-item" data-text-array-index="${itemIndex}">
+                            <input
+                                type="text"
+                                class="form-control form-control-sm"
+                                placeholder="请输入文本内容"
+                                value=""
+                                data-text-array-input
+                            >
+                            <button
+                                class="btn btn-outline-danger btn-sm"
+                                type="button"
+                                data-text-array-remove
+                                title="删除此项"
+                            >
+                                <i class="bi bi-trash"></i>
+                            </button>
+                            <button
+                                class="btn btn-outline-success btn-sm"
+                                type="button"
+                                data-text-array-add
+                                title="添加新项"
+                            >
+                                <i class="bi bi-plus"></i>
+                            </button>
+                        </div>
+                    `;
+
+                    // 移除当前项的添加按钮
+                    const currentItem = button.closest('.text-array-item');
+                    const currentAddButton = currentItem.querySelector('[data-text-array-add]');
+                    if (currentAddButton) {
+                        currentAddButton.remove();
+                    }
+
+                    // 插入新项
+                    currentItem.insertAdjacentHTML('afterend', newItemHtml);
+
+                    // 重新绑定事件
+                    this.setupTextArrayField(wrapper);
+
+                    // 聚焦到新输入框
+                    const newInput = currentItem.nextElementSibling.querySelector('[data-text-array-input]');
+                    if (newInput) {
+                        newInput.focus();
+                    }
+                });
+            });
+
+            // 绑定删除按钮事件
+            const removeButtons = container.querySelectorAll('[data-text-array-remove]');
+            removeButtons.forEach((button) => {
+                button.addEventListener('click', () => {
+                    const item = button.closest('.text-array-item');
+                    const container = item.parentElement;
+                    const items = container.querySelectorAll('.text-array-item');
+
+                    // 如果只有一个项目，不允许删除
+                    if (items.length <= 1) {
+                        return;
+                    }
+
+                    // 删除项目
+                    item.remove();
+
+                    // 重新编号索引
+                    const remainingItems = container.querySelectorAll('.text-array-item');
+                    remainingItems.forEach((remainingItem, index) => {
+                        remainingItem.dataset.textArrayIndex = index;
+
+                        // 确保最后一个项目有添加按钮
+                        const addButton = remainingItem.querySelector('[data-text-array-add]');
+                        if (index === remainingItems.length - 1) {
+                            if (!addButton) {
+                                const removeButton = remainingItem.querySelector('[data-text-array-remove]');
+                                if (removeButton) {
+                                    removeButton.insertAdjacentHTML('afterend', `
+                                        <button
+                                            class="btn btn-outline-success btn-sm"
+                                            type="button"
+                                            data-text-array-add
+                                            title="添加新项"
+                                        >
+                                            <i class="bi bi-plus"></i>
+                                        </button>
+                                    `);
+                                }
+                            }
+                        } else {
+                            // 非最后一个项目移除添加按钮
+                            if (addButton) {
+                                addButton.remove();
+                            }
+                        }
+                    });
+
+                    // 重新绑定事件
+                    this.setupTextArrayField(wrapper);
+
+                    // 更新隐藏值
+                    updateHiddenValue();
+                });
+            });
+        }
+
         initializeGroups() {
             // 初始化分组折叠功能
             const toggleButtons = this.form.querySelectorAll('[data-group-toggle]');
@@ -3085,6 +3364,11 @@
         }
 
         isMultiple(field) {
+            // 关联多选类型始终为多选
+            if (field.type === 'relation_multi') {
+                return true;
+            }
+
             if (field.relation && typeof field.relation.multiple !== 'undefined') {
                 return Boolean(field.relation.multiple);
             }
