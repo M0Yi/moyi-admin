@@ -100,14 +100,25 @@ class InstallController extends AbstractController
             $adminUser = $this->createAdminUser($data, $site->id);
             logger()->info('超级管理员账号创建完成，ID=' . $adminUser->id);
 
-            // 5. 分配角色给管理员
+            // 5. 创建更多测试用户
+            logger()->info('开始创建测试用户');
+            $testUsers = $this->createTestUsers($site->id);
+            logger()->info('测试用户创建完成，共创建 ' . count($testUsers) . ' 个用户');
+
+            // 6. 分配角色给管理员
             logger()->info('开始分配角色给管理员');
             $adminUser->roles()->attach($superAdminRole->id);
             logger()->info('角色分配完成');
 
-            // 6. 插入测试数据
+            // 7. 创建普通用户角色并分配
+            logger()->info('开始创建和分配普通用户角色');
+            $this->assignRolesToTestUsers($testUsers);
+            logger()->info('角色分配完成');
+
+            // 8. 插入测试数据
             logger()->info('开始插入测试数据');
-            $this->insertTestData($site->id, $adminUser->id);
+            $allUserIds = array_merge([$adminUser->id], array_column($testUsers, 'id'));
+            $this->insertTestData($site->id, $allUserIds);
             logger()->info('测试数据插入完成');
 
             // 提交事务
@@ -1186,6 +1197,121 @@ class InstallController extends AbstractController
     }
 
     /**
+     * 创建测试用户
+     */
+    protected function createTestUsers(int $siteId): array
+    {
+        $testUsers = [
+            [
+                'username' => 'zhangwei',
+                'password' => '123456',
+                'email' => 'zhangwei@example.com',
+                'mobile' => '13800138003',
+                'real_name' => '张伟',
+                'status' => 1,
+                'is_admin' => 0,
+            ],
+            [
+                'username' => 'lihua',
+                'password' => '123456',
+                'email' => 'lihua@example.com',
+                'mobile' => '13800138004',
+                'real_name' => '李华',
+                'status' => 1,
+                'is_admin' => 0,
+            ],
+            [
+                'username' => 'wangfang',
+                'password' => '123456',
+                'email' => 'wangfang@example.com',
+                'mobile' => '13800138005',
+                'real_name' => '王芳',
+                'status' => 1,
+                'is_admin' => 0,
+            ],
+            [
+                'username' => 'chenming',
+                'password' => '123456',
+                'email' => 'chenming@example.com',
+                'mobile' => '13800138006',
+                'real_name' => '陈明',
+                'status' => 1,
+                'is_admin' => 0,
+            ],
+            [
+                'username' => 'liuyang',
+                'password' => '123456',
+                'email' => 'liuyang@example.com',
+                'mobile' => '13800138007',
+                'real_name' => '刘阳',
+                'status' => 1,
+                'is_admin' => 0,
+            ],
+            [
+                'username' => 'sunxiao',
+                'password' => '123456',
+                'email' => 'sunxiao@example.com',
+                'mobile' => '13800138008',
+                'real_name' => '孙晓',
+                'status' => 0, // 禁用状态
+                'is_admin' => 0,
+            ],
+        ];
+
+        $createdUsers = [];
+        foreach ($testUsers as $userData) {
+            $user = AdminUser::create(array_merge($userData, ['site_id' => $siteId]));
+            $createdUsers[] = $user;
+        }
+
+        return $createdUsers;
+    }
+
+    /**
+     * 为测试用户分配角色
+     */
+    protected function assignRolesToTestUsers(array $testUsers): void
+    {
+        // 创建一些测试角色
+        $roles = [
+            [
+                'name' => '内容编辑员',
+                'slug' => 'content-editor',
+                'description' => '负责内容编辑和发布',
+                'status' => 1,
+            ],
+            [
+                'name' => '运营专员',
+                'slug' => 'operation-specialist',
+                'description' => '负责运营活动和用户管理',
+                'status' => 1,
+            ],
+            [
+                'name' => '项目经理',
+                'slug' => 'project-manager',
+                'description' => '负责项目管理和团队协调',
+                'status' => 1,
+            ],
+        ];
+
+        $createdRoles = [];
+        foreach ($roles as $roleData) {
+            $role = AdminRole::create($roleData);
+            $createdRoles[] = $role;
+        }
+
+        // 为用户分配角色
+        if (count($testUsers) >= 3 && count($createdRoles) >= 3) {
+            $testUsers[0]->roles()->attach($createdRoles[0]->id); // 张伟 -> 内容编辑员
+            $testUsers[1]->roles()->attach($createdRoles[1]->id); // 李华 -> 运营专员
+            $testUsers[2]->roles()->attach($createdRoles[2]->id); // 王芳 -> 项目经理
+            $testUsers[3]->roles()->attach([$createdRoles[0]->id, $createdRoles[1]->id]); // 陈明 -> 内容编辑员 + 运营专员
+            $testUsers[4]->roles()->attach([$createdRoles[1]->id, $createdRoles[2]->id]); // 刘阳 -> 运营专员 + 项目经理
+            // 孙晓是禁用的，不分配角色
+        }
+    }
+
+    /**
      * 检查环境
      */
     public function checkEnvironment(HttpResponse $response): \Psr\Http\Message\ResponseInterface
@@ -1927,14 +2053,23 @@ class InstallController extends AbstractController
     /**
      * 插入测试数据
      */
-    protected function insertTestData(int $siteId, int $userId): void
+    protected function insertTestData(int $siteId, array $userIds): void
     {
+        // 创建更丰富的用户ID组合用于测试
+        $userCombinations = [
+            [$userIds[0]], // 只有超级管理员
+            [$userIds[0], $userIds[1]], // 超级管理员 + 张伟
+            [$userIds[1], $userIds[2]], // 张伟 + 李华
+            [$userIds[0], $userIds[1], $userIds[2], $userIds[3]], // 前4个用户
+            array_slice($userIds, 0, 6), // 所有有效用户（排除禁用的）
+        ];
+
         $testData = [
             [
                 'id' => 1,
                 'site_id' => $siteId,
-                'user_id' => $userId,
-                'user_ids' => json_encode([$userId]), // 多选关联测试
+                'user_id' => $userIds[0], // 超级管理员
+                'user_ids' => json_encode($userCombinations[0]), // 多选关联测试
                 'image' => 'https://inkakofenghui.oss-cn-shenzhen.aliyuncs.com/inkako/meeting/images/user-1/1763287317-b6a262c586998312.jpg',
                 'images' => '["https://inkakofenghui.oss-cn-shenzhen.aliyuncs.com/inkako/meeting/images/user-1/1763287317-f02bf714faed7258.jpg","https://inkakofenghui.oss-cn-shenzhen.aliyuncs.com/inkako/meeting/images/user-1/1763287318-4d1ca3f323f43571.jpg"]',
                 'is_show' => 0,
@@ -1971,8 +2106,8 @@ class InstallController extends AbstractController
             [
                 'id' => 2,
                 'site_id' => $siteId,
-                'user_id' => $userId,
-                'user_ids' => json_encode([$userId]),
+                'user_id' => $userIds[1], // 张伟
+                'user_ids' => json_encode($userCombinations[1]), // 超级管理员 + 张伟
                 'image' => 'https://inkakofenghui.oss-cn-shenzhen.aliyuncs.com/inkako/meeting/images/user-1/1763287317-229f8e96dc80ae75.jpg',
                 'images' => '["https://inkakofenghui.oss-cn-shenzhen.aliyuncs.com/inkako/meeting/images/user-1/1763287318-aa76a192cc466b58.jpg","https://inkakofenghui.oss-cn-shenzhen.aliyuncs.com/inkako/meeting/images/user-1/1763287318-b6d5cb42c70c57e4.jpg"]',
                 'is_show' => 1,
@@ -2009,10 +2144,161 @@ class InstallController extends AbstractController
             [
                 'id' => 3,
                 'site_id' => $siteId,
-                'user_id' => $userId,
-                'user_ids' => null,
+                'user_id' => $userIds[2], // 李华
+                'user_ids' => json_encode($userCombinations[2]), // 张伟 + 李华
                 'image' => 'https://inkakofenghui.oss-cn-shenzhen.aliyuncs.com/inkako/meeting/images/user-1/1763287317-229f8e96dc80ae75.jpg',
                 'images' => '["https://inkakofenghui.oss-cn-shenzhen.aliyuncs.com/inkako/meeting/images/user-1/1763287318-aa76a192cc466b58.jpg","https://inkakofenghui.oss-cn-shenzhen.aliyuncs.com/inkako/meeting/images/user-1/1763287318-b6d5cb42c70c57e4.jpg"]',
+                'is_show' => 1,
+                'status' => 'active',
+                'title' => '测试文章：多用户协作项目',
+                'content' => '这是一个多用户协作的项目，展示了如何在系统中管理多个用户的关联关系。',
+                'price' => 299.99,
+                'min_age' => 25,
+                'max_age' => 45,
+                'email' => 'test3@example.com',
+                'password' => password_hash('test789', PASSWORD_DEFAULT),
+                'mobile' => '13800138003',
+                'icon' => 'bi bi-people-fill',
+                'rich_content' => '<p><strong>团队协作</strong></p><p>这个项目展示了多用户系统的强大功能。</p>',
+                'gender' => 'male',
+                'hobbies' => json_encode(['teamwork', 'leadership', 'innovation']),
+                'birth_date' => '1988-03-20',
+                'attachment' => 'https://example.com/files/project-plan.pdf',
+                'view_count' => 888,
+                'setting_config' => json_encode([
+                    'banner_title' => '项目横幅',
+                    'banner_enabled' => true,
+                ], JSON_UNESCAPED_UNICODE),
+                'multi_config' => json_encode([
+                    ['key' => 'project_status', 'value' => '进行中', 'type' => 'text'],
+                    ['key' => 'team_size', 'value' => '5', 'type' => 'number'],
+                    ['key' => 'is_public', 'value' => '1', 'type' => 'switch'],
+                ], JSON_UNESCAPED_UNICODE),
+                'published_at' => '2025-11-07 14:30:00',
+                'created_at' => '2025-11-06 09:15:22',
+                'updated_at' => '2025-11-17 16:45:33',
+                'deleted_at' => null,
+            ],
+            [
+                'id' => 4,
+                'site_id' => $siteId,
+                'user_id' => $userIds[3], // 王芳
+                'user_ids' => json_encode($userCombinations[3]), // 前4个用户
+                'image' => 'https://inkakofenghui.oss-cn-shenzhen.aliyuncs.com/inkako/meeting/images/user-1/1763287317-b6a262c586998312.jpg',
+                'images' => '["https://inkakofenghui.oss-cn-shenzhen.aliyuncs.com/inkako/meeting/images/user-1/1763287317-f02bf714faed7258.jpg"]',
+                'is_show' => 1,
+                'status' => 'active',
+                'title' => '测试文章：大型团队项目',
+                'content' => '这个大型项目涉及多个团队成员，展示了复杂的用户关系管理。',
+                'price' => 499.99,
+                'min_age' => 22,
+                'max_age' => 55,
+                'email' => 'test4@example.com',
+                'password' => password_hash('test999', PASSWORD_DEFAULT),
+                'mobile' => '13800138004',
+                'icon' => 'bi bi-diagram-3-fill',
+                'rich_content' => '<p><em>复杂项目管理</em></p><p>涉及多个用户角色的复杂项目。</p>',
+                'gender' => 'female',
+                'hobbies' => json_encode(['management', 'communication', 'analysis']),
+                'birth_date' => '1982-07-12',
+                'attachment' => 'https://example.com/files/large-project.pdf',
+                'view_count' => 1250,
+                'setting_config' => json_encode([
+                    'banner_title' => '大型项目横幅',
+                    'banner_enabled' => true,
+                ], JSON_UNESCAPED_UNICODE),
+                'multi_config' => json_encode([
+                    ['key' => 'budget', 'value' => '50000', 'type' => 'number'],
+                    ['key' => 'deadline', 'value' => '2025-12-31', 'type' => 'date'],
+                    ['key' => 'priority', 'value' => '高', 'type' => 'select'],
+                ], JSON_UNESCAPED_UNICODE),
+                'published_at' => '2025-11-08 10:20:15',
+                'created_at' => '2025-11-07 11:30:45',
+                'updated_at' => '2025-11-18 09:12:18',
+                'deleted_at' => null,
+            ],
+            [
+                'id' => 5,
+                'site_id' => $siteId,
+                'user_id' => $userIds[4], // 陈明
+                'user_ids' => json_encode($userCombinations[4]), // 所有有效用户
+                'image' => 'https://inkakofenghui.oss-cn-shenzhen.aliyuncs.com/inkako/meeting/images/user-1/1763287317-229f8e96dc80ae75.jpg',
+                'images' => '["https://inkakofenghui.oss-cn-shenzhen.aliyuncs.com/inkako/meeting/images/user-1/1763287318-aa76a192cc466b58.jpg","https://inkakofenghui.oss-cn-shenzhen.aliyuncs.com/inkako/meeting/images/user-1/1763287318-b6d5cb42c70c57e4.jpg","https://inkakofenghui.oss-cn-shenzhen.aliyuncs.com/inkako/meeting/images/user-1/1763287317-b6a262c586998312.jpg"]',
+                'is_show' => 1,
+                'status' => 'active',
+                'title' => '测试文章：全员参与项目',
+                'content' => '这是一个需要全员参与的大型项目，涉及所有团队成员的密切协作。',
+                'price' => 999.99,
+                'min_age' => 20,
+                'max_age' => 60,
+                'email' => 'test5@example.com',
+                'password' => password_hash('test000', PASSWORD_DEFAULT),
+                'mobile' => '13800138005',
+                'icon' => 'bi bi-people',
+                'rich_content' => '<p><strong>全员协作项目</strong></p><p>这个项目需要所有团队成员的共同努力。</p>',
+                'gender' => 'male',
+                'hobbies' => json_encode(['collaboration', 'strategy', 'execution']),
+                'birth_date' => '1978-11-05',
+                'attachment' => 'https://example.com/files/company-project.pdf',
+                'view_count' => 2150,
+                'setting_config' => json_encode([
+                    'banner_title' => '全员项目横幅',
+                    'banner_enabled' => true,
+                ], JSON_UNESCAPED_UNICODE),
+                'multi_config' => json_encode([
+                    ['key' => 'company_wide', 'value' => '1', 'type' => 'switch'],
+                    ['key' => 'stakeholders', 'value' => '董事会', 'type' => 'text'],
+                    ['key' => 'impact_level', 'value' => '战略级', 'type' => 'select'],
+                ], JSON_UNESCAPED_UNICODE),
+                'published_at' => '2025-11-09 16:45:30',
+                'created_at' => '2025-11-08 14:20:10',
+                'updated_at' => '2025-11-19 11:25:40',
+                'deleted_at' => null,
+            ],
+            [
+                'id' => 6,
+                'site_id' => $siteId,
+                'user_id' => $userIds[5], // 刘阳
+                'user_ids' => json_encode([$userIds[5]]), // 单个用户
+                'image' => 'https://inkakofenghui.oss-cn-shenzhen.aliyuncs.com/inkako/meeting/images/user-1/1763287317-b6a262c586998312.jpg',
+                'images' => '["https://inkakofenghui.oss-cn-shenzhen.aliyuncs.com/inkako/meeting/images/user-1/1763287317-f02bf714faed7258.jpg"]',
+                'is_show' => 0,
+                'status' => 'active',
+                'title' => '测试文章：个人项目',
+                'content' => '这是一个个人负责的小型项目，用于测试单用户场景。',
+                'price' => 49.99,
+                'min_age' => 25,
+                'max_age' => 40,
+                'email' => 'test6@example.com',
+                'password' => password_hash('test111', PASSWORD_DEFAULT),
+                'mobile' => '13800138006',
+                'icon' => 'bi bi-person-fill',
+                'rich_content' => '<p>个人负责的独立项目。</p>',
+                'gender' => 'male',
+                'hobbies' => json_encode(['focus', 'detail', 'quality']),
+                'birth_date' => '1992-09-18',
+                'attachment' => 'https://example.com/files/personal-project.pdf',
+                'view_count' => 89,
+                'setting_config' => json_encode([
+                    'banner_title' => '个人项目横幅',
+                    'banner_enabled' => false,
+                ], JSON_UNESCAPED_UNICODE),
+                'multi_config' => json_encode([
+                    ['key' => 'solo_project', 'value' => '1', 'type' => 'switch'],
+                    ['key' => 'complexity', 'value' => '简单', 'type' => 'select'],
+                ], JSON_UNESCAPED_UNICODE),
+                'published_at' => '2025-11-10 08:15:25',
+                'created_at' => '2025-11-09 10:45:30',
+                'updated_at' => '2025-11-20 13:30:15',
+                'deleted_at' => null,
+            ],
+            [
+                'id' => 7,
+                'site_id' => $siteId,
+                'user_id' => $userIds[0], // 超级管理员
+                'user_ids' => null, // 空值测试
+                'image' => 'https://inkakofenghui.oss-cn-shenzhen.aliyuncs.com/inkako/meeting/images/user-1/1763287317-229f8e96dc80ae75.jpg',
+                'images' => null, // 空值测试
                 'is_show' => 0,
                 'status' => 'inactive',
                 'title' => '测试文章：已删除的历史稿件',
