@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Middleware;
 
 use App\Model\Admin\AdminSite;
+use App\Service\Admin\InterceptLogService;
 use Hyperf\Context\Context;
 use Hyperf\Di\Annotation\Inject;
 use Hyperf\HttpMessage\Stream\SwooleStream;
@@ -38,6 +39,10 @@ class AdminEntryMiddleware implements MiddlewareInterface
 {
     #[Inject]
     protected RenderInterface $render;
+
+    #[Inject]
+    protected InterceptLogService $interceptLogService;
+
     public function __construct(
         protected RequestInterface $request,
         protected HttpResponse $response
@@ -127,7 +132,46 @@ class AdminEntryMiddleware implements MiddlewareInterface
             $ip = trim($ips[0]);
         }
 
-        // 记录到日志
+        // 获取完整的IP列表
+        $ipList = $this->getClientIpList($request);
+
+        // 记录到拦截日志表
+        try {
+            // 这里不使用静态方法，而是使用注入的服务实例
+            // 构建拦截日志数据
+            $logData = [
+                'site_id' => null, // 非法访问时可能没有站点信息
+                'admin_entry_path' => $adminEntryPath,
+                'method' => strtoupper($request->getMethod()),
+                'path' => $request->getUri()->getPath(),
+                'ip' => $ip,
+                'ip_list' => $ipList,
+                'user_agent' => $request->getHeaderLine('User-Agent') ?: null,
+                'params' => $this->getRequestParams($request),
+                'intercept_type' => 'invalid_path', // 使用非法路径类型
+                'reason' => '非法后台入口访问尝试',
+                'status_code' => 404,
+                'duration' => null,
+            ];
+
+            // 异步记录拦截日志
+            \Hyperf\Coroutine\Coroutine::create(function () use ($logData) {
+                try {
+                    \App\Model\Admin\AdminInterceptLog::create($logData);
+                } catch (\Throwable $e) {
+                    logger()->error('记录拦截日志失败', [
+                        'error' => $e->getMessage(),
+                        'data' => $logData,
+                    ]);
+                }
+            });
+        } catch (\Throwable $e) {
+            logger()->error('准备拦截日志数据失败', [
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        // 记录到 Hyperf 日志
         logger()->warning('非法后台访问尝试', [
             'ip' => $ip,
             'host' => $request->getUri()->getHost(),
@@ -142,6 +186,146 @@ class AdminEntryMiddleware implements MiddlewareInterface
         // 1. IP 黑名单
         // 2. 频率限制
         // 3. 发送警报通知
+    }
+
+    /**
+     * 获取客户端IP列表
+     */
+    private function getClientIpList(ServerRequestInterface $request): array
+    {
+        $ips = [];
+
+        // X-Forwarded-For
+        $xForwardedFor = $request->getHeaderLine('X-Forwarded-For');
+        if (!empty($xForwardedFor)) {
+            $parts = array_map('trim', explode(',', $xForwardedFor));
+            foreach ($parts as $ip) {
+                if ($this->isValidIp($ip)) {
+                    $ips[] = $ip;
+                }
+            }
+        }
+
+        // 其他代理头
+        $otherHeaders = ['X-Real-IP', 'CF-Connecting-IP', 'True-Client-IP'];
+        foreach ($otherHeaders as $header) {
+            $ip = trim($request->getHeaderLine($header));
+            if (!empty($ip) && $this->isValidIp($ip)) {
+                $ips[] = $ip;
+            }
+        }
+
+        // REMOTE_ADDR
+        $serverParams = $request->getServerParams();
+        $remoteAddr = $serverParams['REMOTE_ADDR'] ?? $serverParams['remote_addr'] ?? null;
+        if ($remoteAddr && $this->isValidIp($remoteAddr)) {
+            $ips[] = $remoteAddr;
+        }
+
+        return array_values(array_unique($ips));
+    }
+
+    /**
+     * 验证IP地址是否有效
+     */
+    private function isValidIp(string $ip): bool
+    {
+        return filter_var($ip, FILTER_VALIDATE_IP) !== false;
+    }
+
+    /**
+     * 获取请求参数
+     */
+    private function getRequestParams(ServerRequestInterface $request): array
+    {
+        $params = [];
+
+        // 获取查询参数
+        $queryParams = $request->getQueryParams();
+        if (!empty($queryParams)) {
+            $params['query'] = $queryParams;
+        }
+
+        // 获取请求体参数（限制大小）
+        $parsedBody = $request->getParsedBody();
+        if (!empty($parsedBody) && is_array($parsedBody)) {
+            // 限制参数数量和长度
+            $params['body'] = $this->limitParams($parsedBody);
+        }
+
+        // 过滤敏感信息
+        return $this->filterSensitiveData($params);
+    }
+
+    /**
+     * 限制参数大小
+     */
+    private function limitParams(array $params, int $maxKeys = 5, int $maxValueLength = 50): array
+    {
+        $limited = [];
+        $count = 0;
+
+        foreach ($params as $key => $value) {
+            if ($count >= $maxKeys) {
+                $limited['...'] = '参数过多，已截断';
+                break;
+            }
+
+            if (is_array($value)) {
+                $limited[$key] = $this->limitParams($value, $maxKeys, $maxValueLength);
+            } elseif (is_string($value)) {
+                $limited[$key] = mb_substr($value, 0, $maxValueLength);
+                if (mb_strlen($value) > $maxValueLength) {
+                    $limited[$key] .= '...';
+                }
+            } else {
+                $limited[$key] = $value;
+            }
+
+            $count++;
+        }
+
+        return $limited;
+    }
+
+    /**
+     * 过滤敏感信息
+     */
+    private function filterSensitiveData(mixed $data): mixed
+    {
+        if (!is_array($data)) {
+            return $data;
+        }
+
+        $sensitiveFields = [
+            'password',
+            'password_confirmation',
+            'old_password',
+            'new_password',
+            'token',
+            'api_key',
+            'secret',
+            'access_token',
+            'refresh_token',
+        ];
+
+        $filtered = [];
+        foreach ($data as $key => $value) {
+            $lowerKey = strtolower((string) $key);
+
+            if (in_array($lowerKey, $sensitiveFields)) {
+                $filtered[$key] = '***';
+                continue;
+            }
+
+            if (is_array($value)) {
+                $filtered[$key] = $this->filterSensitiveData($value);
+            } else {
+                $filtered[$key] = $value;
+            }
+        }
+
+        return $filtered;
     }
 }
 

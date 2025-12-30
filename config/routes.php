@@ -195,6 +195,18 @@ Router::addGroup('/admin/{adminPath:[a-zA-Z0-9\-_]+}', function () {
         });
 
         // ========================================
+        // 拦截日志
+        // ========================================
+        Router::addGroup('/system/intercept-logs', function () {
+            Router::get('', 'App\Controller\Admin\System\InterceptLogController@index');
+            Router::get('/{id:\d+}', 'App\Controller\Admin\System\InterceptLogController@show');
+            Router::delete('/{id:\d+}', 'App\Controller\Admin\System\InterceptLogController@destroy');
+            Router::post('/batch-destroy', 'App\Controller\Admin\System\InterceptLogController@batchDestroy');
+            Router::get('/statistics', 'App\Controller\Admin\System\InterceptLogController@statistics');
+            Router::post('/cleanup', 'App\Controller\Admin\System\InterceptLogController@cleanup');
+        });
+
+        // ========================================
         // 文件管理
         // ========================================
         Router::addGroup('/system/upload-files', function () {
@@ -264,6 +276,7 @@ Router::addGroup('/admin/{adminPath:[a-zA-Z0-9\-_]+}', function () {
             \App\Middleware\AdminAuthMiddleware::class,
             \App\Middleware\PermissionMiddleware::class,
             \App\Middleware\OperationLogMiddleware::class,
+            \App\Middleware\InterceptLogMiddleware::class,
         ]
     ]);
 

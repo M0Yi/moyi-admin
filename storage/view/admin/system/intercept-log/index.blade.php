@@ -1,10 +1,10 @@
 @extends('admin.layouts.admin')
 
-@section('title', '操作日志')
+@section('title', '拦截日志')
 
 @php
-    $operationLogSearchConfig = $searchConfig ?? [];
-    $hasSearchConfig = !empty($operationLogSearchConfig['search_fields'] ?? []);
+    $interceptLogSearchConfig = $searchConfig ?? [];
+    $hasSearchConfig = !empty($interceptLogSearchConfig['search_fields'] ?? []);
 @endphp
 
 @if (! ($isEmbedded ?? false))
@@ -20,19 +20,19 @@
 @section('content')
 <div class="container-fluid py-4">
     <div class="mb-3">
-        <h6 class="mb-1 fw-bold">操作日志</h6>
-        <small class="text-muted">查看系统操作日志记录</small>
+        <h6 class="mb-1 fw-bold">拦截日志</h6>
+        <small class="text-muted">查看系统拦截日志记录</small>
     </div>
 
     <div class="card border-0 shadow-sm">
         <div class="card-body">
             @include('admin.components.data-table-with-columns', [
-                'tableId' => 'operationLogTable',
-                'storageKey' => 'operationLogTableColumns',
-                'ajaxUrl' => admin_route('system/operation-logs'),
-                'searchFormId' => 'searchForm_operationLogTable',
-                'searchPanelId' => 'searchPanel_operationLogTable',
-                'searchConfig' => $operationLogSearchConfig,
+                'tableId' => 'interceptLogTable',
+                'storageKey' => 'interceptLogTableColumns',
+                'ajaxUrl' => admin_route('system/intercept-logs'),
+                'searchFormId' => 'searchForm_interceptLogTable',
+                'searchPanelId' => 'searchPanel_interceptLogTable',
+                'searchConfig' => $interceptLogSearchConfig,
                 'showSearch' => $hasSearchConfig,
                 'showPagination' => true,
                 'columns' => [
@@ -46,9 +46,10 @@
                     ],
                     [
                         'index' => 1,
-                        'label' => '用户名',
-                        'field' => 'username',
-                        'type' => 'text',
+                        'label' => '拦截类型',
+                        'field' => 'intercept_type',
+                        'type' => 'custom',
+                        'renderFunction' => 'renderInterceptType',
                         'visible' => true,
                         'width' => '100',
                     ],
@@ -87,6 +88,14 @@
                     ],
                     [
                         'index' => 6,
+                        'label' => '拦截原因',
+                        'field' => 'reason',
+                        'type' => 'text',
+                        'visible' => true,
+                        'width' => '150',
+                    ],
+                    [
+                        'index' => 7,
                         'label' => '执行时长',
                         'field' => 'duration',
                         'type' => 'custom',
@@ -95,7 +104,7 @@
                         'width' => '100',
                     ],
                     [
-                        'index' => 7,
+                        'index' => 8,
                         'label' => '所属站点',
                         'field' => 'site.name',
                         'type' => 'text',
@@ -103,8 +112,8 @@
                         'width' => '120',
                     ],
                     [
-                        'index' => 8,
-                        'label' => '操作时间',
+                        'index' => 9,
+                        'label' => '拦截时间',
                         'field' => 'created_at',
                         'type' => 'date',
                         'format' => 'Y-m-d H:i:s',
@@ -112,31 +121,30 @@
                         'width' => '150',
                     ],
                     [
-                        'index' => 9,
+                        'index' => 10,
                         'label' => '操作',
                         'type' => 'actions',
                         'actions' => [
                             [
                                 'type' => 'link',
-                                'href' => admin_route('system/operation-logs') . '/{id}',
+                                'href' => admin_route('system/intercept-logs') . '/{id}',
                                 'icon' => 'bi-eye',
                                 'variant' => 'info',
                                 'title' => '查看详情',
                                 'attributes' => [
-                                    'data-iframe-shell-trigger' => 'operation-log-show-{id}',
-                                    'data-iframe-shell-src' => admin_route('system/operation-logs') . '/{id}',
-                                    'data-iframe-shell-title' => '操作日志详情',
-                                    'data-iframe-shell-channel' => 'operation-log',
+                                    'data-iframe-shell-trigger' => 'intercept-log-show-{id}',
+                                    'data-iframe-shell-src' => admin_route('system/intercept-logs') . '/{id}',
+                                    'data-iframe-shell-title' => '拦截日志详情',
+                                    'data-iframe-shell-channel' => 'intercept-log',
                                     'data-iframe-shell-hide-actions' => 'true'
                                 ]
                             ],
                             [
                                 'type' => 'button',
-                                'onclick' => 'deleteRow_operationLogTable({id})',
+                                'onclick' => 'deleteRow_interceptLogTable({id})',
                                 'icon' => 'bi-trash',
                                 'variant' => 'danger',
                                 'title' => '删除',
-                                'visible' => false
                             ]
                         ],
                         'visible' => true,
@@ -146,8 +154,16 @@
                     ],
                 ],
                 'data' => [],
-                'emptyMessage' => '暂无操作日志',
-                // 批量删除功能已移除
+                'emptyMessage' => '暂无拦截日志',
+                'batchActions' => [
+                    [
+                        'label' => '批量删除',
+                        'action' => 'batchDelete_interceptLogTable',
+                        'variant' => 'danger',
+                        'icon' => 'bi-trash',
+                        'confirm' => '确定要删除选中的记录吗？'
+                    ]
+                ]
             ])
         </div>
     </div>
@@ -160,6 +176,23 @@
 @endif
 @include('components.admin-script', ['path' => '/js/components/refresh-parent-listener.js'])
 <script>
+// 渲染拦截类型
+function renderInterceptType(value) {
+    const labels = {
+        '404': '页面不存在',
+        'invalid_path': '非法路径',
+        'unauthorized': '未授权访问'
+    };
+    const colors = {
+        '404': 'warning',
+        'invalid_path': 'danger',
+        'unauthorized': 'danger'
+    };
+    const label = labels[value] || value;
+    const color = colors[value] || 'secondary';
+    return `<span class="badge bg-${color}">${label}</span>`;
+}
+
 // 渲染请求方法
 function renderMethod(value) {
     const colors = {
@@ -168,6 +201,8 @@ function renderMethod(value) {
         'PUT': 'warning',
         'DELETE': 'danger',
         'PATCH': 'info',
+        'HEAD': 'secondary',
+        'OPTIONS': 'info'
     };
     const color = colors[value] || 'secondary';
     return `<span class="badge bg-${color}">${value}</span>`;
@@ -201,16 +236,60 @@ function renderDuration(value) {
     }
 }
 
-    document.addEventListener('DOMContentLoaded', function () {
+// 批量删除函数
+function batchDelete_interceptLogTable() {
+    const table = window['_dataTable_interceptLogTable'];
+    if (!table) {
+        alert('表格未初始化');
+        return;
+    }
+
+    const selectedRows = table.getSelectedRows();
+    if (!selectedRows || selectedRows.length === 0) {
+        alert('请选择要删除的记录');
+        return;
+    }
+
+    const ids = selectedRows.map(row => row.id);
+    if (!confirm(`确定要删除选中的 ${ids.length} 条记录吗？`)) {
+        return;
+    }
+
+    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
+
+    fetch(`{{ admin_route("system/intercept-logs") }}/batch-destroy`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRF-TOKEN': csrfToken
+        },
+        body: JSON.stringify({ ids })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.code === 200) {
+            alert(data.msg || '删除成功');
+            table.reload();
+        } else {
+            alert(data.msg || data.message || '删除失败');
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('删除失败');
+    });
+}
+
+document.addEventListener('DOMContentLoaded', function () {
     // 删除单行函数
-    window.deleteRow_operationLogTable = function(id) {
+    window.deleteRow_interceptLogTable = function(id) {
         if (!confirm('确定要删除这条记录吗？')) {
             return;
         }
-        
+
         const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
-        
-        fetch(`{{ admin_route("system/operation-logs") }}/${id}`, {
+
+        fetch(`{{ admin_route("system/intercept-logs") }}/${id}`, {
             method: 'DELETE',
             headers: {
                 'Content-Type': 'application/json',
@@ -221,7 +300,7 @@ function renderDuration(value) {
         .then(data => {
             if (data.code === 200) {
                 alert(data.msg || '删除成功');
-                const table = window['_dataTable_operationLogTable'];
+                const table = window['_dataTable_interceptLogTable'];
                 if (table) {
                     table.reload();
                 }
@@ -235,31 +314,31 @@ function renderDuration(value) {
         });
     };
 });
-</script>
+
 @if ($hasSearchConfig)
 <script>
 document.addEventListener('DOMContentLoaded', function () {
-    const config = @json($operationLogSearchConfig);
+    const config = @json($interceptLogSearchConfig);
     if (!config || !config.search_fields || !config.search_fields.length) {
         return;
     }
     if (typeof window.SearchFormRenderer !== 'function') {
-        console.warn('[OperationLogPage] SearchFormRenderer 未加载');
+        console.warn('[InterceptLogPage] SearchFormRenderer 未加载');
         return;
     }
 
     const renderer = new window.SearchFormRenderer({
         config,
-        formId: 'searchForm_operationLogTable',
-        panelId: 'searchPanel_operationLogTable',
-        tableId: 'operationLogTable'
+        formId: 'searchForm_interceptLogTable',
+        panelId: 'searchPanel_interceptLogTable',
+        tableId: 'interceptLogTable'
     });
 
-    window['_searchFormRenderer_operationLogTable'] = renderer;
+    window['_searchFormRenderer_interceptLogTable'] = renderer;
     if (typeof window.createSearchFormResetFunction === 'function') {
-        window.resetSearchForm_operationLogTable = window.createSearchFormResetFunction('operationLogTable');
+        window.resetSearchForm_interceptLogTable = window.createSearchFormResetFunction('interceptLogTable');
     } else {
-        window.resetSearchForm_operationLogTable = function () {
+        window.resetSearchForm_interceptLogTable = function () {
             if (renderer && typeof renderer.reset === 'function') {
                 renderer.reset();
             }
@@ -269,4 +348,3 @@ document.addEventListener('DOMContentLoaded', function () {
 </script>
 @endif
 @endpush
-

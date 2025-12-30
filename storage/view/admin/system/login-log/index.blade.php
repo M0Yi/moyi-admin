@@ -52,7 +52,7 @@
                         'data-iframe-shell-channel' => 'login-log',
                         'data-iframe-shell-hide-actions' => 'true'
                     ]],
-                        ['type'=>'button','onclick'=>'deleteRow_loginLogTable({id})','icon'=>'bi-trash','variant'=>'danger','title'=>'删除']
+                        ['type'=>'button','onclick'=>'deleteRow_loginLogTable({id})','icon'=>'bi-trash','variant'=>'danger','title'=>'删除','visible'=>false]
                     ],'visible'=>true,'width'=>'120','class'=>'sticky-column','toggleable'=>false],
                 ],
                 'data'=>[],

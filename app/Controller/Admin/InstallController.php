@@ -723,6 +723,29 @@ class InstallController extends AbstractController
                             $this->makeButtonPermission('批量删除登录日志', 'system.login-logs.batch-delete', '/system/login-logs/batch-destroy', 3, 'POST'),
                         ],
                     ],
+                    // 拦截日志权限
+                    [
+                        'name' => '拦截日志',
+                        'slug' => 'system.intercept-logs',
+                        'type' => 'menu',
+                        'icon' => 'shield-exclamation',
+                        'path' => '/system/intercept-logs*',
+                        'method' => 'GET',
+                        'sort' => 3,
+                        'status' => 1,
+                        'children' => [
+                            // 查看拦截日志列表：GET /system/intercept-logs*
+                            $this->makeButtonPermission('查看拦截日志', 'system.intercept-logs.view', '/system/intercept-logs*', 1, 'GET'),
+                            // 删除拦截日志：DELETE /system/intercept-logs/{id}
+                            $this->makeButtonPermission('删除拦截日志', 'system.intercept-logs.delete', '/system/intercept-logs*', 2, 'DELETE'),
+                            // 批量删除拦截日志：POST /system/intercept-logs/batch-destroy
+                            $this->makeButtonPermission('批量删除拦截日志', 'system.intercept-logs.batch-delete', '/system/intercept-logs/batch-destroy', 3, 'POST'),
+                            // 查看统计数据：GET /system/intercept-logs/statistics
+                            $this->makeButtonPermission('查看拦截统计', 'system.intercept-logs.statistics', '/system/intercept-logs/statistics', 4, 'GET'),
+                            // 清理过期日志：POST /system/intercept-logs/cleanup
+                            $this->makeButtonPermission('清理过期日志', 'system.intercept-logs.cleanup', '/system/intercept-logs/cleanup', 5, 'POST'),
+                        ],
+                    ],
                 ],
             ],
         ];
@@ -1079,6 +1102,30 @@ class InstallController extends AbstractController
                 'visible' => 1,
                 'status' => 1,
                 'sort' => 2,
+                'cache' => 1,
+                'config' => null,
+                'remark' => null,
+            ]
+        );
+
+        // 拦截日志（位于日志分组下，排序在登录日志之后）
+        AdminMenu::query()->firstOrCreate(
+            ['site_id' => $siteId, 'path' => '/system/intercept-logs'],
+            [
+                'parent_id' => $logs->id,
+                'name' => 'system.intercept-logs',
+                'title' => '拦截日志',
+                'icon' => 'bi bi-shield-exclamation',
+                'component' => null,
+                'redirect' => null,
+                'type' => AdminMenu::TYPE_MENU,
+                'target' => AdminMenu::TARGET_SELF,
+                'badge' => null,
+                'badge_type' => null,
+                'permission' => 'system.intercept-logs.view',
+                'visible' => 1,
+                'status' => 1,
+                'sort' => 3,
                 'cache' => 1,
                 'config' => null,
                 'remark' => null,
@@ -1830,6 +1877,36 @@ class InstallController extends AbstractController
                 $table->index(['site_id', 'created_at'], 'idx_site_created_at');
             });
             Db::statement("ALTER TABLE `admin_operation_logs` COMMENT = '操作日志表'");
+        }
+
+        // 创建拦截日志表
+        if (! Schema::hasTable('admin_intercept_logs')) {
+            Schema::create('admin_intercept_logs', function (Blueprint $table) {
+                $table->engine = 'InnoDB';
+                $table->charset = 'utf8mb4';
+                $table->collation = 'utf8mb4_unicode_ci';
+                $table->bigIncrements('id')->comment('拦截日志ID');
+                $table->unsignedBigInteger('site_id')->nullable()->comment('站点ID');
+                $table->string('admin_entry_path', 64)->nullable()->comment('后台入口标识');
+                $table->string('method', 10)->comment('请求方法');
+                $table->string('path', 500)->comment('请求路径');
+                $table->string('ip', 50)->comment('IP地址');
+                $table->json('ip_list')->nullable()->comment('代理链IP列表');
+                $table->text('user_agent')->nullable()->comment('User Agent');
+                $table->json('params')->nullable()->comment('请求参数');
+                $table->string('intercept_type', 50)->comment('拦截类型：404=页面不存在，invalid_path=非法路径，unauthorized=未授权访问');
+                $table->string('reason', 255)->nullable()->comment('拦截原因');
+                $table->integer('status_code')->default(404)->comment('HTTP状态码');
+                $table->integer('duration')->nullable()->comment('执行时长(ms)');
+                $table->timestamp('created_at')->nullable()->comment('创建时间');
+                $table->index('site_id', 'admin_intercept_logs_site_id_index');
+                $table->index('admin_entry_path', 'admin_intercept_logs_admin_entry_path_index');
+                $table->index('intercept_type', 'admin_intercept_logs_intercept_type_index');
+                $table->index('ip', 'admin_intercept_logs_ip_index');
+                $table->index('created_at', 'admin_intercept_logs_created_at_index');
+                $table->index(['site_id', 'created_at'], 'admin_intercept_logs_site_created_at_index');
+            });
+            Db::statement("ALTER TABLE `admin_intercept_logs` COMMENT = '拦截日志表'");
         }
 
         if (! Schema::hasTable('users')) {
