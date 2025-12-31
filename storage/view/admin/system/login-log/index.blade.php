@@ -64,6 +64,9 @@
 @endsection
 
 @push('admin_scripts')
+@if ($hasSearchConfig)
+    @include('components.admin-script', ['path' => '/js/components/search-form-renderer.js'])
+@endif
 @include('components.admin-script', ['path' => '/js/components/refresh-parent-listener.js'])
 <script>
 function renderStatus(value) {
@@ -84,6 +87,34 @@ document.addEventListener('DOMContentLoaded', function () {
     };
 
     // 批量删除功能已移除
+
+    @if ($hasSearchConfig)
+    // 搜索表单渲染器
+    const config = @json($loginLogSearchConfig);
+    if (config && config.search_fields && config.search_fields.length) {
+        if (typeof window.SearchFormRenderer === 'function') {
+            const renderer = new window.SearchFormRenderer({
+                config,
+                formId: 'searchForm_loginLogTable',
+                panelId: 'searchPanel_loginLogTable',
+                tableId: 'loginLogTable'
+            });
+
+            window['_searchFormRenderer_loginLogTable'] = renderer;
+            if (typeof window.createSearchFormResetFunction === 'function') {
+                window.resetSearchForm_loginLogTable = window.createSearchFormResetFunction('loginLogTable');
+            } else {
+                window.resetSearchForm_loginLogTable = function () {
+                    if (renderer && typeof renderer.reset === 'function') {
+                        renderer.reset();
+                    }
+                };
+            }
+        } else {
+            console.warn('[LoginLogPage] SearchFormRenderer 未加载');
+        }
+    }
+    @endif
 });
 </script>
 @endpush

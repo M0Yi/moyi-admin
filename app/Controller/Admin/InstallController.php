@@ -706,13 +706,33 @@ class InstallController extends AbstractController
                         ],
                     ],
                     [
+                        'name' => '错误统计',
+                        'slug' => 'system.error-statistics',
+                        'type' => 'menu',
+                        'icon' => 'exclamation-triangle',
+                        'path' => '/system/error-statistics*',
+                        'method' => 'GET',
+                        'sort' => 2,
+                        'status' => 1,
+                        'children' => [
+                            // 查看错误统计列表：GET /system/error-statistics*
+                            $this->makeButtonPermission('查看错误统计', 'system.error-statistics.view', '/system/error-statistics*', 1, 'GET'),
+                            // 删除错误统计：DELETE /system/error-statistics/{id}
+                            $this->makeButtonPermission('删除错误统计', 'system.error-statistics.delete', '/system/error-statistics*', 2, 'DELETE'),
+                            // 标记为已解决：POST /system/error-statistics/{id}/resolve
+                            $this->makeButtonPermission('标记错误已解决', 'system.error-statistics.resolve', '/system/error-statistics*', 3, 'POST'),
+                            // 批量标记已解决：POST /system/error-statistics/batch-resolve
+                            $this->makeButtonPermission('批量标记已解决', 'system.error-statistics.batch-resolve', '/system/error-statistics/batch-resolve', 4, 'POST'),
+                        ],
+                    ],
+                    [
                         'name' => '登录日志',
                         'slug' => 'system.login-logs',
                         'type' => 'menu',
                         'icon' => 'box-arrow-in-right',
                         'path' => '/system/login-logs*',
                         'method' => 'GET',
-                        'sort' => 2,
+                        'sort' => 3,
                         'status' => 1,
                         'children' => [
                             // 查看登录日志列表：GET /system/login-logs*
@@ -731,7 +751,7 @@ class InstallController extends AbstractController
                         'icon' => 'shield-exclamation',
                         'path' => '/system/intercept-logs*',
                         'method' => 'GET',
-                        'sort' => 3,
+                        'sort' => 4,
                         'status' => 1,
                         'children' => [
                             // 查看拦截日志列表：GET /system/intercept-logs*
@@ -1131,6 +1151,35 @@ class InstallController extends AbstractController
                 'remark' => null,
             ]
         );
+
+        // 错误统计（位于日志分组下，排序在登录日志之后）
+        AdminMenu::query()->firstOrCreate(
+            ['site_id' => $siteId, 'path' => '/system/error-statistics'],
+            [
+                'parent_id' => $logs->id,
+                'name' => 'system.error-statistics',
+                'title' => '错误统计',
+                'icon' => 'bi bi-exclamation-triangle',
+                'component' => null,
+                'redirect' => null,
+                'type' => AdminMenu::TYPE_MENU,
+                'target' => AdminMenu::TARGET_SELF,
+                'badge' => null,
+                'badge_type' => null,
+                'permission' => 'system.error-statistics.view',
+                'visible' => 1,
+                'status' => 1,
+                'sort' => 3,
+                'cache' => 1,
+                'config' => null,
+                'remark' => null,
+            ]
+        );
+
+        // 更新拦截日志的排序
+        AdminMenu::query()->where('site_id', $siteId)
+            ->where('path', '/system/intercept-logs')
+            ->update(['sort' => 4]);
 
         AdminMenu::query()->firstOrCreate(
             ['site_id' => $siteId, 'path' => '/system/crud-generator'],

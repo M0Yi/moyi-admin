@@ -313,38 +313,34 @@ document.addEventListener('DOMContentLoaded', function () {
             alert('删除失败');
         });
     };
-});
 
-@if ($hasSearchConfig)
-<script>
-document.addEventListener('DOMContentLoaded', function () {
+    @if ($hasSearchConfig)
+    // 搜索表单渲染器
     const config = @json($interceptLogSearchConfig);
-    if (!config || !config.search_fields || !config.search_fields.length) {
-        return;
-    }
-    if (typeof window.SearchFormRenderer !== 'function') {
-        console.warn('[InterceptLogPage] SearchFormRenderer 未加载');
-        return;
-    }
+    if (config && config.search_fields && config.search_fields.length) {
+        if (typeof window.SearchFormRenderer === 'function') {
+            const renderer = new window.SearchFormRenderer({
+                config,
+                formId: 'searchForm_interceptLogTable',
+                panelId: 'searchPanel_interceptLogTable',
+                tableId: 'interceptLogTable'
+            });
 
-    const renderer = new window.SearchFormRenderer({
-        config,
-        formId: 'searchForm_interceptLogTable',
-        panelId: 'searchPanel_interceptLogTable',
-        tableId: 'interceptLogTable'
-    });
-
-    window['_searchFormRenderer_interceptLogTable'] = renderer;
-    if (typeof window.createSearchFormResetFunction === 'function') {
-        window.resetSearchForm_interceptLogTable = window.createSearchFormResetFunction('interceptLogTable');
-    } else {
-        window.resetSearchForm_interceptLogTable = function () {
-            if (renderer && typeof renderer.reset === 'function') {
-                renderer.reset();
+            window['_searchFormRenderer_interceptLogTable'] = renderer;
+            if (typeof window.createSearchFormResetFunction === 'function') {
+                window.resetSearchForm_interceptLogTable = window.createSearchFormResetFunction('interceptLogTable');
+            } else {
+                window.resetSearchForm_interceptLogTable = function () {
+                    if (renderer && typeof renderer.reset === 'function') {
+                        renderer.reset();
+                    }
+                };
             }
-        };
+        } else {
+            console.warn('[InterceptLogPage] SearchFormRenderer 未加载');
+        }
     }
+    @endif
 });
 </script>
-@endif
 @endpush

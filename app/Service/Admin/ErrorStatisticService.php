@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Service\Admin;
 
+use App\Constants\ErrorCode;
+use App\Exception\BusinessException;
 use App\Model\Admin\AdminErrorStatistic;
 use Hyperf\Context\Context;
 use Hyperf\Contract\StdoutLoggerInterface;
@@ -169,6 +171,213 @@ class ErrorStatisticService
         }
 
         return (string) $code;
+    }
+
+    /**
+     * 获取错误统计列表
+     *
+     * @param array $params 查询参数
+     * @return array
+     */
+    public function getList(array $params = []): array
+    {
+        $query = AdminErrorStatistic::query()
+            ->orderBy('last_occurred_at', 'desc');
+
+        // 站点过滤：普通管理员固定当前站点，超级管理员可根据筛选选择站点
+        $requestedSiteId = isset($params['site_id']) ? (int) $params['site_id'] : 0;
+        $currentSiteId = (int) (site_id() ?? 0);
+        if (is_super_admin()) {
+            if ($requestedSiteId > 0) {
+                $query->where('site_id', $requestedSiteId);
+            }
+        } elseif ($currentSiteId > 0) {
+            $query->where('site_id', $currentSiteId);
+        }
+
+        // 用户筛选
+        if (!empty($params['user_id'])) {
+            $query->where('user_id', (int) $params['user_id']);
+        }
+
+        // 用户名筛选
+        if (!empty($params['username'])) {
+            $query->where('username', 'like', '%' . trim((string) $params['username']) . '%');
+        }
+
+        // 异常类筛选
+        if (!empty($params['exception_class'])) {
+            $query->where('exception_class', 'like', '%' . trim((string) $params['exception_class']) . '%');
+        }
+
+        // 错误消息筛选
+        if (!empty($params['error_message'])) {
+            $query->where('error_message', 'like', '%' . trim((string) $params['error_message']) . '%');
+        }
+
+        // 错误等级筛选
+        if (!empty($params['error_level'])) {
+            $query->where('error_level', trim((string) $params['error_level']));
+        }
+
+        // 状态码筛选
+        if (isset($params['status_code']) && $params['status_code'] !== '') {
+            $query->where('status_code', (int) $params['status_code']);
+        }
+
+        // 请求路径筛选
+        if (!empty($params['request_path'])) {
+            $query->where('request_path', 'like', '%' . trim((string) $params['request_path']) . '%');
+        }
+
+        // IP地址筛选
+        if (!empty($params['request_ip'])) {
+            $query->where('request_ip', 'like', '%' . trim((string) $params['request_ip']) . '%');
+        }
+
+        // 状态筛选
+        if (isset($params['status']) && $params['status'] !== '') {
+            $query->where('status', (int) $params['status']);
+        }
+
+        // 日期范围筛选
+        if (!empty($params['start_date'])) {
+            $query->where('last_occurred_at', '>=', $params['start_date']);
+        }
+        if (!empty($params['end_date'])) {
+            $query->where('last_occurred_at', '<=', $params['end_date'] . ' 23:59:59');
+        }
+
+        // 分页
+        $pageSize = $params['page_size'] ?? 15;
+        $paginator = $query->paginate((int)$pageSize);
+
+        return [
+            'list' => $paginator->items(),
+            'total' => $paginator->total(),
+            'page' => $paginator->currentPage(),
+            'page_size' => $paginator->perPage(),
+        ];
+    }
+
+    /**
+     * 获取错误统计详情
+     *
+     * @param int $id 错误统计ID
+     * @return AdminErrorStatistic
+     * @throws BusinessException
+     */
+    public function getById(int $id): AdminErrorStatistic
+    {
+        $query = AdminErrorStatistic::query()->where('id', $id);
+
+        $siteId = site_id() ?? 0;
+        if ($siteId && !is_super_admin()) {
+            $query->where('site_id', $siteId);
+        }
+
+        $errorStat = $query->first();
+
+        if (!$errorStat) {
+            throw new BusinessException(ErrorCode::NOT_FOUND, '错误统计记录不存在');
+        }
+
+        return $errorStat;
+    }
+
+    /**
+     * 获取站点筛选选项（仅超级管理员）
+     *
+     * @return array
+     */
+    public function getSiteFilterOptions(): array
+    {
+        if (!is_super_admin()) {
+            return [];
+        }
+
+        $sites = \App\Model\Admin\AdminSite::query()
+            ->where('status', 1)
+            ->orderBy('id', 'asc')
+            ->get();
+
+        $options = [['value' => '', 'label' => '全部站点']];
+        foreach ($sites as $site) {
+            $options[] = [
+                'value' => $site->id,
+                'label' => $site->name,
+            ];
+        }
+
+        return $options;
+    }
+
+    /**
+     * 删除错误统计记录
+     *
+     * @param int $id 错误统计ID
+     * @return bool
+     * @throws BusinessException
+     */
+    public function delete(int $id): bool
+    {
+        $errorStat = $this->getById($id);
+        return $errorStat->delete();
+    }
+
+    /**
+     * 批量删除错误统计记录
+     *
+     * @param array $ids 错误统计ID数组
+     * @return int 删除的记录数
+     */
+    public function batchDelete(array $ids): int
+    {
+        $query = AdminErrorStatistic::query()->whereIn('id', $ids);
+
+        $siteId = site_id() ?? 0;
+        if ($siteId && !is_super_admin()) {
+            $query->where('site_id', $siteId);
+        }
+
+        return $query->delete();
+    }
+
+    /**
+     * 标记错误为已解决
+     *
+     * @param int $id 错误统计ID
+     * @return bool
+     */
+    public function resolve(int $id): bool
+    {
+        $errorStat = $this->getById($id);
+        $errorStat->status = 2; // 2表示已解决
+        $errorStat->resolved_at = now();
+        return $errorStat->save();
+    }
+
+    /**
+     * 批量标记错误为已解决
+     *
+     * @param array $ids 错误统计ID数组
+     * @return int 更新的记录数
+     */
+    public function batchResolve(array $ids): int
+    {
+        $query = AdminErrorStatistic::query()
+            ->whereIn('id', $ids)
+            ->where('status', '<', 2); // 只更新未解决和处理中的
+
+        $siteId = site_id() ?? 0;
+        if ($siteId && !is_super_admin()) {
+            $query->where('site_id', $siteId);
+        }
+
+        return $query->update([
+            'status' => 2,
+            'resolved_at' => now(),
+        ]);
     }
 }
 

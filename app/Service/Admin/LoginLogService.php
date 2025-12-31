@@ -95,6 +95,33 @@ class LoginLogService
 
         return $query->delete();
     }
+
+    /**
+     * 获取站点筛选选项（仅超级管理员）
+     *
+     * @return array
+     */
+    public function getSiteFilterOptions(): array
+    {
+        if (!is_super_admin()) {
+            return [];
+        }
+
+        $sites = \App\Model\Admin\AdminSite::query()
+            ->where('status', 1)
+            ->orderBy('id', 'asc')
+            ->get();
+
+        $options = [['value' => '', 'label' => '全部站点']];
+        foreach ($sites as $site) {
+            $options[] = [
+                'value' => $site->id,
+                'label' => $site->name,
+            ];
+        }
+
+        return $options;
+    }
 }
 
 

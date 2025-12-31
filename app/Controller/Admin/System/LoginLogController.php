@@ -34,18 +34,61 @@ class LoginLogController extends BaseModelCrudController
 
         $searchFields = ['username', 'ip', 'status'];
         $fields = [
-            ['name' => 'username', 'label' => '用户名', 'type' => 'text', 'col' => 'col-12 col-md-3'],
-            ['name' => 'ip', 'label' => 'IP', 'type' => 'text', 'col' => 'col-12 col-md-3'],
-            ['name' => 'status', 'label' => '状态', 'type' => 'select', 'options' => [
-                ['value' => '', 'label' => '全部'],
-                ['value' => '1', 'label' => '成功'],
-                ['value' => '0', 'label' => '失败'],
-            ], 'col' => 'col-12 col-md-3'],
-            ['name' => 'start_date', 'label' => '开始日期', 'type' => 'date', 'col' => 'col-12 col-md-3'],
-            ['name' => 'end_date', 'label' => '结束日期', 'type' => 'date', 'col' => 'col-12 col-md-3'],
+            [
+                'name' => 'username',
+                'label' => '用户名',
+                'type' => 'text',
+                'placeholder' => '请输入用户名',
+                'col' => 'col-12 col-md-3',
+            ],
+            [
+                'name' => 'ip',
+                'label' => 'IP地址',
+                'type' => 'text',
+                'placeholder' => '请输入IP地址',
+                'col' => 'col-12 col-md-3',
+            ],
+            [
+                'name' => 'status',
+                'label' => '状态',
+                'type' => 'select',
+                'options' => [
+                    ['value' => '', 'label' => '全部'],
+                    ['value' => '1', 'label' => '成功'],
+                    ['value' => '0', 'label' => '失败'],
+                ],
+                'col' => 'col-12 col-md-3',
+            ],
+            [
+                'name' => 'start_date',
+                'label' => '开始日期',
+                'type' => 'date',
+                'col' => 'col-12 col-md-3',
+            ],
+            [
+                'name' => 'end_date',
+                'label' => '结束日期',
+                'type' => 'date',
+                'col' => 'col-12 col-md-3',
+            ],
         ];
 
-        $searchConfig = ['search_fields' => $searchFields, 'fields' => $fields];
+        if (is_super_admin()) {
+            $searchFields[] = 'site_id';
+            $fields[] = [
+                'name' => 'site_id',
+                'label' => '所属站点',
+                'type' => 'select',
+                'options' => $this->loginLogService->getSiteFilterOptions(),
+                'placeholder' => '请选择站点',
+                'col' => 'col-12 col-md-3',
+            ];
+        }
+
+        $searchConfig = [
+            'search_fields' => $searchFields,
+            'fields' => $fields,
+        ];
 
         return $this->renderAdmin('admin.system.login-log.index', [
             'searchConfig' => $searchConfig,

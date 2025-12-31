@@ -97,6 +97,22 @@ class AdminErrorStatistic extends Model
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
     ];
+
+    /**
+     * 关联用户
+     */
+    public function user()
+    {
+        return $this->belongsTo(AdminUser::class, 'user_id');
+    }
+
+    /**
+     * 关联站点
+     */
+    public function site()
+    {
+        return $this->belongsTo(AdminSite::class, 'site_id');
+    }
 }
 
 

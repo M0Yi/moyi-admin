@@ -63,7 +63,6 @@ Router::addGroup('/admin/{adminPath:[a-zA-Z0-9\-_]+}', function () {
         Router::get('/fields-config/{tableName}', 'App\Controller\Admin\System\CrudGeneratorController@getFieldsConfig');
         Router::post('/save-config', 'App\Controller\Admin\System\CrudGeneratorController@saveConfig');
         Router::post('/save-config-v2', 'App\Controller\Admin\System\CrudGeneratorController@saveConfigV2');
-        Router::get('/preview/{id:\d+}', 'App\Controller\Admin\System\CrudGeneratorController@preview');
         Router::post('/generate/{id:\d+}', 'App\Controller\Admin\System\CrudGeneratorController@generate');
         Router::get('/download/{id:\d+}', 'App\Controller\Admin\System\CrudGeneratorController@download');
         Router::delete('/{id:\d+}', 'App\Controller\Admin\System\CrudGeneratorController@delete');
@@ -192,6 +191,17 @@ Router::addGroup('/admin/{adminPath:[a-zA-Z0-9\-_]+}', function () {
             Router::get('', 'App\Controller\Admin\System\LoginLogController@index');
             Router::get('/{id:\d+}', 'App\Controller\Admin\System\LoginLogController@show');
             Router::delete('/{id:\d+}', 'App\Controller\Admin\System\LoginLogController@destroy');
+        });
+
+        // ========================================
+        // 错误统计日志
+        // ========================================
+        Router::addGroup('/system/error-statistics', function () {
+            Router::get('', 'App\Controller\Admin\System\ErrorStatisticController@index');
+            Router::get('/{id:\d+}', 'App\Controller\Admin\System\ErrorStatisticController@show');
+            Router::delete('/{id:\d+}', 'App\Controller\Admin\System\ErrorStatisticController@destroy');
+            Router::post('/{id:\d+}/resolve', 'App\Controller\Admin\System\ErrorStatisticController@resolve');
+            Router::post('/batch-resolve', 'App\Controller\Admin\System\ErrorStatisticController@batchResolve');
         });
 
         // ========================================
