@@ -242,10 +242,6 @@
 ])
 
 @push('admin_scripts')
-@include('components.color-picker')
-@include('components.gradient-picker')
-@include('components.icon-picker')
-
 <!-- 引入通用表单渲染器 -->
 @php
 @include('components.admin-script', ['path' => '/js/components/universal-form-renderer.js'])

@@ -51,9 +51,6 @@
 @endpush
 
 @push('admin_scripts')
-<!-- 引入图标选择器组件 -->
-@include('components.icon-picker')
-
 @php
 @include('components.admin-script', ['path' => '/js/components/universal-form-renderer.js'])
 <script>

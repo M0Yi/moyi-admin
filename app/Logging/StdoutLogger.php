@@ -79,6 +79,14 @@ class StdoutLogger implements StdoutLoggerInterface
 
     public function log($level, $message, array $context = []): void
     {
+        // 匹配日志需要显示context数组的标签配置，从 config/log_context_tags 获取
+        $contextTags = $this->config->get('log_context_tags', []);
+        foreach ($contextTags as $tag) {
+            if (str_starts_with($message, $tag)) {
+                print_r($context);
+                break; // 匹配到任意一个标签就打印，之后跳出循环
+            }
+        }
 
         $config = $this->config->get(StdoutLoggerInterface::class, ['log_level' => []]);
 

@@ -1,0 +1,127 @@
+{
+  "_comment": "AddonsStore 插件菜单和权限配置文件",
+  "description": "此文件定义了 AddonsStore 插件的菜单和权限配置，在插件安装时会自动创建这些菜单和权限",
+
+  "permissions": [
+    {
+      "name": "AddonsStore 应用",
+      "slug": "addons_store",
+      "type": "menu",
+      "path": "/addons_store",
+      "description": "AddonsStore 应用权限组",
+      "sort": 900,
+      "status": 1,
+      "children": [
+        {
+          "name": "访问应用管理",
+          "slug": "addons_store.manage",
+          "type": "menu",
+          "path": "/addons_store",
+          "description": "访问应用管理页面的权限",
+          "sort": 1,
+          "status": 1,
+          "children": [
+            {
+              "name": "查看应用数据",
+              "slug": "addons_store.view",
+              "type": "button",
+              "path": "/addons_store*",
+              "description": "查看应用数据的权限",
+              "sort": 1,
+              "status": 1
+            },
+            {
+              "name": "新增应用",
+              "slug": "addons_store.create",
+              "type": "button",
+              "path": "/addons_store/create*",
+              "description": "新增应用的权限",
+              "sort": 2,
+              "status": 1
+            },
+            {
+              "name": "编辑应用",
+              "slug": "addons_store.edit",
+              "type": "button",
+              "path": "/addons_store/*/edit*",
+              "description": "编辑应用的权限",
+              "sort": 3,
+              "status": 1
+            },
+            {
+              "name": "删除应用",
+              "slug": "addons_store.delete",
+              "type": "button",
+              "path": "/addons_store/*",
+              "description": "删除应用的权限",
+              "sort": 4,
+              "status": 1
+            }
+          ]
+        }
+      ]
+    }
+  ],
+
+  "menus": [
+    {
+      "name": "addons_store",
+      "title": "应用市场",
+      "icon": "bi bi-shop",
+      "path": null,
+      "component": null,
+      "redirect": null,
+      "type": "group",
+      "target": "_self",
+      "badge": null,
+      "badge_type": null,
+      "permission": null,
+      "visible": 1,
+      "status": 1,
+      "sort": 900,
+      "cache": 1,
+      "config": null,
+      "remark": "应用市场菜单组",
+      "children": [
+        {
+          "name": "addons_store.manage",
+          "title": "应用管理",
+          "icon": "bi bi-grid",
+          "path": "/addons_store",
+          "component": "addons_store/index",
+          "redirect": null,
+          "type": "menu",
+          "target": "_self",
+          "badge": null,
+          "badge_type": null,
+          "permission": "addons_store.manage",
+          "visible": 1,
+          "status": 1,
+          "sort": 1,
+          "cache": 1,
+          "config": null,
+          "remark": "应用管理页面"
+        },
+        {
+          "name": "addons_store.versions",
+          "title": "应用版本",
+          "icon": "bi bi-tag",
+          "path": "/addons_store/versions",
+          "component": "addons_store/version_management",
+          "redirect": null,
+          "type": "menu",
+          "target": "_self",
+          "badge": null,
+          "badge_type": null,
+          "permission": "addons_store.manage",
+          "visible": 1,
+          "status": 1,
+          "sort": 2,
+          "cache": 1,
+          "config": null,
+          "remark": "应用版本页面"
+        }
+      ]
+    }
+  ]
+}

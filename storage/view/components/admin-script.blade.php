@@ -1,23 +1,39 @@
 {{--
-通用 JS 脚本加载组件（支持 CDN）
-
-使用方式：
-@include('components.admin-script', ['path' => '/js/components/refresh-parent-listener.js'])
+管理后台脚本组件
 
 参数：
-- $path: JS 文件路径（相对于 public 目录，必须以 / 开头）
-- $version: 可选，版本号（用于缓存控制）
+- $path: 脚本路径（必需）
+- $attributes: 额外的属性数组（可选）
+
+使用方式：
+@include('components.admin-script', ['path' => '/js/components/example.js'])
+
+特殊处理：
+- 当加载 universal-form-renderer.js 时，自动包含所有表单相关组件
 --}}
+
 @php
-    $resourcePath = $path ?? '/js/admin.js';
-    // 优先使用传入的版本参数，否则使用全局常量 APP_VERSION
-    $version = $version ?? (defined('APP_VERSION') ? APP_VERSION : '') ?? '';
-    $resourcePathWithVersion = $version ? $resourcePath . '?v=' . $version : $resourcePath;
-    $cdn = site()?->resource_cdn;
-    $src = !empty($cdn)
-        ? rtrim($cdn, '/') . $resourcePathWithVersion
-        : $resourcePathWithVersion;
+    $path = $path ?? '';
+    $attributes = $attributes ?? [];
+
+    // 当加载 UniversalFormRenderer 时，自动包含所有表单组件
+    $isUniversalFormRenderer = str_contains($path, 'universal-form-renderer');
+
+    // 构建属性字符串
+    $attrString = '';
+    if (!empty($attributes)) {
+        $attrPairs = [];
+        foreach ($attributes as $key => $value) {
+            $attrPairs[] = htmlspecialchars($key, ENT_QUOTES) . '="' . htmlspecialchars($value, ENT_QUOTES) . '"';
+        }
+        $attrString = ' ' . implode(' ', $attrPairs);
+    }
 @endphp
 
-<script src="{{ $src }}"></script>
+@if($isUniversalFormRenderer)
+    {{-- 引入通用表单组件包 --}}
+    @include('components.universal-form-components', $attributes ?? [])
+@endif
 
+{{-- 引入指定的脚本 --}}
+<script src="{{ $path }}"{{ $attrString }}></script>

@@ -2305,6 +2305,85 @@
                     }
                 });
             }
+
+            // 初始化图标选择器（如果有）
+            // 注意：由于插件配置页面可能在不同的容器中，这里使用全局查找
+            const initIconPreviews = () => {
+                console.log('[UniversalFormRenderer] 初始化图标预览...');
+                const iconInputGroups = document.querySelectorAll('.icon-input-group');
+                console.log('[UniversalFormRenderer] 找到图标输入组数量:', iconInputGroups.length);
+
+                iconInputGroups.forEach((group, index) => {
+                    console.log(`[UniversalFormRenderer] 处理第 ${index + 1} 个图标输入组`);
+                    const iconInput = group.querySelector('input[type="text"]');
+                    const previewSpan = group.querySelector('.input-group-text[id$="_preview"]');
+
+                    console.log('[UniversalFormRenderer] 图标输入框:', iconInput);
+                    console.log('[UniversalFormRenderer] 预览元素:', previewSpan);
+
+                    if (iconInput && previewSpan) {
+                        const updatePreview = () => {
+                            const iconValue = iconInput.value || 'bi bi-star';
+                            console.log('[UniversalFormRenderer] 更新预览，图标值:', iconValue);
+                            const iconElement = previewSpan.querySelector('i');
+                            if (iconElement) {
+                                iconElement.className = iconValue;
+                                console.log('[UniversalFormRenderer] 预览图标已更新为:', iconValue);
+                            } else {
+                                console.warn('[UniversalFormRenderer] 未找到预览图标元素');
+                            }
+                        };
+
+                        // 监听输入变化，更新预览
+                        iconInput.addEventListener('input', () => {
+                            console.log('[UniversalFormRenderer] 监听到输入变化事件');
+                            updatePreview();
+                        });
+
+                        // 初始化时也更新一次预览
+                        updatePreview();
+                    } else {
+                        console.warn('[UniversalFormRenderer] 图标输入框或预览元素未找到');
+                    }
+                });
+            };
+
+            // 使用 setTimeout 确保 DOM 完全渲染后再初始化
+            setTimeout(() => {
+                initIconPreviews();
+            }, 100);
+
+            // 也绑定到 window 对象，以便其他地方可以调用
+            window.initUniversalFormIconPreviews = initIconPreviews;
+
+            // 也监听 DOM 变化，以防动态添加的元素
+            if (typeof MutationObserver !== 'undefined') {
+                const observer = new MutationObserver((mutations) => {
+                    let shouldReinit = false;
+                    mutations.forEach((mutation) => {
+                        if (mutation.type === 'childList') {
+                            mutation.addedNodes.forEach((node) => {
+                                if (node.nodeType === Node.ELEMENT_NODE &&
+                                    (node.classList?.contains('icon-input-group') ||
+                                     node.querySelector?.('.icon-input-group'))) {
+                                    shouldReinit = true;
+                                }
+                            });
+                        }
+                    });
+                    if (shouldReinit) {
+                        console.log('[UniversalFormRenderer] DOM 变化，重新初始化图标预览');
+                        setTimeout(() => {
+                            initIconPreviews();
+                        }, 50);
+                    }
+                });
+
+                observer.observe(document.body, {
+                    childList: true,
+                    subtree: true
+                });
+            }
         }
 
         setupTextArrayField(wrapper) {
@@ -3294,11 +3373,16 @@
         }
 
         getFieldValue(field) {
-            if (typeof field.default === 'undefined' || field.default === null) {
-                return '';
+            // 优先使用 value（当前值），然后使用 default（默认值）
+            if (typeof field.value !== 'undefined' && field.value !== null) {
+                return field.value;
             }
 
-            return field.default;
+            if (typeof field.default !== 'undefined' && field.default !== null) {
+                return field.default;
+            }
+
+            return '';
         }
 
         getOptions(field) {

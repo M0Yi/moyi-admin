@@ -190,3 +190,6 @@ class InterceptLogController extends BaseModelCrudController
         return $this->success(null, "成功清理 {$deletedCount} 条过期日志");
     }
 }
+
+
+

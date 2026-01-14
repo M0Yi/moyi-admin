@@ -1,0 +1,314 @@
+{
+  "version": "1.0.0",
+  "description": "插件商店数据库配置文件",
+  "tables": {
+    "addons_store_addons": {
+      "comment": "插件商店插件信息表",
+      "columns": {
+        "id": {
+          "type": "bigint unsigned",
+          "primary": true,
+          "auto_increment": true,
+          "comment": "主键ID"
+        },
+        "name": {
+          "type": "varchar(100)",
+          "comment": "插件名称",
+          "index": true
+        },
+        "slug": {
+          "type": "varchar(100)",
+          "comment": "插件标识",
+          "unique": true,
+          "index": true
+        },
+        "identifier": {
+          "type": "varchar(100)",
+          "comment": "插件标识符ID",
+          "unique": true,
+          "index": true
+        },
+        "description": {
+          "type": "text",
+          "comment": "插件描述",
+          "nullable": true
+        },
+        "author": {
+          "type": "varchar(100)",
+          "comment": "作者",
+          "index": true
+        },
+        "version": {
+          "type": "varchar(20)",
+          "comment": "当前版本"
+        },
+        "category": {
+          "type": "varchar(50)",
+          "comment": "分类",
+          "default": "general",
+          "index": true
+        },
+        "tags": {
+          "type": "json",
+          "comment": "标签",
+          "nullable": true
+        },
+        "homepage": {
+          "type": "varchar(255)",
+          "comment": "主页",
+          "nullable": true
+        },
+        "repository": {
+          "type": "varchar(255)",
+          "comment": "代码仓库",
+          "nullable": true
+        },
+        "license": {
+          "type": "varchar(100)",
+          "comment": "许可证",
+          "nullable": true
+        },
+        "downloads": {
+          "type": "int",
+          "default": 0,
+          "comment": "总下载次数"
+        },
+        "rating": {
+          "type": "decimal(3,2)",
+          "default": 0.00,
+          "comment": "评分"
+        },
+        "reviews_count": {
+          "type": "int",
+          "default": 0,
+          "comment": "评价数量"
+        },
+        "status": {
+          "type": "tinyint",
+          "default": 1,
+          "comment": "状态：0=下架，1=上架",
+          "index": true
+        },
+        "is_official": {
+          "type": "tinyint",
+          "default": 0,
+          "comment": "是否官方插件"
+        },
+        "is_featured": {
+          "type": "tinyint",
+          "default": 0,
+          "comment": "是否推荐"
+        },
+        "is_free": {
+          "type": "tinyint",
+          "default": 1,
+          "comment": "是否免费：0=收费，1=免费"
+        },
+        "package_path": {
+          "type": "varchar(255)",
+          "comment": "安装包路径",
+          "nullable": true
+        },
+        "created_at": {
+          "type": "timestamp",
+          "comment": "创建时间",
+          "nullable": true
+        },
+        "updated_at": {
+          "type": "timestamp",
+          "comment": "更新时间",
+          "nullable": true
+        },
+        "deleted_at": {
+          "type": "timestamp",
+          "comment": "软删除时间",
+          "nullable": true
+        }
+      }
+    },
+    "addons_store_versions": {
+      "comment": "插件商店版本信息表",
+      "columns": {
+        "id": {
+          "type": "bigint unsigned",
+          "primary": true,
+          "auto_increment": true,
+          "comment": "主键ID"
+        },
+        "addon_id": {
+          "type": "bigint unsigned",
+          "comment": "插件ID",
+          "index": true
+        },
+        "description": {
+            "type": "text",
+            "comment": "插件描述",
+            "nullable": true
+          },        
+        "version": {
+          "type": "varchar(20)",
+          "comment": "版本号"
+        },
+        "filename": {
+          "type": "varchar(255)",
+          "comment": "文件名"
+        },
+        "filepath": {
+          "type": "varchar(500)",
+          "comment": "文件路径"
+        },
+        "filesize": {
+          "type": "bigint",
+          "comment": "文件大小（字节）"
+        },
+        "checksum": {
+          "type": "varchar(64)",
+          "comment": "文件校验码（SHA256）",
+          "index": true
+        },
+        "changelog": {
+          "type": "text",
+          "comment": "更新日志",
+          "nullable": true
+        },
+        "compatibility": {
+          "type": "json",
+          "comment": "兼容性信息",
+          "nullable": true
+        },
+        "downloads": {
+          "type": "int",
+          "default": 0,
+          "comment": "版本下载次数"
+        },
+        "status": {
+          "type": "tinyint",
+          "default": 1,
+          "comment": "状态：0=禁用，1=启用",
+          "index": true
+        },
+        "released_at": {
+          "type": "timestamp",
+          "comment": "发布日期",
+          "nullable": true
+        },
+        "created_at": {
+          "type": "timestamp",
+          "comment": "创建时间",
+          "nullable": true
+        },
+        "updated_at": {
+          "type": "timestamp",
+          "comment": "更新时间",
+          "nullable": true
+        }
+      },
+      "indexes": [
+        {
+          "name": "idx_addon_version",
+          "columns": ["addon_id", "version"],
+          "unique": true
+        }
+      ]
+    },
+    "addons_store_download_logs": {
+      "comment": "插件商店下载日志表",
+      "columns": {
+        "addon_id": {
+          "type": "bigint unsigned",
+          "comment": "插件ID",
+          "index": true
+        },
+        "version_id": {
+          "type": "bigint unsigned",
+          "comment": "版本ID",
+          "index": true
+        },
+        "user_id": {
+          "type": "bigint unsigned",
+          "comment": "下载用户ID",
+          "nullable": true,
+          "index": true
+        },
+        "user_ip": {
+          "type": "varchar(50)",
+          "comment": "下载IP",
+          "index": true
+        },
+        "user_agent": {
+          "type": "text",
+          "comment": "User Agent",
+          "nullable": true
+        },
+        "referer": {
+          "type": "varchar(500)",
+          "comment": "来源页面",
+          "nullable": true
+        },
+        "version": {
+          "type": "varchar(20)",
+          "comment": "下载的版本号"
+        },
+        "created_at": {
+          "type": "timestamp",
+          "comment": "下载时间",
+          "nullable": true
+        }
+      },
+      "indexes": [
+        {
+          "name": "idx_download_time",
+          "columns": ["created_at"]
+        }
+      ]
+    },
+    "addons_store_reviews": {
+      "comment": "插件商店评价表",
+      "columns": {
+        "addon_id": {
+          "type": "bigint unsigned",
+          "comment": "插件ID",
+          "index": true
+        },
+        "user_id": {
+          "type": "bigint unsigned",
+          "comment": "评价用户ID",
+          "index": true
+        },
+        "rating": {
+          "type": "tinyint",
+          "comment": "评分（1-5）",
+          "index": true
+        },
+        "comment": {
+          "type": "text",
+          "comment": "评价内容",
+          "nullable": true
+        },
+        "status": {
+          "type": "tinyint",
+          "default": 1,
+          "comment": "状态：0=隐藏，1=显示",
+          "index": true
+        },
+        "created_at": {
+          "type": "timestamp",
+          "comment": "评价时间",
+          "nullable": true
+        },
+        "updated_at": {
+          "type": "timestamp",
+          "comment": "更新时间",
+          "nullable": true
+        }
+      },
+      "indexes": [
+        {
+          "name": "idx_user_addon",
+          "columns": ["user_id", "addon_id"],
+          "unique": true
+        }
+      ]
+    }
+  }
+}

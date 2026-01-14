@@ -675,6 +675,34 @@ class InstallController extends AbstractController
                             $this->makeButtonPermission('访问 Iframe 模式', 'system.iframe-demo.view', '/system/iframe-demo*', 1, 'GET'),
                         ],
                     ],
+                    [
+                        'name' => '插件管理',
+                        'slug' => 'system.addons',
+                        'type' => 'menu',
+                        'icon' => 'puzzle',
+                        'path' => '/system/addons',
+                        'method' => 'GET',
+                        'sort' => 180,
+                        'status' => 1,
+                        'children' => [
+                            // 访问插件管理页面：GET /system/addons*
+                            $this->makeButtonPermission('访问插件管理', 'system.addons.view', '/system/addons*', 1, 'GET'),
+                            // 安装插件：POST /system/addons/install
+                            $this->makeButtonPermission('安装插件', 'system.addons.install', '/system/addons/install', 2, 'POST'),
+                            // 启用插件：POST /system/addons/{addon}/enable
+                            $this->makeButtonPermission('启用插件', 'system.addons.enable', '/system/addons/*/enable', 3, 'POST'),
+                            // 禁用插件：POST /system/addons/{addon}/disable
+                            $this->makeButtonPermission('禁用插件', 'system.addons.disable', '/system/addons/*/disable', 4, 'POST'),
+                            // 安装插件：POST /system/addons/{addon}/install-addon
+                            $this->makeButtonPermission('安装插件', 'system.addons.install', '/system/addons/*/install-addon', 5, 'POST'),
+                            // 卸载插件：POST /system/addons/{addon}/uninstall
+                            $this->makeButtonPermission('卸载插件', 'system.addons.uninstall', '/system/addons/*/uninstall', 6, 'POST'),
+                            // 导出插件：GET /system/addons/{addon}/export
+                            $this->makeButtonPermission('导出插件', 'system.addons.export', '/system/addons/*/export', 7, 'GET'),
+                            // 删除插件：DELETE /system/addons/{addon}
+                            $this->makeButtonPermission('删除插件', 'system.addons.delete', '/system/addons/*', 8, 'DELETE'),
+                        ],
+                    ],
                 ],
             ],
             [
@@ -1224,6 +1252,29 @@ class InstallController extends AbstractController
                 'cache' => 1,
                 'config' => null,
                 'remark' => '系统菜单',
+            ]
+        );
+
+        AdminMenu::query()->firstOrCreate(
+            ['site_id' => $siteId, 'path' => '/system/addons'],
+            [
+                'parent_id' => $system->id,
+                'name' => 'system.addons',
+                'title' => '插件管理',
+                'icon' => 'bi bi-puzzle',
+                'component' => 'admin/system/addons/index',
+                'redirect' => null,
+                'type' => AdminMenu::TYPE_MENU,
+                'target' => AdminMenu::TARGET_SELF,
+                'badge' => null,
+                'badge_type' => null,
+                'permission' => 'system.addons.view',
+                'visible' => 1,
+                'status' => 1,
+                'sort' => 1920,
+                'cache' => 1,
+                'config' => null,
+                'remark' => '插件管理系统',
             ]
         );
 

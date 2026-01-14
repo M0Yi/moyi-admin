@@ -373,6 +373,7 @@ async function toggleStatus(id, checkbox, apiUrlTemplate, field = 'status') {
             headers: {
                 'Content-Type': 'application/json',
                 'X-Requested-With': 'XMLHttpRequest',
+                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '',
             },
             body: JSON.stringify({
                 field: actualField

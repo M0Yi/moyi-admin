@@ -1004,7 +1004,11 @@
 {{-- 组件样式 --}}
 @include('admin.components.data-table.styles')
 
-@include('admin.components.data-table.search-form')
+@include('admin.components.data-table.search-form', [
+    'showSearch' => $showSearch,
+    'searchPanelId' => $searchPanelId,
+    'searchFormId' => $searchFormId
+])
 
 @include('admin.components.data-table.toolbar')
 

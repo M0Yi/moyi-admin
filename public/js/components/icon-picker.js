@@ -66,7 +66,12 @@ function initIconPicker() {
         if (selectedIcon && iconPickerTargetInput) {
             const targetInput = document.getElementById(iconPickerTargetInput);
             if (targetInput) {
-                targetInput.value = 'bi bi-' + selectedIcon;
+                const newValue = 'bi bi-' + selectedIcon;
+                console.log('[IconPicker] 设置输入框值为:', newValue);
+                targetInput.value = newValue;
+
+                // 手动更新预览（如果存在）
+                updateIconPreview(targetInput, newValue);
 
                 // 触发 input 事件，以便其他脚本可以监听
                 targetInput.dispatchEvent(new Event('input', { bubbles: true }));
@@ -232,6 +237,24 @@ function formatIconClass(iconClass, returnFullClass = true) {
     }
     
     return returnFullClass ? `bi bi-${iconName}` : iconName;
+}
+
+// 更新图标预览
+function updateIconPreview(inputElement, iconValue) {
+    if (!inputElement) return;
+
+    // 查找对应的预览元素
+    const inputId = inputElement.id;
+    const previewId = `${inputId}_preview`;
+    const previewSpan = document.getElementById(previewId);
+
+    if (previewSpan) {
+        const iconElement = previewSpan.querySelector('i');
+        if (iconElement) {
+            console.log('[IconPicker] 更新预览图标为:', iconValue);
+            iconElement.className = iconValue;
+        }
+    }
 }
 
 // 页面加载时初始化

@@ -282,6 +282,11 @@ class AdminAuthMiddleware implements MiddlewareInterface
             return true;
         }
 
+        // 文件下载/导出请求（返回文件而不是HTML页面）
+        if (preg_match('/\/(?:export|download|attachment)$/', $path)) {
+            return true;
+        }
+
         // 请求头包含 Accept: application/json
         $accept = $request->getHeaderLine('Accept');
         if (str_contains($accept, 'application/json')) {

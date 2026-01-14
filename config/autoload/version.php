@@ -11,7 +11,7 @@ declare(strict_types=1);
 
 return [
     // 示例初始版本，请在发布时由脚本替换为实际版本号，例如：v1.2.3 或 1.2.3+build.20251223
-    'framework_version' => '1.2.3',
+    'framework_version' => '1.0.0',
 ];
 
 

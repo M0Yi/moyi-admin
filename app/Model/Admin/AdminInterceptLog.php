@@ -145,3 +145,5 @@ class AdminInterceptLog extends Model
         return $query->where('status_code', $statusCode);
     }
 }
+
+

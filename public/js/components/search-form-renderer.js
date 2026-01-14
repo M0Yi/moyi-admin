@@ -323,36 +323,164 @@
         }
 
         initializeEnhancements() {
-            if (!this.form) return;
+            if (!this.form) {
+                console.warn('[SearchFormRenderer] 表单元素不存在，跳过增强功能初始化', this.formId);
+                return;
+            }
+
+            console.log('[SearchFormRenderer] 开始初始化表单增强功能', {
+                formId: this.formId,
+                tableId: this.tableId,
+                searchFields: this.searchFields,
+                currentUrl: window.location.href
+            });
+
+            // 从URL参数填充搜索表单
+            console.log('[SearchFormRenderer] 开始从URL参数填充搜索表单');
+            this.populateFormFromUrlParams();
 
             // 初始化日期选择器（使用 Flatpickr）
+            console.log('[SearchFormRenderer] 开始初始化日期选择器');
             this.initializeDateInputs();
 
             // 初始化关联字段的下拉框（如果使用了 Tom Select）
             if (window.TomSelect) {
+                console.log('[SearchFormRenderer] 检测到TomSelect，开始初始化关联字段下拉框');
                 const relationFields = this.form.querySelectorAll('select[data-relation]');
-                relationFields.forEach(select => {
+                console.log('[SearchFormRenderer] 找到关联字段数量:', relationFields.length);
+
+                relationFields.forEach((select, index) => {
                     const fieldName = select.getAttribute('data-relation');
                     const relationUrl = `/admin/u/${this.model}/search-relation-options?field=${fieldName}`;
-                    
+
+                    console.log(`[SearchFormRenderer] 初始化关联字段 ${index + 1}:`, {
+                        fieldName: fieldName,
+                        relationUrl: relationUrl,
+                        selectElement: select
+                    });
+
                     new TomSelect(select, {
                         valueField: 'value',
                         labelField: 'text',
                         searchField: ['text', 'label'],
                         load: function(query, callback) {
-                            if (!query.length) return callback();
+                            console.log(`[SearchFormRenderer] 关联字段 ${fieldName} 搜索请求:`, query);
+                            if (!query.length) {
+                                console.log(`[SearchFormRenderer] 关联字段 ${fieldName} 搜索查询为空，跳过`);
+                                return callback();
+                            }
                             fetch(`${relationUrl}&search=${encodeURIComponent(query)}`)
-                                .then(response => response.json())
+                                .then(response => {
+                                    console.log(`[SearchFormRenderer] 关联字段 ${fieldName} 搜索响应状态:`, response.status);
+                                    return response.json();
+                                })
                                 .then(data => {
+                                    console.log(`[SearchFormRenderer] 关联字段 ${fieldName} 搜索响应数据:`, data);
                                     if (data.code === 200 && data.data && data.data.results) {
+                                        console.log(`[SearchFormRenderer] 关联字段 ${fieldName} 返回 ${data.data.results.length} 条结果`);
                                         callback(data.data.results);
                                     } else {
+                                        console.log(`[SearchFormRenderer] 关联字段 ${fieldName} 无有效结果`);
                                         callback();
                                     }
                                 })
-                                .catch(() => callback());
+                                .catch(error => {
+                                    console.error(`[SearchFormRenderer] 关联字段 ${fieldName} 搜索失败:`, error);
+                                    callback();
+                                });
                         }
                     });
+                });
+            } else {
+                console.log('[SearchFormRenderer] TomSelect 未加载，跳过关联字段下拉框初始化');
+            }
+
+            console.log('[SearchFormRenderer] 表单增强功能初始化完成');
+        }
+
+        /**
+         * 从URL参数填充搜索表单
+         */
+        populateFormFromUrlParams() {
+            if (!this.form) {
+                console.warn('[SearchFormRenderer] 表单不存在，跳过URL参数填充');
+                return;
+            }
+
+            try {
+                const currentUrl = window.location.href;
+                const urlParams = new URLSearchParams(window.location.search);
+
+                console.log('[SearchFormRenderer] 开始解析URL参数填充表单', {
+                    currentUrl: currentUrl,
+                    searchParams: window.location.search,
+                    totalParams: urlParams.toString().split('&').length,
+                    searchFields: this.searchFields
+                });
+
+                // 遍历所有搜索字段
+                this.searchFields.forEach(fieldName => {
+                    // 优先检查filters[fieldName]格式的参数（表单提交格式）
+                    let paramName = `filters[${fieldName}]`;
+                    let filterValue = urlParams.get(paramName);
+
+                    // 如果没找到，尝试直接的fieldName格式（URL直接参数）
+                    if (filterValue === null) {
+                        paramName = fieldName;
+                        filterValue = urlParams.get(paramName);
+                    }
+
+                    console.log(`[SearchFormRenderer] 检查字段 ${fieldName}:`, {
+                        filtersParamName: `filters[${fieldName}]`,
+                        directParamName: fieldName,
+                        usedParamName: paramName,
+                        filterValue: filterValue,
+                        hasValue: filterValue !== null && filterValue !== ''
+                    });
+
+                    if (filterValue !== null && filterValue !== '') {
+                        // 查找对应的表单字段并设置值（表单字段始终使用filters[fieldName]格式）
+                        const formFieldName = `filters[${fieldName}]`;
+                        const input = this.form.querySelector(`[name="${formFieldName}"]`);
+
+                        if (input) {
+                            console.log(`[SearchFormRenderer] 找到表单字段 ${fieldName}, 准备设置值:`, {
+                                fieldName: fieldName,
+                                filterValue: filterValue,
+                                inputType: input.type || input.tagName,
+                                inputElement: input
+                            });
+
+                            // 根据输入类型设置值
+                            if (input.type === 'checkbox' || input.type === 'radio') {
+                                const checkedValue = filterValue === '1' || filterValue === 'true';
+                                input.checked = checkedValue;
+                                console.log(`[SearchFormRenderer] 设置复选框/单选框 ${fieldName} 为: ${checkedValue}`);
+                            } else if (input.tagName === 'SELECT') {
+                                input.value = filterValue;
+                                // 触发change事件，以便TomSelect等组件更新显示
+                                input.dispatchEvent(new Event('change', { bubbles: true }));
+                                console.log(`[SearchFormRenderer] 设置下拉框 ${fieldName} 为: "${filterValue}", 已触发change事件`);
+                            } else {
+                                input.value = filterValue;
+                                // 触发input事件，以便日期选择器等组件更新显示
+                                input.dispatchEvent(new Event('input', { bubbles: true }));
+                                console.log(`[SearchFormRenderer] 设置输入框 ${fieldName} 为: "${filterValue}", 已触发input事件`);
+                            }
+                        } else {
+                            console.warn(`[SearchFormRenderer] 未找到表单字段: ${paramName}`);
+                        }
+                    } else {
+                        console.log(`[SearchFormRenderer] 字段 ${fieldName} 无URL参数值，跳过`);
+                    }
+                });
+
+                console.log('[SearchFormRenderer] URL参数填充完成');
+            } catch (error) {
+                console.error('[SearchFormRenderer] 解析URL参数失败:', error, {
+                    errorMessage: error.message,
+                    errorStack: error.stack,
+                    currentUrl: window.location.href
                 });
             }
         }

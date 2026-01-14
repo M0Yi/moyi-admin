@@ -18,6 +18,18 @@ return [
     'app_name' => env('APP_NAME', 'skeleton'),
     'app_env' => env('APP_ENV', 'dev'),
     'scan_cacheable' => env('SCAN_CACHEABLE', false),
+
+    // 日志配置：需要打印 context 内容的标签前缀
+    // 匹配的日志消息前缀，满足条件时会打印 context 数组内容
+    'log_context_tags' => [
+        // '[插件导入]',
+        // '[插件导出]',
+        // '[数据库管理]',
+        // 可以添加更多需要打印 context 的标签
+        // '[用户管理]',
+        // '[系统配置]',
+    ],
+
     StdoutLoggerInterface::class => [
         'log_level' => [
 //            LogLevel::ALERT,

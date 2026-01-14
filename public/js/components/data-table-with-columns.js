@@ -578,7 +578,9 @@
 
             let html = '';
             data.data.forEach(row => {
-                html += '<tr>';
+                // 将行数据存储为JSON字符串，用于占位符替换
+                const rowDataJson = JSON.stringify(row).replace(/"/g, '&quot;');
+                html += `<tr data-row-data="${rowDataJson}">`;
 
                 // 批量删除复选框列（如果启用了批量删除）
                 if (config.enableBatchDelete) {
@@ -1127,11 +1129,13 @@
                             return; // 跳过不可见的按钮
                         }
                         
-                        // 替换占位符 {id} 和 {value}
+                        // 替换占位符 {id}、{value}、{name} 和 {enabled}
                         const replacePlaceholders = (str) => {
                             if (!str) return '';
                             return str.replace(/{id}/g, row.id)
-                                      .replace(/{value}/g, value || '');
+                                      .replace(/{value}/g, value || '')
+                                      .replace(/{name}/g, row.name || '')
+                                      .replace(/{enabled}/g, row.enabled ? 'true' : 'false');
                         };
                         
                         if (action.type === 'link') {

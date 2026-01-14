@@ -21,12 +21,12 @@
 
     <div class="card border-0 shadow-sm">
         <div class="card-body">
-            {{-- 使用集成了工具栏的数据表格组件（AJAX 模式） --}}
             @include('admin.components.data-table-with-columns', [
                 'tableId' => 'menuTable',
                 'storageKey' => 'menuTableColumns',
                 'ajaxUrl' => admin_route('system/menus'),  // 启用 AJAX 模式
                 'showPagination' => false,  // 菜单管理不需要分页功能
+                'defaultPageSize' => 500,  // 默认每页显示 500 条数据'
                 'columns' => [
                     // ID列
                     [

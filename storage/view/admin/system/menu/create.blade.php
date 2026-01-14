@@ -41,12 +41,12 @@
 @endsection
 
 @push('admin_scripts')
-<!-- 引入图标选择器组件 -->
-@include('components.icon-picker', ['targetInputId' => 'icon'])
-
 <!-- 引入通用表单渲染器 -->
 @php
-@include('components.admin-script', ['path' => '/js/components/universal-form-renderer.js'])
+@include('components.admin-script', [
+    'path' => '/js/components/universal-form-renderer.js',
+    'iconPickerParams' => ['targetInputId' => 'icon']
+])
 
 <!-- 菜单表单特殊逻辑 -->
 @include('components.admin-script', ['path' => '/js/admin/system/menu-form.js'])

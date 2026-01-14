@@ -199,6 +199,64 @@
         }
     }
 
+    /**
+     * 处理标题中的占位符替换
+     * @param {string} title 原始标题
+     * @param {Element} trigger 触发器元素
+     * @returns {string} 处理后的标题
+     */
+    function resolveTitleWithPlaceholders(title, trigger) {
+        if (!title || !title.includes('{')) {
+            return title;
+        }
+
+        // 查找触发器所在的表格行
+        const row = trigger.closest('tr');
+        if (!row) {
+            return title;
+        }
+
+        // 从表格行中提取数据
+        const rowData = extractRowData(row);
+
+        // 替换占位符
+        return title.replace(/\{(\w+)\}/g, (match, fieldName) => {
+            return rowData[fieldName] || match;
+        });
+    }
+
+    /**
+     * 从表格行中提取数据
+     * @param {Element} row 表格行元素
+     * @returns {object} 行数据对象
+     */
+    function extractRowData(row) {
+        const data = {};
+
+        // 尝试从行的data-row-data属性获取完整数据
+        if (row.dataset && row.dataset.rowData) {
+            try {
+                // 数据在HTML属性中被转义，需要先解码
+                const decodedData = row.dataset.rowData.replace(/&quot;/g, '"');
+                return JSON.parse(decodedData);
+            } catch (error) {
+                console.warn('[IframeShell] Failed to parse row data:', error);
+            }
+        }
+
+        // 如果没有data-row-data属性，尝试从单元格内容推断
+        const cells = row.querySelectorAll('td');
+        cells.forEach((cell, index) => {
+            // 从data-field属性获取字段名（如果有的话）
+            const fieldName = cell.dataset.field;
+            if (fieldName) {
+                data[fieldName] = cell.textContent.trim();
+            }
+        });
+
+        return data;
+    }
+
     function resolveTabUrl(sourceUrl) {
         if (!sourceUrl) {
             return '';
@@ -371,7 +429,7 @@
 
         const dataset = trigger.dataset;
         const src = dataset.iframeShellSrc || trigger.getAttribute('href');
-        const title = dataset.iframeShellTitle || trigger.textContent.trim();
+        let title = dataset.iframeShellTitle || trigger.textContent.trim();
         const behavior = dataset.iframeShellBehavior || 'modal';
         const fallbackToWindow = dataset.iframeShellFallbackWindow !== 'false';
         const hideActions = dataset.iframeShellHideActions === 'true' || dataset.iframeShellHideActions === '1';
@@ -380,6 +438,9 @@
             console.warn('[IframeShell] missing src for trigger:', trigger);
             return;
         }
+
+        // 处理标题中的占位符替换
+        title = resolveTitleWithPlaceholders(title, trigger);
 
         if (behavior === 'tab') {
             openTab(src, title, { fallbackToWindow });

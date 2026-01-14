@@ -1,0 +1,9 @@
+{
+  "directories": {
+    "View/admin/addons_store": "storage/view/admin/addons_store"
+  },
+  "files": {
+    "Public/css/addons_store.css": "public/css/addons_store.css",
+    "Public/js/addons_store.js": "public/js/addons_store.js"
+  }
+}
