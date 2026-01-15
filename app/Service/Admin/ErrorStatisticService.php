@@ -237,7 +237,14 @@ class ErrorStatisticService
 
         // 状态筛选
         if (isset($params['status']) && $params['status'] !== '') {
-            $query->where('status', (int) $params['status']);
+            $statusValue = $params['status'];
+            // 支持多选状态筛选（逗号分隔）
+            if (strpos($statusValue, ',') !== false) {
+                $statuses = array_map('intval', explode(',', $statusValue));
+                $query->whereIn('status', $statuses);
+            } else {
+                $query->where('status', (int) $statusValue);
+            }
         }
 
         // 日期范围筛选

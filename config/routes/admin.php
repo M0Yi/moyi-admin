@@ -276,6 +276,8 @@ Router::addGroup('/admin/{adminPath:[a-zA-Z0-9\-_]+}', function () {
             Router::get('/{addonId}/config', 'App\Controller\Admin\System\AddonController@config');
             Router::post('/{addonId}/save-config', 'App\Controller\Admin\System\AddonController@saveConfig');
             Router::post('/install', 'App\Controller\Admin\System\AddonController@install');
+            Router::post('/install-store/{addonId}', 'App\Controller\Admin\System\AddonController@installStoreAddon');
+            Router::post('/upgrade-store/{addonId}', 'App\Controller\Admin\System\AddonController@upgradeStoreAddon');
             Router::post('/{addonId}/enable', 'App\Controller\Admin\System\AddonController@enable');
             Router::post('/{addonId}/disable', 'App\Controller\Admin\System\AddonController@disable');
             Router::post('/{addonId}/install', 'App\Controller\Admin\System\AddonController@installAddon');
@@ -285,6 +287,13 @@ Router::addGroup('/admin/{adminPath:[a-zA-Z0-9\-_]+}', function () {
             Router::post('/refresh', 'App\Controller\Admin\System\AddonController@refresh');
             Router::post('/test-config/{addonName}', 'App\Controller\Admin\System\AddonController@testConfigUpdate');
             Router::get('/route-status', 'App\Controller\Admin\System\AddonController@getRouteLoadStatus');
+            Router::get('/test-store-api', 'App\Controller\Admin\System\AddonController@testStoreApi');
+            Router::get('/debug-store-list', 'App\Controller\Admin\System\AddonController@debugStoreList');
+            Router::get('/check-addon-status', 'App\Controller\Admin\System\AddonController@checkAddonStatus');
+            Router::get('/test-filters-parsing', 'App\Controller\Admin\System\AddonController@testFiltersParsing');
+            Router::get('/test-local-addons', 'App\Controller\Admin\System\AddonController@testLocalAddons');
+            Router::get('/test-addon-intersection', 'App\Controller\Admin\System\AddonController@testAddonIntersection');
+            Router::get('/test-action-conditions', 'App\Controller\Admin\System\AddonController@testActionConditions');
         });
     }, [
         'middleware' => [

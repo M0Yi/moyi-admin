@@ -34,6 +34,17 @@
                 'searchPanelId' => 'searchPanel_errorStatisticTable',
                 'searchConfig' => $errorStatisticSearchConfig,
                 'showSearch' => $hasSearchConfig,
+                'statusFilterConfig' => [
+                    'filter_field' => 'status',
+                    'options' => [
+                        ['value' => '0', 'label' => '未处理', 'variant' => 'danger', 'icon' => 'bi-exclamation-triangle'],
+                        ['value' => '1', 'label' => '处理中', 'variant' => 'warning', 'icon' => 'bi-clock'],
+                        ['value' => '2', 'label' => '已解决', 'variant' => 'success', 'icon' => 'bi-check-circle']
+                    ],
+                    'show_all' => true,
+                    'all_label' => '全部状态',
+                    'multiple' => false
+                ],
                 'showPagination' => true,
                 'columns' => [
                     [

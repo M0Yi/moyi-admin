@@ -26,7 +26,7 @@ class AddonsStoreApiController extends AbstractController
 
         try {
             $result = $this->storeService->getAddonList($params);
-            return $this->success($result);
+            return $this->response->json($result);
         } catch (\Exception $e) {
             return $this->error($e->getMessage());
         }

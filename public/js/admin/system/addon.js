@@ -25,9 +25,60 @@
 
         // 自定义渲染函数
         window.renderAddonStatus = function(value, row, column) {
-            const status = value ? '启用' : '禁用';
-            const variant = value ? 'success' : 'secondary';
-            return `<span class="badge bg-${variant}">${status}</span>`;
+            const source = row.source || 'local';
+
+            if (source === 'store') {
+                // 商店插件：显示安装状态
+                const isInstalled = row.installed ? true : false;
+                const status = isInstalled ? '已安装' : '未安装';
+                const variant = isInstalled ? 'success' : 'secondary';
+                return `<span class="badge bg-${variant}">${status}</span>`;
+            } else {
+                // 本地插件：显示启用状态
+                const isEnabled = row.enabled ? true : false;
+                const status = isEnabled ? '启用' : '禁用';
+                const variant = isEnabled ? 'success' : 'secondary';
+                return `<span class="badge bg-${variant}">${status}</span>`;
+            }
+        };
+
+        // 来源渲染函数
+        window.renderAddonSource = function(value, column, row) {
+            const source = value || 'local';
+            const labels = {
+                'local': { text: '本地插件', variant: 'primary' },
+                'store': { text: '应用商城', variant: 'info' }
+            };
+
+            const label = labels[source] || labels['local'];
+
+            return `<span class="badge bg-${label.variant}">${label.text}</span>`;
+        };
+
+        // 安装状态渲染函数
+        window.renderAddonInstallStatus = function(value, column, row) {
+            const isInstalled = row.installed ? true : false;
+            const canUpgrade = row.can_upgrade ? true : false;
+            const currentVersion = row.current_version || '';
+            const latestVersion = row.version || '';
+
+            if (isInstalled) {
+                if (canUpgrade) {
+                    return `<div class="text-center">
+                        <span class="badge bg-warning mb-1">可升级</span><br>
+                        <small class="text-muted">${currentVersion} → ${latestVersion}</small>
+                    </div>`;
+                } else {
+                    return `<div class="text-center">
+                        <span class="badge bg-success">已安装</span><br>
+                        <small class="text-muted">v${currentVersion}</small>
+                    </div>`;
+                }
+            } else {
+                return `<div class="text-center">
+                    <span class="badge bg-secondary">未安装</span>
+                </div>`;
+            }
         };
 
         // 状态切换开关渲染函数
@@ -351,14 +402,41 @@
     /**
      * 导出插件
      */
-    window.exportAddon = function(addonId, addonName, isEnabled) {
+    window.exportAddon = function(addonId, addonName, isEnabled, addonVersion) {
+        // 将字符串转换为布尔值（从模板传来的 {enabled} 是字符串）
+        const isEnabledBool = isEnabled === 'true' || isEnabled === true;
+
+        // 添加详细调试日志
+        console.log('[导出插件] ===== 开始导出插件 =====');
+        console.log('[导出插件] 接收到的参数:', {
+            addonId: addonId,
+            addonName: addonName,
+            addonVersion: addonVersion,
+            isEnabled: isEnabled,
+            isEnabledType: typeof isEnabled,
+            isEnabledBool: isEnabledBool
+        });
+
+        // 检查参数有效性
+        if (!addonId) {
+            console.error('[导出插件] addonId 为空');
+            return;
+        }
+        if (!addonName || addonName === 'undefined' || addonName === 'null') {
+            console.warn('[导出插件] addonName 为空或无效，使用默认名称');
+            addonName = '未命名插件';
+        }
+
         // 检查插件状态，只有禁用状态才能导出
-        if (isEnabled) {
+        if (isEnabledBool) {
+            console.warn('[导出插件] 插件处于启用状态，无法导出');
             if (typeof showToast === 'function') {
                 showToast('warning', '只能导出已禁用的插件');
             }
             return;
         }
+
+        console.log('[导出插件] 插件处于禁用状态，开始导出流程');
 
         if (!confirm(`确定要导出插件 "${addonName}" 吗？\n\n导出的zip文件将包含插件的所有文件。`)) {
             return;
@@ -370,9 +448,12 @@
             showToast('info', originalText, 0); // 0表示不自动关闭
         }
 
+        // 构建导出URL（不需要传递文件名参数）
         const exportUrl = getAddonRoute(`${addonId}/export`);
 
-        // 创建一个临时链接来下载文件
+        console.log('[导出插件] 构建的导出URL:', exportUrl);
+
+        // 使用前端控制下载的方式，避免URL参数编码问题
         fetch(exportUrl, {
             method: 'GET',
             headers: {
@@ -416,16 +497,30 @@
                 throw new Error(`HTTP error! status: ${response.status}`);
             }
 
-            // 获取文件名从响应头
-            const contentDisposition = response.headers.get('content-disposition');
-            let filename = `${addonId}.zip`; // 默认文件名
+            // 前端直接构造文件名，避免后端编码问题
+            // 格式：ID_插件名称_版本_日期.zip
+            const now = new Date();
+            const dateStr = now.getFullYear() + '-' +
+                           String(now.getMonth() + 1).padStart(2, '0') + '-' +
+                           String(now.getDate()).padStart(2, '0') + '_' +
+                           String(now.getHours()).padStart(2, '0') + '-' +
+                           String(now.getMinutes()).padStart(2, '0') + '-' +
+                           String(now.getSeconds()).padStart(2, '0');
 
-            if (contentDisposition) {
-                const matches = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
-                if (matches && matches[1]) {
-                    filename = matches[1].replace(/['"]/g, '');
-                }
-            }
+            // 简化文件名，避免中文编码问题
+            const safeAddonName = addonName.replace(/[^\w\u4e00-\u9fff\-_]/g, '_'); // 只保留字母、数字、中文、横线、下划线
+            const safeVersion = (addonVersion || 'unknown').replace(/[^\w\.\-_]/g, '_'); // 版本号清理
+            const filename = `${addonId}_${safeAddonName}_${safeVersion}_${dateStr}.zip`;
+
+            console.log('[导出插件] 前端构造文件名:', {
+                addonId: addonId,
+                addonName: addonName,
+                addonVersion: addonVersion,
+                safeAddonName: safeAddonName,
+                safeVersion: safeVersion,
+                dateStr: dateStr,
+                finalFilename: filename
+            });
 
             return response.blob().then(blob => ({ blob, filename }));
         })
@@ -468,16 +563,183 @@
     };
 
     /**
+     * 从应用商城安装插件
+     */
+    window.installStoreAddon = function(addonId, addonName) {
+        if (!confirm(`确定要从应用商城安装插件 "${addonName}" 吗？\n\n这将从远程服务器下载并安装插件。`)) {
+            return;
+        }
+
+        // 显示加载状态
+        if (typeof showToast === 'function') {
+            showToast('info', '正在从应用商城下载插件...', 0); // 0表示不自动关闭
+        }
+
+        const installUrl = getAddonRoute(`install-store/${addonId}`);
+
+        fetch(installUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || ''
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.code === 200) {
+                if (typeof showToast === 'function') {
+                    showToast('success', `插件 "${addonName}" 从应用商城安装成功`);
+                }
+                // 刷新主框架
+                if (window.AdminIframeClient?.refreshMainFrame) {
+                    window.AdminIframeClient.refreshMainFrame({
+                        message: `插件 "${addonName}" 安装成功，主框架即将刷新`,
+                        delay: 3000,
+                        toastType: 'success'
+                    });
+                } else {
+                    // 降级方案：延迟3秒刷新页面
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 3000);
+                }
+            } else {
+                if (typeof showToast === 'function') {
+                    showToast('danger', data.msg || data.message || '插件安装失败');
+                }
+            }
+        })
+        .catch(error => {
+            console.error('安装失败:', error);
+            if (typeof showToast === 'function') {
+                showToast('danger', '插件安装失败：' + error.message);
+            }
+        });
+    };
+
+    /**
+     * 从应用商城升级插件
+     */
+    window.upgradeStoreAddon = function(addonId, addonName, currentVersion, latestVersion) {
+        if (!confirm(`确定要将插件 "${addonName}" 从 v${currentVersion} 升级到 v${latestVersion} 吗？\n\n这将从应用商城下载最新版本并覆盖当前安装。`)) {
+            return;
+        }
+
+        // 显示加载状态
+        if (typeof showToast === 'function') {
+            showToast('info', `正在升级插件 ${addonName}...`, 0);
+        }
+
+        const upgradeUrl = getAddonRoute(`upgrade-store/${addonId}`);
+
+        fetch(upgradeUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || ''
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.code === 200) {
+                if (typeof showToast === 'function') {
+                    showToast('success', `插件 "${addonName}" 升级成功`);
+                }
+                // 刷新主框架
+                if (window.AdminIframeClient?.refreshMainFrame) {
+                    window.AdminIframeClient.refreshMainFrame({
+                        message: `插件 "${addonName}" 升级成功，主框架即将刷新`,
+                        delay: 3000,
+                        toastType: 'success'
+                    });
+                } else {
+                    // 降级方案：延迟3秒刷新页面
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 3000);
+                }
+            } else {
+                if (typeof showToast === 'function') {
+                    showToast('danger', data.msg || data.message || '插件升级失败');
+                }
+            }
+        })
+        .catch(error => {
+            console.error('升级失败:', error);
+            if (typeof showToast === 'function') {
+                showToast('danger', '插件升级失败：' + error.message);
+            }
+        });
+    };
+
+    /**
+     * 筛选应用商城插件
+     */
+    window.filterStoreAddons = function() {
+        // 查找搜索表单中的source字段
+        const sourceSelect = document.querySelector('select[name="filters[source]"]') ||
+                           document.querySelector('#searchForm_addonTable select[name="filters[source]"]');
+
+        if (sourceSelect) {
+            // 设置source值为"store"
+            sourceSelect.value = 'store';
+
+            // 触发change事件以确保表单更新
+            const changeEvent = new Event('change', { bubbles: true });
+            sourceSelect.dispatchEvent(changeEvent);
+
+            // 查找并点击搜索按钮
+            const searchButton = document.querySelector('#searchForm_addonTable button[type="submit"]') ||
+                               document.querySelector('#searchForm_addonTable .btn-primary');
+
+            if (searchButton) {
+                searchButton.click();
+            } else {
+                // 如果找不到搜索按钮，手动触发搜索
+                if (window.DataTableManager && typeof window.DataTableManager.refresh === 'function') {
+                    window.DataTableManager.refresh('addonTable');
+                }
+            }
+
+            // 显示提示信息
+            if (typeof showToast === 'function') {
+                showToast('info', '正在加载应用商城插件...', 2000);
+            }
+        } else {
+            console.warn('[插件筛选] 未找到source选择器');
+            // 降级方案：刷新整个页面并传递参数
+            const currentUrl = new URL(window.location.href);
+            currentUrl.searchParams.set('filters[source]', 'store');
+            window.location.href = currentUrl.toString();
+        }
+    };
+
+    /**
      * 删除插件
      */
     window.deleteAddon = function(addonId, addonName, isEnabled) {
+        // 将字符串转换为布尔值（从模板传来的 {enabled} 是字符串）
+        const isEnabledBool = isEnabled === 'true' || isEnabled === true;
+
+        // 添加调试日志
+        console.log('[删除插件] 参数信息:', {
+            addonId: addonId,
+            addonName: addonName,
+            isEnabled: isEnabled,
+            isEnabledType: typeof isEnabled,
+            isEnabledBool: isEnabledBool
+        });
+
         // 检查插件状态，只有禁用状态才能删除
-        if (isEnabled) {
+        if (isEnabledBool) {
+            console.warn('[删除插件] 插件处于启用状态，无法删除');
             if (typeof showToast === 'function') {
                 showToast('warning', '只能删除已禁用的插件');
             }
             return;
         }
+
+        console.log('[删除插件] 插件处于禁用状态，开始删除流程');
 
         if (!confirm(`⚠️ 危险操作！\n\n确定要删除插件 "${addonName}" 吗？\n\n这将永久删除插件的所有文件，此操作不可恢复！`)) {
             return;

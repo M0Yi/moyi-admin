@@ -917,6 +917,78 @@
         
         // 所有列类型渲染都在前端 JavaScript 中完成
         function renderCell(value, column, row) {
+            // 检查列的 visible 字段（支持函数、布尔值、字符串表达式）
+            let columnVisible = true;
+            if (column.visible !== undefined) {
+                // 创建 evaluateCondition 函数的本地版本
+                const evaluateCondition = (conditionValue) => {
+                    // 如果是函数，直接调用
+                    if (typeof conditionValue === 'function') {
+                        return conditionValue(value, row, column);
+                    }
+
+                    // 如果是布尔值，直接返回
+                    if (typeof conditionValue === 'boolean') {
+                        return conditionValue;
+                    }
+
+                    // 如果是字符串，进行解析
+                    if (typeof conditionValue === 'string') {
+                        try {
+                            // 检查是否是函数字符串定义
+                            if (conditionValue.trim().startsWith('function(')) {
+                                // 函数字符串：直接构造并调用
+                                const functionBody = conditionValue.trim();
+                                const func = new Function('value', 'row', 'column', `return (${functionBody})(value, row, column);`);
+                                return func(value, row, column);
+                            } else {
+                                // 普通字符串表达式：处理占位符并计算
+                                let condition = conditionValue;
+                                const fieldMatches = condition.match(/{(\w+)}/g);
+                                if (fieldMatches) {
+                                    fieldMatches.forEach(match => {
+                                        const fieldName = match.slice(1, -1); // 移除 {}
+                                        let fieldValue = row[fieldName];
+
+                                        // 处理布尔值转换
+                                        if (typeof fieldValue === 'boolean') {
+                                            fieldValue = fieldValue ? 'true' : 'false';
+                                        } else if (fieldValue === null || fieldValue === undefined) {
+                                            fieldValue = 'false';
+                                        }
+
+                                        condition = condition.replace(new RegExp(match.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), fieldValue);
+                                    });
+                                }
+
+                                // 安全计算条件表达式
+                                const conditionFn = new Function('value', 'row', 'column', `return ${condition};`);
+                                return conditionFn(value, row, column);
+                            }
+                        } catch (error) {
+                            console.error('[Column Condition Error]', {
+                                condition: conditionValue,
+                                error: error.message,
+                                row: row,
+                                value: value,
+                                column: column
+                            });
+                            return true; // 出错时默认显示
+                        }
+                    }
+
+                    // 其他类型默认为 true
+                    return true;
+                };
+
+                columnVisible = evaluateCondition(column.visible);
+            }
+
+            // 如果列不可见，返回空内容
+            if (!columnVisible) {
+                return '';
+            }
+
             const columnType = column.type || 'text';
             
             switch (columnType) {
@@ -1115,27 +1187,157 @@
                         return '<span class="text-muted" style="font-size: 0.875rem;">-</span>';
                     }
                     
+                    // ===========================================
+                    // 统一条件渲染方案说明：
+                    //
+                    // 支持三种条件判断方式（按优先级顺序）：
+                    //
+                    // 1. condition 字段（推荐）：
+                    //    - function(value, row, column): 标准函数方式，最灵活
+                    //    - boolean: 直接布尔值，简单但不够灵活
+                    //    - string: 字符串表达式，支持 {field} 占位符，如 "row.source === 'store' && !row.installed"
+                    //
+                    // 2. visible 字段（向后兼容，已废弃）：
+                    //    - 同 condition，支持函数、布尔值、字符串表达式
+                    //
+                    // 3. show 字段（最终控制开关）：
+                    //    - function(value, row, column): 函数方式
+                    //    - boolean: 布尔值，默认 true
+                    //    - string: 字符串表达式
+                    //
+                    // 示例用法：
+                    // 'condition' => function(value, row, column) { return row.status === 'active'; }
+                    // 'condition' => 'row.source === "store" && !row.installed'
+                    // 'condition' => true
+                    // 'show' => function(value, row, column) { return row.enabled; }
+                    // 'show' => false
+                    // ===========================================
+
                     // 遍历操作按钮配置
                     actions.forEach(action => {
-                        // 检查是否可见（支持函数和布尔值）
+                        // 统一条件评估器：支持 function(value, row, column)、布尔值、字符串表达式
+                        const evaluateCondition = (conditionValue) => {
+                            // 如果是函数，直接调用
+                            if (typeof conditionValue === 'function') {
+                                return conditionValue(value, row, column);
+                            }
+
+                            // 如果是布尔值，直接返回
+                            if (typeof conditionValue === 'boolean') {
+                                return conditionValue;
+                            }
+
+                            // 如果是字符串，进行解析
+                            if (typeof conditionValue === 'string') {
+                                try {
+                                    // 检查是否是函数字符串定义
+                                    if (conditionValue.trim().startsWith('function(')) {
+                                        // 函数字符串：直接构造并调用
+                                        const functionBody = conditionValue.trim();
+                                        const func = new Function('value', 'row', 'column', `return (${functionBody})(value, row, column);`);
+                                        const result = func(value, row, column);
+
+                                        console.debug('[Action Condition - Function]', {
+                                            original: conditionValue,
+                                            type: 'function',
+                                            result: result,
+                                            row: row,
+                                            value: value,
+                                            column: column
+                                        });
+
+                                        return result;
+                                    } else {
+                                        // 普通字符串表达式：处理占位符并计算
+                                        let condition = conditionValue;
+                                        const fieldMatches = condition.match(/{(\w+)}/g);
+                                        if (fieldMatches) {
+                                            fieldMatches.forEach(match => {
+                                                const fieldName = match.slice(1, -1); // 移除 {}
+                                                let fieldValue = row[fieldName];
+
+                                                // 处理布尔值转换
+                                                if (typeof fieldValue === 'boolean') {
+                                                    fieldValue = fieldValue ? 'true' : 'false';
+                                                } else if (fieldValue === null || fieldValue === undefined) {
+                                                    fieldValue = 'false';
+                                                }
+
+                                                condition = condition.replace(new RegExp(match.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), fieldValue);
+                                            });
+                                        }
+
+                                        // 安全计算条件表达式
+                                        const conditionFn = new Function('value', 'row', 'column', `return ${condition};`);
+                                        const result = conditionFn(value, row, column);
+
+                                        console.debug('[Action Condition - Expression]', {
+                                            original: conditionValue,
+                                            processed: condition,
+                                            type: 'expression',
+                                            result: result,
+                                            row: row,
+                                            value: value,
+                                            column: column
+                                        });
+
+                                        return result;
+                                    }
+
+                                } catch (error) {
+                                    console.error('[Action Condition Error]', {
+                                        condition: conditionValue,
+                                        error: error.message,
+                                        row: row,
+                                        value: value,
+                                        column: column
+                                    });
+                                    return true; // 出错时默认显示
+                                }
+                            }
+
+                            // 其他类型默认为 true
+                            return true;
+                        };
+
+                        // 检查是否可见
                         let isVisible = true;
-                        if (typeof action.visible === 'function') {
-                            isVisible = action.visible(row);
-                        } else if (action.visible !== undefined) {
-                            isVisible = action.visible;
+
+                        // 检查 visible 字段（主要控制字段，支持函数、布尔值、字符串表达式）
+                        if (action.visible !== undefined) {
+                            isVisible = evaluateCondition(action.visible);
                         }
-                        
+                        // 检查 condition 字段（向后兼容）
+                        else if (action.condition !== undefined) {
+                            isVisible = evaluateCondition(action.condition);
+                        }
+
                         if (!isVisible) {
                             return; // 跳过不可见的按钮
                         }
                         
-                        // 替换占位符 {id}、{value}、{name} 和 {enabled}
+                        // 替换占位符 {id}、{value}、{name}、{enabled}、{current_version}、{version}
                         const replacePlaceholders = (str) => {
                             if (!str) return '';
-                            return str.replace(/{id}/g, row.id)
-                                      .replace(/{value}/g, value || '')
-                                      .replace(/{name}/g, row.name || '')
-                                      .replace(/{enabled}/g, row.enabled ? 'true' : 'false');
+
+                            const result = str.replace(/{id}/g, row.id)
+                                             .replace(/{value}/g, value || '')
+                                             .replace(/{name}/g, row.name || '')
+                                             .replace(/{enabled}/g, row.enabled ? 'true' : 'false')
+                                             .replace(/{current_version}/g, row.current_version || '')
+                                             .replace(/{version}/g, row.version || '');
+
+                            // 调试：记录占位符替换
+                            if (str.includes('{name}') && window.location.href.includes('addons')) {
+                                console.log('[占位符替换] 插件名称替换:', {
+                                    original: str,
+                                    result: result,
+                                    rowName: row.name,
+                                    rowId: row.id
+                                });
+                            }
+
+                            return result;
                         };
                         
                         if (action.type === 'link') {

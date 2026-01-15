@@ -12,7 +12,7 @@ return [
      * true: 启用插件功能
      * false: 禁用插件功能
      */
-    'enabled' => true,
+    'enabled' => false,
 
     /**
      * 插件配置项

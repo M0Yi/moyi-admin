@@ -31,7 +31,7 @@ class AddonController extends AbstractController
             return $this->listData($request);
         }
 
-        $addons = $this->addonService->scanAddons();
+        $addons = $this->addonService->getAllAddons();
 
         return $this->renderAdmin('admin.system.addon.index', [
             'addons' => $addons,
@@ -43,7 +43,218 @@ class AddonController extends AbstractController
      */
     public function listData(RequestInterface $request)
     {
-        $addons = $this->addonService->scanAddons();
+        // 支持前端传入 filters（SearchFormRenderer 会以 filters[...] 提交）
+        $allParams = $this->request->all();
+
+        // 处理filters参数 - 可能是JSON字符串（URL编码）
+        $filtersParam = $this->request->input('filters');
+        $filters = [];
+
+        if (!empty($filtersParam)) {
+            // 如果是JSON字符串，解析它
+            if (is_string($filtersParam)) {
+                $decoded = json_decode($filtersParam, true);
+                if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
+                    $filters = $decoded;
+                    logger()->info('[插件列表] 成功解析JSON格式的filters参数', [
+                        'raw_filters' => $filtersParam,
+                        'parsed_filters' => $filters
+                    ]);
+                } else {
+                    logger()->warning('[插件列表] filters参数不是有效的JSON字符串', [
+                        'raw_filters' => $filtersParam,
+                        'json_error' => json_last_error_msg()
+                    ]);
+                }
+            } elseif (is_array($filtersParam)) {
+                $filters = $filtersParam;
+            }
+        }
+
+        logger()->info('[插件列表] ===== 请求开始 =====', [
+            'all_params' => $allParams,
+            'raw_filters_param' => $this->request->input('filters'),
+            'parsed_filters' => $filters,
+            'source_filter' => $filters['source'] ?? 'NOT_SET',
+            'has_source_filter' => isset($filters['source']),
+            'source_filter_empty' => empty($filters['source']),
+            'filters_type' => gettype($filters),
+            'filters_count' => count($filters),
+            'request_method' => $request->getMethod(),
+            'request_uri' => $request->getUri()->getPath(),
+            'query_string' => $request->getUri()->getQuery()
+        ]);
+
+        // 根据来源筛选优化数据获取
+        if (!empty($filters['source']) && $filters['source'] === 'store') {
+            logger()->info('[插件列表] 检测到商店来源筛选，获取商店插件列表');
+            $addons = $this->addonService->getStoreAddons(true); // true 表示强制刷新，不使用缓存
+            logger()->info('[插件列表] 商店插件获取完成', [
+                'count' => count($addons),
+                'source_value' => 'store',
+                'early_return' => true
+            ]);
+        } elseif (!empty($filters['source']) && $filters['source'] === 'local') {
+            logger()->info('[插件列表] 检测到本地来源筛选，只获取本地插件列表');
+            $localAddons = $this->addonService->scanAddons();
+            // 为本地插件添加source字段
+            foreach ($localAddons as &$addon) {
+                $addon['source'] = 'local';
+            }
+            $addons = $localAddons;
+            logger()->info('[插件列表] 本地插件获取完成', [
+                'count' => count($addons),
+                'source_value' => 'local',
+                'early_return' => true
+            ]);
+        } else {
+            logger()->info('[插件列表] 无来源筛选或全部来源，获取所有插件列表', [
+                'source_value' => $filters['source'] ?? 'NOT_SET',
+                'source_condition_check' => !empty($filters['source']) && in_array($filters['source'], ['store', 'local'])
+            ]);
+            $addons = $this->addonService->getAllAddons();
+            logger()->info('[插件列表] 所有插件获取完成', [
+                'count' => count($addons),
+                'early_return' => false
+            ]);
+        }
+
+        // 简单过滤实现：name 模糊、version 模糊、enabled 精确、category 精确、source 精确（若存在）
+        $originalCount = count($addons);
+        logger()->info('[插件列表] ===== 开始过滤 =====', [
+            'original_count' => $originalCount,
+            'filters_applied' => $filters,
+            'has_filters' => !empty($filters) && is_array($filters)
+        ]);
+
+        if (!empty($filters) && is_array($filters)) {
+            $filterStats = [
+                'name_filter' => !empty($filters['name']),
+                'version_filter' => !empty($filters['version']),
+                'enabled_filter' => isset($filters['enabled']) && $filters['enabled'] !== '',
+                'category_filter' => !empty($filters['category']),
+                'source_filter' => !empty($filters['source'])
+            ];
+
+            logger()->info('[插件列表] 过滤条件分析', array_merge($filterStats, [
+                'source_filter_value' => $filters['source'] ?? 'NOT_SET',
+                'source_filter_condition' => !empty($filters['source'])
+            ]));
+
+            $addons = array_filter($addons, function ($addon) use ($filters, &$filterStats) {
+                $addonId = $addon['id'] ?? 'unknown';
+                $addonName = $addon['name'] ?? 'unknown';
+                $addonSource = $addon['source'] ?? 'local';
+
+                // 名称搜索（模糊）
+                if (!empty($filters['name'])) {
+                    $needle = mb_strtolower(trim($filters['name']));
+                    $hay = mb_strtolower($addon['name'] ?? '');
+                    if (strpos($hay, $needle) === false) {
+                        logger()->debug("[插件列表] 名称过滤 - 排除插件: {$addonName} (ID: {$addonId})");
+                        return false;
+                    }
+                }
+
+                // 版本搜索（模糊）
+                if (!empty($filters['version'])) {
+                    $needle = mb_strtolower(trim($filters['version']));
+                    $hay = mb_strtolower($addon['version'] ?? '');
+                    if (strpos($hay, $needle) === false) {
+                        logger()->debug("[插件列表] 版本过滤 - 排除插件: {$addonName} (ID: {$addonId})");
+                        return false;
+                    }
+                }
+
+                // enabled 精确匹配（'1' 或 '0'）
+                if (isset($filters['enabled']) && $filters['enabled'] !== '') {
+                    $val = $filters['enabled'];
+                    $addonEnabled = isset($addon['enabled']) ? ($addon['enabled'] ? '1' : '0') : '0';
+                    if ((string)$addonEnabled !== (string)$val) {
+                        logger()->debug("[插件列表] 启用状态过滤 - 排除插件: {$addonName} (ID: {$addonId}), 期望: {$val}, 实际: {$addonEnabled}");
+                        return false;
+                    }
+                }
+
+                // category 精确匹配（如果 addon 中存在 category 字段）
+                if (!empty($filters['category']) && isset($addon['category'])) {
+                    if ((string)$addon['category'] !== (string)$filters['category']) {
+                        logger()->debug("[插件列表] 分类过滤 - 排除插件: {$addonName} (ID: {$addonId}), 期望: {$filters['category']}, 实际: {$addon['category']}");
+                        return false;
+                    }
+                }
+
+                // source 过滤（local=本地插件，store=商店插件）
+                if (!empty($filters['source'])) {
+                    logger()->info("[插件列表] Source过滤检查", [
+                        'plugin_id' => $addonId,
+                        'plugin_name' => $addonName,
+                        'plugin_source' => $addonSource,
+                        'filter_source' => $filters['source'],
+                        'source_match' => (string)$addonSource === (string)$filters['source']
+                    ]);
+
+                    if ((string)$addonSource !== (string)$filters['source']) {
+                        logger()->info("[插件列表] Source过滤 - 排除插件: {$addonName} (ID: {$addonId}), 期望来源: {$filters['source']}, 插件来源: {$addonSource}");
+                        $filterStats['source_excluded_count'] = ($filterStats['source_excluded_count'] ?? 0) + 1;
+                        return false;
+                    } else {
+                        logger()->info("[插件列表] Source过滤 - 保留插件: {$addonName} (ID: {$addonId}), 来源匹配: {$addonSource}");
+                        $filterStats['source_included_count'] = ($filterStats['source_included_count'] ?? 0) + 1;
+                    }
+                }
+
+                return true;
+            });
+
+            // array_filter preserves keys -> reindex
+            $addons = array_values($addons);
+
+            logger()->info('[插件列表] ===== 过滤完成 =====', [
+                'original_count' => $originalCount,
+                'filtered_count' => count($addons),
+                'removed_count' => $originalCount - count($addons),
+                'filter_stats' => $filterStats
+            ]);
+        } else {
+            logger()->info('[插件列表] 无过滤条件，跳过过滤');
+        }
+
+        // 分析返回数据的source分布和安装状态
+        $sourceStats = [];
+        $installStats = ['installed' => 0, 'not_installed' => 0, 'can_upgrade' => 0];
+        foreach ($addons as $addon) {
+            $source = $addon['source'] ?? 'local';
+            $sourceStats[$source] = ($sourceStats[$source] ?? 0) + 1;
+
+            if (!empty($addon['installed'])) {
+                $installStats['installed']++;
+                if (!empty($addon['can_upgrade'])) {
+                    $installStats['can_upgrade']++;
+                }
+            } else {
+                $installStats['not_installed']++;
+            }
+        }
+
+        logger()->info('[插件列表] ===== 返回数据统计 =====', [
+            'final_count' => count($addons),
+            'source_distribution' => $sourceStats,
+            'install_stats' => $installStats,
+            'sample_addons' => count($addons) > 0 ? array_map(function($addon) {
+                return [
+                    'id' => $addon['id'] ?? 'unknown',
+                    'name' => $addon['name'] ?? 'unknown',
+                    'source' => $addon['source'] ?? 'local',
+                    'installed' => $addon['installed'] ?? false,
+                    'can_upgrade' => $addon['can_upgrade'] ?? false,
+                    'current_version' => $addon['current_version'] ?? '',
+                    'version' => $addon['version'] ?? '',
+                    'has_install_status' => isset($addon['installed']),
+                    'has_upgrade_status' => isset($addon['can_upgrade'])
+                ];
+            }, array_slice($addons, 0, 3)) : []
+        ]);
 
         // 统一返回格式：插件列表数据
         return $this->success([
@@ -442,6 +653,315 @@ class AddonController extends AbstractController
     }
 
     /**
+     * 从应用商城安装插件
+     */
+    public function installStoreAddon($addonId)
+    {
+        logger()->info("[应用商城安装] 开始从应用商城安装插件", ['addonId' => $addonId]);
+
+        try {
+            // 首先获取商店插件信息
+            $storeAddons = $this->addonService->getStoreAddons(true); // 强制刷新
+            $addonInfo = null;
+
+            foreach ($storeAddons as $addon) {
+                if ($addon['id'] === $addonId) {
+                    $addonInfo = $addon;
+                    break;
+                }
+            }
+
+            if (!$addonInfo) {
+                logger()->error("[应用商城安装] 插件不存在", ['addonId' => $addonId]);
+                return $this->error('插件在应用商城中不存在');
+            }
+
+            // 检查插件是否已经安装
+            $localAddon = $this->addonService->getAddonInfoById($addonId);
+            if ($localAddon && $localAddon['installed']) {
+                logger()->warning("[应用商城安装] 插件已经安装", ['addonId' => $addonId]);
+                return $this->error('插件已经安装');
+            }
+
+            // 从商店下载插件
+            $downloadUrl = $addonInfo['download_url'] ?? '';
+            if (!$downloadUrl) {
+                logger()->error("[应用商城安装] 插件下载地址不存在", ['addonId' => $addonId]);
+                return $this->error('插件下载地址不存在');
+            }
+
+            logger()->info("[应用商城安装] 开始下载插件", [
+                'addonId' => $addonId,
+                'downloadUrl' => $downloadUrl
+            ]);
+
+            // 下载插件文件
+            $client = $this->addonService->getClientFactory()->create();
+            $response = $client->get($downloadUrl, [
+                'timeout' => 300, // 5分钟超时
+            ]);
+
+            if ($response->getStatusCode() !== 200) {
+                logger()->error("[应用商城安装] 下载失败", [
+                    'addonId' => $addonId,
+                    'statusCode' => $response->getStatusCode()
+                ]);
+                return $this->error('插件下载失败');
+            }
+
+            // 创建临时文件
+            $tempDir = BASE_PATH . '/runtime/temp/store_install_' . uniqid();
+            if (!mkdir($tempDir, 0755, true)) {
+                logger()->error("[应用商城安装] 无法创建临时目录", ['tempDir' => $tempDir]);
+                return $this->error('无法创建临时目录');
+            }
+
+            $zipFile = $tempDir . '/addon.zip';
+            file_put_contents($zipFile, $response->getBody()->getContents());
+
+            logger()->info("[应用商城安装] 插件下载完成，开始验证", [
+                'addonId' => $addonId,
+                'zipFile' => $zipFile,
+                'fileSize' => filesize($zipFile)
+            ]);
+
+            // 验证并解压插件
+            $addonInfo = $this->extractAndValidateAddon($zipFile, $tempDir);
+
+            if (!$addonInfo) {
+                $this->cleanupTempFiles($tempDir);
+                logger()->error("[应用商城安装] 插件验证失败", ['addonId' => $addonId]);
+                return $this->error('插件文件格式不正确');
+            }
+
+            // 安装插件
+            $pluginDir = $addonInfo['plugin_dir'];
+            $actualPluginName = basename($pluginDir);
+            $addonDir = BASE_PATH . '/addons/' . $actualPluginName;
+
+            // 检查插件目录是否已存在
+            if (is_dir($addonDir)) {
+                $this->cleanupTempFiles($tempDir);
+                logger()->error("[应用商城安装] 插件目录已存在", [
+                    'addonId' => $addonId,
+                    'addonDir' => $addonDir
+                ]);
+                return $this->error('插件目录已存在');
+            }
+
+            // 移动插件到addons目录
+            if (!$this->moveDirectory($pluginDir, $addonDir)) {
+                $this->cleanupTempFiles($tempDir);
+                logger()->error("[应用商城安装] 移动插件失败", [
+                    'addonId' => $addonId,
+                    'source' => $pluginDir,
+                    'target' => $addonDir
+                ]);
+                return $this->error('无法安装插件到addons目录');
+            }
+
+            // 清理临时文件
+            $this->cleanupTempFiles($tempDir);
+
+            // 执行插件安装流程
+            $installResult = $this->addonService->installAddon($actualPluginName);
+            if (!$installResult) {
+                $this->cleanupTempFiles($addonDir); // 清理已安装的插件目录
+                logger()->error("[应用商城安装] 插件安装流程失败", ['addonId' => $addonId]);
+                return $this->error('插件安装失败');
+            }
+
+            logger()->info("[应用商城安装] 插件安装成功", [
+                'addonId' => $addonId,
+                'addonName' => $addonInfo['addon_info']['name'] ?? 'unknown'
+            ]);
+
+            return $this->success([
+                'addon_id' => $actualPluginName,
+                'addon_name' => $addonInfo['addon_info']['name'] ?? 'unknown',
+                'version' => $addonInfo['addon_info']['version'] ?? 'unknown'
+            ], '插件从应用商城安装成功');
+
+        } catch (\Throwable $e) {
+            logger()->error("[应用商城安装] 安装异常", [
+                'addonId' => $addonId,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            return $this->error('插件安装失败：' . $e->getMessage());
+        }
+    }
+
+    /**
+     * 从应用商城升级插件
+     */
+    public function upgradeStoreAddon($addonId)
+    {
+        logger()->info("[应用商城升级] 开始从应用商城升级插件", ['addonId' => $addonId]);
+
+        try {
+            // 首先获取商店插件信息
+            $storeAddons = $this->addonService->getStoreAddons(true); // 强制刷新
+            $addonInfo = null;
+
+            foreach ($storeAddons as $addon) {
+                if ($addon['id'] === $addonId) {
+                    $addonInfo = $addon;
+                    break;
+                }
+            }
+
+            if (!$addonInfo) {
+                logger()->error("[应用商城升级] 插件不存在", ['addonId' => $addonId]);
+                return $this->error('插件在应用商城中不存在');
+            }
+
+            // 检查插件是否已经安装
+            $localAddon = $this->addonService->getAddonInfoById($addonId);
+            if (!$localAddon || !$localAddon['installed']) {
+                logger()->warning("[应用商城升级] 插件未安装", ['addonId' => $addonId]);
+                return $this->error('插件未安装，无法升级');
+            }
+
+            // 检查是否需要升级
+            if (!$addonInfo['can_upgrade']) {
+                logger()->warning("[应用商城升级] 插件已是最新版本", [
+                    'addonId' => $addonId,
+                    'currentVersion' => $addonInfo['current_version'],
+                    'latestVersion' => $addonInfo['version']
+                ]);
+                return $this->error('插件已是最新版本，无需升级');
+            }
+
+            // 从商店下载插件
+            $downloadUrl = $addonInfo['download_url'] ?? '';
+            if (!$downloadUrl) {
+                logger()->error("[应用商城升级] 插件下载地址不存在", ['addonId' => $addonId]);
+                return $this->error('插件下载地址不存在');
+            }
+
+            logger()->info("[应用商城升级] 开始下载插件", [
+                'addonId' => $addonId,
+                'currentVersion' => $addonInfo['current_version'],
+                'latestVersion' => $addonInfo['version']
+            ]);
+
+            // 下载插件文件
+            $client = $this->addonService->getClientFactory()->create();
+            $response = $client->get($downloadUrl, [
+                'timeout' => 300, // 5分钟超时
+            ]);
+
+            if ($response->getStatusCode() !== 200) {
+                logger()->error("[应用商城升级] 下载失败", [
+                    'addonId' => $addonId,
+                    'statusCode' => $response->getStatusCode()
+                ]);
+                return $this->error('插件下载失败');
+            }
+
+            // 创建临时文件
+            $tempDir = BASE_PATH . '/runtime/temp/upgrade_store_' . uniqid();
+            if (!mkdir($tempDir, 0755, true)) {
+                logger()->error("[应用商城升级] 无法创建临时目录", ['tempDir' => $tempDir]);
+                return $this->error('无法创建临时目录');
+            }
+
+            $zipFile = $tempDir . '/addon.zip';
+            file_put_contents($zipFile, $response->getBody()->getContents());
+
+            logger()->info("[应用商城升级] 插件下载完成，开始验证", [
+                'addonId' => $addonId,
+                'zipFile' => $zipFile,
+                'fileSize' => filesize($zipFile)
+            ]);
+
+            // 验证并解压插件
+            $addonInfo = $this->extractAndValidateAddon($zipFile, $tempDir);
+
+            if (!$addonInfo) {
+                $this->cleanupTempFiles($tempDir);
+                logger()->error("[应用商城升级] 插件验证失败", ['addonId' => $addonId]);
+                return $this->error('插件文件格式不正确');
+            }
+
+            // 升级插件（覆盖安装）
+            $pluginDir = $addonInfo['plugin_dir'];
+            $actualPluginName = basename($pluginDir);
+            $addonDir = BASE_PATH . '/addons/' . $actualPluginName;
+
+            // 检查插件目录是否存在（应该存在，因为是升级）
+            if (!is_dir($addonDir)) {
+                $this->cleanupTempFiles($tempDir);
+                logger()->error("[应用商城升级] 插件目录不存在，无法升级", [
+                    'addonId' => $addonId,
+                    'addonDir' => $addonDir
+                ]);
+                return $this->error('插件目录不存在，无法升级');
+            }
+
+            // 备份当前版本（可选）
+            $backupDir = $addonDir . '_backup_' . date('Y-m-d_H-i-s');
+            if (!$this->moveDirectory($addonDir, $backupDir)) {
+                logger()->warning("[应用商城升级] 备份当前版本失败，继续升级", [
+                    'addonId' => $addonId,
+                    'backupDir' => $backupDir
+                ]);
+            }
+
+            // 移动新版本到插件目录
+            if (!$this->moveDirectory($pluginDir, $addonDir)) {
+                // 如果移动失败，尝试恢复备份
+                if (is_dir($backupDir)) {
+                    $this->moveDirectory($backupDir, $addonDir);
+                }
+                $this->cleanupTempFiles($tempDir);
+                logger()->error("[应用商城升级] 升级失败", [
+                    'addonId' => $addonId,
+                    'source' => $pluginDir,
+                    'target' => $addonDir
+                ]);
+                return $this->error('插件升级失败');
+            }
+
+            // 清理临时文件
+            $this->cleanupTempFiles($tempDir);
+
+            // 如果有备份，删除它
+            if (is_dir($backupDir)) {
+                $this->deleteDirectory($backupDir);
+            }
+
+            // 重新安装/启用插件（如果需要的话）
+            $installResult = $this->addonService->installAddon($actualPluginName);
+            if (!$installResult) {
+                logger()->warning("[应用商城升级] 插件重新安装失败，但升级已完成", ['addonId' => $addonId]);
+            }
+
+            logger()->info("[应用商城升级] 插件升级成功", [
+                'addonId' => $addonId,
+                'fromVersion' => $addonInfo['current_version'] ?? 'unknown',
+                'toVersion' => $addonInfo['version'] ?? 'unknown'
+            ]);
+
+            return $this->success([
+                'addon_id' => $actualPluginName,
+                'addon_name' => $addonInfo['name'] ?? 'unknown',
+                'from_version' => $addonInfo['current_version'] ?? 'unknown',
+                'to_version' => $addonInfo['version'] ?? 'unknown'
+            ], '插件从应用商城升级成功');
+
+        } catch (\Throwable $e) {
+            logger()->error("[应用商城升级] 升级异常", [
+                'addonId' => $addonId,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            return $this->error('插件升级失败：' . $e->getMessage());
+        }
+    }
+
+    /**
      * 安装插件（为已存在的插件执行安装操作）
      */
     public function installAddon($addonId)
@@ -770,7 +1290,10 @@ class AddonController extends AbstractController
      */
     public function refresh()
     {
-        $addons = $this->addonService->scanAddons();
+        // 清除商店插件缓存
+        $this->addonService->clearStoreAddonsCache();
+
+        $addons = $this->addonService->getAllAddons();
 
         return $this->success([
             'addons' => $addons,
@@ -1048,13 +1571,19 @@ class AddonController extends AbstractController
                 return $this->error('无法创建临时目录');
             }
 
-            // 创建zip文件名（使用实际的插件目录名）
-            $zipFileName = $actualAddonName . '_' . date('Y-m-d_H-i-s') . '.zip';
+            // 创建zip文件名（ID + 插件名称 + 时间戳）
+            $addonVersion = $addon['version'] ?? 'unknown';
+            // 生成简单的临时文件名，后端不处理最终下载文件名
+            $zipFileName = 'addon_export_' . $addonId . '_' . date('Ymd_His') . '.zip';
             $zipFilePath = $tempDir . '/' . $zipFileName;
 
             logger()->info("[插件导出] 创建ZIP文件", [
+                'addonId' => $addonId,
+                'actualAddonName' => $actualAddonName,
+                'addonVersion' => $addonVersion,
                 'zipFileName' => $zipFileName,
-                'zipFilePath' => $zipFilePath
+                'zipFilePath' => $zipFilePath,
+                'frontendControlFilename' => true
             ]);
 
             $zip = new \ZipArchive();
@@ -1138,18 +1667,31 @@ class AddonController extends AbstractController
                 // 创建文件流
                 $fileStream = new \Hyperf\HttpMessage\Stream\SwooleFileStream($zipFilePath);
 
+                // 后端不设置下载文件名，由前端控制
+                $contentDisposition = 'attachment';
+
+                logger()->info("[插件导出] 后端响应处理", [
+                    'fileName' => $zipFileName,
+                    'contentDisposition' => $contentDisposition,
+                    'frontendControl' => true
+                ]);
+
                 // 返回文件下载响应
                 $response = $this->response
                     ->withHeader('Content-Type', 'application/zip')
-                    ->withHeader('Content-Disposition', 'attachment; filename="' . $zipFileName . '"')
+                    ->withHeader('Content-Disposition', $contentDisposition)
                     ->withHeader('Content-Length', $finalFileSize)
                     ->withBody($fileStream);
 
             } catch (\Throwable $streamException) {
-                logger()->error("[插件导出] 创建文件流失败", [
-                    'zipFilePath' => $zipFilePath,
-                    'error' => $streamException->getMessage()
-                ]);
+            logger()->error("[插件导出] 创建文件流失败", [
+                'addonId' => $addonId,
+                'actualAddonName' => $actualAddonName,
+                'addonDisplayName' => $addon['name'] ?? $actualAddonName,
+                'zipFilePath' => $zipFilePath,
+                'zipFileName' => $zipFileName,
+                'error' => $streamException->getMessage()
+            ]);
                 $this->cleanupTempFiles($tempDir);
                 return $this->error('文件流创建失败，请重试');
             }
@@ -1176,7 +1718,8 @@ class AddonController extends AbstractController
 
             logger()->info("[插件导出] 插件导出成功", [
                 'addonId' => $addonId,
-                'addonName' => $actualAddonName,
+                'actualAddonName' => $actualAddonName,
+                'addonDisplayName' => $addon['name'] ?? $actualAddonName,
                 'zipFileName' => $zipFileName,
                 'tempDir' => $tempDir
             ]);
@@ -1187,7 +1730,9 @@ class AddonController extends AbstractController
             logger()->error('插件导出失败', [
                 'addonId' => $addonId,
                 'actualAddonName' => $actualAddonName ?? 'unknown',
+                'addonDisplayName' => $addon['name'] ?? $actualAddonName ?? 'unknown',
                 'tempDir' => $tempDir ?? 'not_created',
+                'zipFileName' => $zipFileName ?? 'not_created',
                 'error' => $e->getMessage(),
                 'file' => $e->getFile(),
                 'line' => $e->getLine(),
@@ -1354,6 +1899,552 @@ class AddonController extends AbstractController
                 'data_keys' => array_keys($data)
             ]);
             return $this->error('配置保存失败');
+        }
+    }
+
+    /**
+     * 测试插件商店API连接
+     */
+    public function testStoreApi()
+    {
+        try {
+            logger()->info('[插件商店测试] 开始测试API连接');
+
+            // 获取配置
+            $apiUrl = config('addons_store.api_url');
+            $apiToken = config('addons_store.api_token');
+
+            logger()->info('[插件商店测试] 配置信息', [
+                'apiUrl' => $apiUrl,
+                'hasToken' => !empty($apiToken),
+                'tokenLength' => $apiToken ? strlen($apiToken) : 0
+            ]);
+
+            // 测试基础连接
+            try {
+                $client = $this->addonService->getClientFactory()->create();
+
+                logger()->info('[插件商店测试] 创建HTTP客户端成功');
+
+                $headers = [
+                    'Accept' => 'application/json',
+                    'Content-Type' => 'application/json',
+                ];
+
+                if ($apiToken) {
+                    $headers['Authorization'] = 'Bearer ' . $apiToken;
+                }
+
+                logger()->info('[插件商店测试] 准备发送请求', [
+                    'url' => $apiUrl,
+                    'headers' => array_keys($headers),
+                    'timeout' => 10
+                ]);
+
+                try {
+                    $response = $client->get($apiUrl, [
+                        'headers' => $headers,
+                        'timeout' => 10, // 缩短超时时间以便快速反馈
+                    ]);
+
+                    $statusCode = $response->getStatusCode();
+                    $responseBody = $response->getBody()->getContents();
+
+                    logger()->info('[插件商店测试] 收到HTTP响应', [
+                        'statusCode' => $statusCode,
+                        'responseLength' => strlen($responseBody),
+                        'contentType' => $response->getHeaderLine('content-type')
+                    ]);
+
+                } catch (\GuzzleHttp\Exception\ConnectException $e) {
+                    logger()->error('[插件商店测试] 连接失败', [
+                        'url' => $apiUrl,
+                        'error' => $e->getMessage()
+                    ]);
+                    return $this->error('网络连接失败：无法连接到 ' . $apiUrl . ' - ' . $e->getMessage());
+                } catch (\GuzzleHttp\Exception\RequestException $e) {
+                    $statusCode = $e->getResponse() ? $e->getResponse()->getStatusCode() : 'unknown';
+                    logger()->error('[插件商店测试] HTTP请求失败', [
+                        'url' => $apiUrl,
+                        'statusCode' => $statusCode,
+                        'error' => $e->getMessage()
+                    ]);
+                    return $this->error('HTTP请求失败 (状态码: ' . $statusCode . ')：' . $e->getMessage());
+                } catch (\Throwable $e) {
+                    logger()->error('[插件商店测试] 未知错误', [
+                        'url' => $apiUrl,
+                        'error' => $e->getMessage(),
+                        'errorClass' => get_class($e)
+                    ]);
+                    return $this->error('测试过程中发生错误：' . $e->getMessage());
+                }
+
+                logger()->info('[插件商店测试] 收到响应', [
+                    'statusCode' => $statusCode,
+                    'responseLength' => strlen($responseBody),
+                    'responsePreview' => substr($responseBody, 0, 200)
+                ]);
+
+                // 解析JSON响应
+                $data = json_decode($responseBody, true);
+                $jsonError = json_last_error();
+
+                logger()->info('[插件商店测试] JSON解析结果', [
+                    'isValidJson' => $jsonError === JSON_ERROR_NONE,
+                    'jsonError' => $jsonError,
+                    'dataKeys' => is_array($data) ? array_keys($data) : null,
+                    'dataCode' => is_array($data) && isset($data['code']) ? $data['code'] : null
+                ]);
+
+                if ($jsonError !== JSON_ERROR_NONE) {
+                    return $this->error('API返回的不是有效JSON: ' . json_last_error_msg());
+                }
+
+            } catch (\Throwable $httpError) {
+                logger()->error('[插件商店测试] HTTP请求失败', [
+                    'error' => $httpError->getMessage(),
+                    'errorClass' => get_class($httpError),
+                    'file' => $httpError->getFile(),
+                    'line' => $httpError->getLine()
+                ]);
+
+                return $this->error('HTTP请求失败: ' . $httpError->getMessage());
+            }
+
+            // 如果HTTP请求成功，继续获取插件数据
+            $addons = $this->addonService->getStoreAddons(true);
+
+            logger()->info('[插件商店测试] API测试完成', [
+                'addons_count' => count($addons),
+                'has_addons' => !empty($addons)
+            ]);
+
+            return $this->success([
+                'addons_count' => count($addons),
+                'addons' => $addons,
+                'api_config' => [
+                    'api_url' => $apiUrl,
+                    'has_token' => !empty($apiToken)
+                ],
+                'http_test' => [
+                    'status_code' => $statusCode,
+                    'response_length' => strlen($responseBody),
+                    'is_valid_json' => $jsonError === JSON_ERROR_NONE,
+                    'api_code' => is_array($data) && isset($data['code']) ? $data['code'] : null
+                ]
+            ], 'API测试完成');
+
+        } catch (\Throwable $e) {
+            logger()->error('[插件商店测试] API测试失败', [
+                'error' => $e->getMessage(),
+                'errorClass' => get_class($e),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+                'trace' => substr($e->getTraceAsString(), 0, 1000)
+            ]);
+
+            return $this->error('API测试失败：' . $e->getMessage());
+        }
+    }
+
+    /**
+     * 检查插件安装状态
+     */
+    public function checkAddonStatus()
+    {
+        try {
+            $addonsBaseDir = BASE_PATH . '/addons';
+            $addonsStoreDir = $addonsBaseDir . '/AddonsStore';
+
+            $status = [
+                'addons_base_dir' => [
+                    'path' => $addonsBaseDir,
+                    'exists' => is_dir($addonsBaseDir),
+                    'writable' => is_writable($addonsBaseDir)
+                ],
+                'addons_store' => [
+                    'path' => $addonsStoreDir,
+                    'exists' => is_dir($addonsStoreDir),
+                    'info_file' => $addonsStoreDir . '/info.php',
+                    'info_exists' => file_exists($addonsStoreDir . '/info.php'),
+                    'routes_file' => $addonsStoreDir . '/routes.php',
+                    'routes_exists' => file_exists($addonsStoreDir . '/routes.php')
+                ]
+            ];
+
+            // 尝试读取插件信息
+            if ($status['addons_store']['info_exists']) {
+                try {
+                    $info = include $status['addons_store']['info_file'];
+                    $status['addons_store']['info'] = $info;
+                } catch (\Throwable $e) {
+                    $status['addons_store']['info_error'] = $e->getMessage();
+                }
+            }
+
+            // 检查插件是否已安装（通过扫描addons目录）
+            $localAddons = $this->addonService->scanAddons();
+            $addonsStoreInstalled = false;
+            $addonsStoreInfo = null;
+
+            foreach ($localAddons as $addon) {
+                if ($addon['id'] === 'addons_store') {
+                    $addonsStoreInstalled = true;
+                    $addonsStoreInfo = $addon;
+                    break;
+                }
+            }
+
+            $status['addons_store']['installed'] = $addonsStoreInstalled;
+            $status['addons_store']['installed_info'] = $addonsStoreInfo;
+
+            // API连接测试
+            $apiUrl = config('addons_store.api_url');
+            $status['api_config'] = [
+                'url' => $apiUrl,
+                'configured' => !empty($apiUrl)
+            ];
+
+            // 测试本地API连接
+            if (!empty($apiUrl)) {
+                try {
+                    $client = $this->addonService->getClientFactory()->create();
+                    $response = $client->get($apiUrl, [
+                        'timeout' => 5,
+                        'headers' => [
+                            'Accept' => 'application/json',
+                        ]
+                    ]);
+
+                    $status['api_connection'] = [
+                        'status_code' => $response->getStatusCode(),
+                        'success' => $response->getStatusCode() === 200,
+                        'response_length' => strlen($response->getBody()->getContents())
+                    ];
+                } catch (\Throwable $e) {
+                    $status['api_connection'] = [
+                        'error' => $e->getMessage(),
+                        'error_class' => get_class($e)
+                    ];
+                }
+            }
+
+            return $this->success($status, '插件状态检查完成');
+
+        } catch (\Throwable $e) {
+            logger()->error('[插件状态检查] 失败', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return $this->error('状态检查失败：' . $e->getMessage());
+        }
+    }
+
+    /**
+     * 测试操作按钮条件渲染（用于调试）
+     */
+    public function testActionConditions()
+    {
+        try {
+            $addons = $this->addonService->getAllAddons();
+
+            $testResults = [];
+
+            foreach ($addons as $addon) {
+                $addonId = $addon['id'] ?? 'unknown';
+                $addonName = $addon['name'] ?? 'unknown';
+                $source = $addon['source'] ?? 'unknown';
+                $installed = $addon['installed'] ?? false;
+                $canUpgrade = $addon['can_upgrade'] ?? false;
+                $enabled = $addon['enabled'] ?? false;
+
+                // 测试各种条件
+                $conditions = [
+                    'install_store' => $source === 'store' && !$installed,
+                    'upgrade_store' => $source === 'store' && $installed && $canUpgrade,
+                    'enable_local' => $source === 'local' && !$enabled,
+                    'disable_local' => $source === 'local' && $enabled,
+                    'configure_local' => $source === 'local' && $enabled,
+                    'export_local' => $source === 'local',
+                    'delete_local' => $source === 'local'
+                ];
+
+                $testResults[] = [
+                    'id' => $addonId,
+                    'name' => $addonName,
+                    'source' => $source,
+                    'installed' => $installed,
+                    'can_upgrade' => $canUpgrade,
+                    'enabled' => $enabled,
+                    'conditions' => $conditions,
+                    'visible_buttons' => array_keys(array_filter($conditions, fn($v) => $v))
+                ];
+            }
+
+            return $this->success([
+                'total_addons' => count($addons),
+                'test_results' => $testResults,
+                'summary' => [
+                    'store_addons' => count(array_filter($testResults, fn($r) => $r['source'] === 'store')),
+                    'local_addons' => count(array_filter($testResults, fn($r) => $r['source'] === 'local')),
+                    'installed_addons' => count(array_filter($testResults, fn($r) => $r['installed'])),
+                    'can_upgrade_addons' => count(array_filter($testResults, fn($r) => $r['can_upgrade']))
+                ]
+            ], '操作按钮条件测试完成');
+
+        } catch (\Throwable $e) {
+            logger()->error('[测试] 条件测试失败', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            return $this->error('测试失败：' . $e->getMessage());
+        }
+    }
+
+    /**
+     * 测试插件交集逻辑（用于调试）
+     */
+    public function testAddonIntersection()
+    {
+        try {
+            logger()->info('[测试] 开始测试插件交集逻辑');
+
+            // 获取本地插件
+            $localAddons = $this->addonService->scanAddons();
+            logger()->info('[测试] 本地插件列表', [
+                'count' => count($localAddons),
+                'addons' => array_map(function($addon) {
+                    return [
+                        'id' => $addon['id'] ?? 'unknown',
+                        'name' => $addon['name'] ?? 'unknown',
+                        'version' => $addon['version'] ?? 'unknown'
+                    ];
+                }, $localAddons)
+            ]);
+
+            // 获取商店插件
+            $storeAddons = $this->addonService->getStoreAddons(true);
+            logger()->info('[测试] 商店插件列表', [
+                'count' => count($storeAddons),
+                'addons' => array_map(function($addon) {
+                    return [
+                        'id' => $addon['id'] ?? 'unknown',
+                        'name' => $addon['name'] ?? 'unknown',
+                        'installed' => $addon['installed'] ?? false,
+                        'can_upgrade' => $addon['can_upgrade'] ?? false,
+                        'current_version' => $addon['current_version'] ?? '',
+                        'version' => $addon['version'] ?? '',
+                        'all_keys' => array_keys($addon)
+                    ];
+                }, $storeAddons)
+            ]);
+
+            // 获取所有插件（交集）
+            $allAddons = $this->addonService->getAllAddons();
+            logger()->info('[测试] 交集后的插件列表', [
+                'count' => count($allAddons),
+                'addons' => array_map(function($addon) {
+                    return [
+                        'id' => $addon['id'] ?? 'unknown',
+                        'name' => $addon['name'] ?? 'unknown',
+                        'source' => $addon['source'] ?? 'unknown',
+                        'installed' => $addon['installed'] ?? false,
+                        'can_upgrade' => $addon['can_upgrade'] ?? false,
+                        'current_version' => $addon['current_version'] ?? '',
+                        'version' => $addon['version'] ?? '',
+                        'has_installed_field' => isset($addon['installed']),
+                        'has_upgrade_field' => isset($addon['can_upgrade']),
+                        'all_keys' => array_keys($addon)
+                    ];
+                }, $allAddons)
+            ]);
+
+            // 分析交集结果
+            $localIds = array_column($localAddons, 'id');
+            $storeIds = array_column($storeAddons, 'id');
+            $allIds = array_column($allAddons, 'id');
+
+            $intersection = array_intersect($localIds, $storeIds);
+            $localOnly = array_diff($localIds, $storeIds);
+            $storeOnly = array_diff($storeIds, $localIds);
+
+            logger()->info('[测试] 交集分析', [
+                'local_only_count' => count($localOnly),
+                'store_only_count' => count($storeOnly),
+                'intersection_count' => count($intersection),
+                'total_unique_count' => count($allIds),
+                'local_only_ids' => array_values($localOnly),
+                'store_only_ids' => array_values($storeOnly),
+                'intersection_ids' => array_values($intersection)
+            ]);
+
+            return $this->success([
+                'local_count' => count($localAddons),
+                'store_count' => count($storeAddons),
+                'total_unique_count' => count($allAddons),
+                'intersection_count' => count($intersection),
+                'local_only_count' => count($localOnly),
+                'store_only_count' => count($storeOnly),
+                'sample_intersection' => count($intersection) > 0 ? array_map(function($addonId) use ($allAddons) {
+                    foreach ($allAddons as $addon) {
+                        if (($addon['id'] ?? '') === $addonId) {
+                            return [
+                                'id' => $addonId,
+                                'name' => $addon['name'] ?? 'unknown',
+                                'source' => $addon['source'] ?? 'unknown',
+                                'installed' => $addon['installed'] ?? false,
+                                'can_upgrade' => $addon['can_upgrade'] ?? false
+                            ];
+                        }
+                    }
+                    return null;
+                }, array_slice(array_values($intersection), 0, 3)) : [],
+                'data_structure_check' => [
+                    'first_addon_keys' => count($allAddons) > 0 ? array_keys($allAddons[0]) : [],
+                    'has_install_status' => count($allAddons) > 0 ? isset($allAddons[0]['installed']) : false,
+                    'has_upgrade_status' => count($allAddons) > 0 ? isset($allAddons[0]['can_upgrade']) : false
+                ]
+            ], '插件交集测试完成');
+
+        } catch (\Throwable $e) {
+            logger()->error('[测试] 交集测试失败', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            return $this->error('测试失败：' . $e->getMessage());
+        }
+    }
+
+    /**
+     * 测试filters参数解析（用于调试）
+     */
+    public function testFiltersParsing()
+    {
+        try {
+            $allParams = $this->request->all();
+            $rawFiltersParam = $this->request->input('filters');
+            $parsedFilters = [];
+
+            // 模拟listData中的解析逻辑
+            if (!empty($rawFiltersParam)) {
+                if (is_string($rawFiltersParam)) {
+                    $decoded = json_decode($rawFiltersParam, true);
+                    if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
+                        $parsedFilters = $decoded;
+                    }
+                } elseif (is_array($rawFiltersParam)) {
+                    $parsedFilters = $rawFiltersParam;
+                }
+            }
+
+            $result = [
+                'request_params' => $allParams,
+                'raw_filters_param' => $rawFiltersParam,
+                'raw_filters_type' => gettype($rawFiltersParam),
+                'parsed_filters' => $parsedFilters,
+                'parsed_filters_type' => gettype($parsedFilters),
+                'json_decode_error' => json_last_error_msg(),
+                'source_filter' => $parsedFilters['source'] ?? 'NOT_SET',
+                'query_string' => $this->request->getUri()->getQuery(),
+                'decoded_query' => urldecode($this->request->getUri()->getQuery())
+            ];
+
+            logger()->info('[测试] filters参数解析测试', $result);
+
+            return $this->success($result, 'filters参数解析测试完成');
+
+        } catch (\Throwable $e) {
+            logger()->error('[测试] 解析测试失败', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            return $this->error('测试失败：' . $e->getMessage());
+        }
+    }
+
+    /**
+     * 手动触发商店插件获取（用于调试）
+     */
+    public function debugStoreList()
+    {
+        try {
+            logger()->info('[调试] 手动触发商店插件获取');
+
+            // 模拟前端发送的filters参数
+            $filters = ['source' => 'store'];
+
+            // 复制listData的逻辑
+            if (!empty($filters['source']) && $filters['source'] === 'store') {
+                logger()->info('[调试] 获取商店插件列表');
+                $addons = $this->addonService->getStoreAddons(true);
+                logger()->info('[调试] 商店插件数量', ['count' => count($addons)]);
+
+                // 显示前3个插件的详细信息
+                if (count($addons) > 0) {
+                    logger()->info('[调试] 前3个插件详情', [
+                        'addon1' => count($addons) > 0 ? [
+                            'id' => $addons[0]['id'],
+                            'name' => $addons[0]['name'],
+                            'version' => $addons[0]['version'],
+                            'download_url' => $addons[0]['download_url'] ?? 'N/A'
+                        ] : null,
+                        'addon2' => count($addons) > 1 ? [
+                            'id' => $addons[1]['id'],
+                            'name' => $addons[1]['name'],
+                            'version' => $addons[1]['version'],
+                            'download_url' => $addons[1]['download_url'] ?? 'N/A'
+                        ] : null,
+                        'addon3' => count($addons) > 2 ? [
+                            'id' => $addons[2]['id'],
+                            'name' => $addons[2]['name'],
+                            'version' => $addons[2]['version'],
+                            'download_url' => $addons[2]['download_url'] ?? 'N/A'
+                        ] : null
+                    ]);
+                }
+            } else {
+                logger()->info('[调试] 获取所有插件列表');
+                $addons = $this->addonService->getAllAddons();
+                logger()->info('[调试] 所有插件数量', ['count' => count($addons)]);
+            }
+
+            // 过滤逻辑
+            if (!empty($filters) && is_array($filters)) {
+                $originalCount = count($addons);
+                $addons = array_filter($addons, function ($addon) use ($filters) {
+                    if (!empty($filters['source'])) {
+                        $addonSource = $addon['source'] ?? 'local';
+                        if ((string)$addonSource !== (string)$filters['source']) {
+                            return false;
+                        }
+                    }
+                    return true;
+                });
+                $addons = array_values($addons);
+                logger()->info('[调试] 过滤后插件数量', [
+                    'original' => $originalCount,
+                    'filtered' => count($addons)
+                ]);
+            }
+
+            return $this->success([
+                'data' => $addons,
+                'total' => count($addons),
+                'page' => 1,
+                'page_size' => count($addons),
+                'last_page' => 1,
+                'filters' => $filters,
+                'data_structure' => count($addons) > 0 ? array_keys($addons[0]) : []
+            ], '调试完成');
+
+        } catch (\Throwable $e) {
+            logger()->error('[调试] 调试失败', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return $this->error('调试失败：' . $e->getMessage());
         }
     }
 

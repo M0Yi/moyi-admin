@@ -127,6 +127,16 @@ class ErrorStatisticController extends BaseModelCrudController
         $searchConfig = [
             'search_fields' => $searchFields,
             'fields' => $fields,
+            'status_filter' => [
+                'enabled' => true,
+                'title' => '状态筛选',
+                'show_all' => true,
+                'options' => [
+                    ['value' => '0', 'label' => '未处理', 'color' => 'danger'],
+                    ['value' => '1', 'label' => '处理中', 'color' => 'warning'],
+                    ['value' => '2', 'label' => '已解决', 'color' => 'success'],
+                ],
+            ],
         ];
 
         return $this->renderAdmin('admin.system.error-statistic.index', [

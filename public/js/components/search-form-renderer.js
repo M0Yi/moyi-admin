@@ -12,13 +12,14 @@
             this.panelId = options.panelId || 'searchPanel';
             this.tableId = options.tableId || 'dataTable';
             this.model = options.model || '';
-            
+
             this.searchFields = this.config.search_fields || [];
             this.fieldsConfig = this.config.search_fields_config || this.config.fields || [];
-            
+            this.statusFilterConfig = this.config.status_filter || {};
+
             this.form = null;
             this.panel = null;
-            
+
             this.init();
         }
 
@@ -57,6 +58,9 @@
             
             // 绑定表单提交事件
             this.attachFormSubmit();
+
+            // 渲染状态筛选卡项
+            this.renderStatusFilterCards();
         }
 
         buildFormHtml() {
@@ -590,6 +594,169 @@
                 window['loadData_' + this.tableId]();
             }
         }
+
+        renderStatusFilterCards() {
+            // 检查是否启用了状态筛选
+            if (!this.statusFilterConfig.enabled) {
+                return;
+            }
+
+            const cardsContainer = document.getElementById(`statusFilterCards_${this.tableId}`);
+            if (!cardsContainer) {
+                console.warn('[SearchFormRenderer] 未找到状态筛选卡项容器:', `statusFilterCards_${this.tableId}`);
+                return;
+            }
+
+            const statusOptions = this.statusFilterConfig.options || [];
+            if (statusOptions.length === 0) {
+                // 如果没有配置状态选项，尝试从字段配置中自动推断
+                const statusField = this.fieldsConfig.find(field =>
+                    field.name === 'status' || field.name === 'state'
+                );
+                if (statusField && statusField.options) {
+                    // 将字段配置转换为状态卡项格式
+                    Object.entries(statusField.options).forEach(([key, option]) => {
+                        if (typeof option === 'object') {
+                            statusOptions.push({
+                                value: key,
+                                label: option.label || option.name || key,
+                                color: option.color || this.getStatusColor(key, option.label || option.name || key),
+                                icon: option.icon
+                            });
+                        } else {
+                            statusOptions.push({
+                                value: key,
+                                label: option,
+                                color: this.getStatusColor(key, option)
+                            });
+                        }
+                    });
+                }
+            }
+
+            if (statusOptions.length === 0) {
+                cardsContainer.style.display = 'none';
+                return;
+            }
+
+            // 渲染为 nav-tabs 的卡项（使用 Bootstrap 的 nav-tabs 样式）
+            const itemsHtml = statusOptions.map(option => {
+                const value = option.value || option.key || '';
+                const label = option.label || option.name || option.text || value;
+                const icon = option.icon || '';
+
+                return `<li class="nav-item">
+                    <a class="nav-link" href="javascript:void(0)" data-value="${value}"
+                       onclick="setStatusFilter_${this.tableId}('${value}')">
+                        ${icon ? `<i class="${icon} me-1"></i>` : ''}${label}
+                    </a>
+                </li>`;
+            }).join('');
+
+            // 构建 nav-tabs 列表
+            let ulHtml = `<ul class="nav nav-tabs card-header-tabs">${itemsHtml}</ul>`;
+
+            // 添加"全部"选项到最前（如果启用）
+            if (this.statusFilterConfig.show_all !== false) {
+                const allLi = `<li class="nav-item">
+                    <a class="nav-link active" aria-current="true" href="javascript:void(0)" data-value=""
+                       onclick="setStatusFilter_${this.tableId}('')">
+                        <i class="bi bi-grid me-1"></i>全部
+                    </a>
+                </li>`;
+                ulHtml = `<ul class="nav nav-tabs card-header-tabs">${allLi}${itemsHtml}</ul>`;
+            }
+
+            cardsContainer.innerHTML = ulHtml;
+
+            // 绑定全局函数
+            this.bindStatusFilterFunctions();
+        }
+
+        /**
+         * 根据状态值获取颜色
+         */
+        getStatusColor(value, label) {
+            const labelLower = label.toLowerCase();
+            const valueStr = String(value).toLowerCase();
+
+            // 数字状态映射
+            if (value === 0 || value === '0' || valueStr.includes('disable') || valueStr.includes('inactive') || labelLower.includes('禁用') || labelLower.includes('未启用')) {
+                return 'secondary';
+            }
+            if (value === 1 || value === '1' || valueStr.includes('active') || valueStr.includes('enable') || labelLower.includes('启用') || labelLower.includes('正常') || labelLower.includes('已启用')) {
+                return 'success';
+            }
+            if (value === 2 || valueStr.includes('pending') || labelLower.includes('处理中') || labelLower.includes('审核中') || labelLower.includes('待处理')) {
+                return 'warning';
+            }
+
+            // 默认颜色
+            return 'primary';
+        }
+
+        /**
+         * 根据颜色获取Bootstrap样式类
+         */
+        getBadgeClass(color) {
+            const colorMap = {
+                'primary': 'btn-outline-primary',
+                'success': 'btn-outline-success',
+                'warning': 'btn-outline-warning',
+                'danger': 'btn-outline-danger',
+                'info': 'btn-outline-info',
+                'secondary': 'btn-outline-secondary'
+            };
+            return colorMap[color] || 'btn-outline-primary';
+        }
+
+        /**
+         * 绑定状态筛选相关函数到全局
+         */
+        bindStatusFilterFunctions() {
+            const self = this;
+
+            // 设置状态筛选
+            window[`setStatusFilter_${this.tableId}`] = function(value) {
+                // 更新表单中的状态字段
+                const statusInput = self.form.querySelector('select[name*="status"], input[name*="status"]');
+                if (statusInput) {
+                    statusInput.value = value;
+                } else {
+                    // 如果表单中没有状态字段，添加到隐藏字段
+                    let hiddenInput = self.form.querySelector('input[name="filters[status]"]');
+                    if (!hiddenInput) {
+                        hiddenInput = document.createElement('input');
+                        hiddenInput.type = 'hidden';
+                        hiddenInput.name = 'filters[status]';
+                        self.form.appendChild(hiddenInput);
+                    }
+                    hiddenInput.value = value;
+                }
+
+                // 更新 nav-tabs 的激活样式
+                const links = document.querySelectorAll(`#statusFilterCards_${self.tableId} .nav-link`);
+                links.forEach(link => {
+                    const linkValue = link.getAttribute('data-value') ?? '';
+                    if (linkValue === value) {
+                        link.classList.add('active');
+                        link.setAttribute('aria-current', 'true');
+                    } else {
+                        link.classList.remove('active');
+                        link.removeAttribute('aria-current');
+                    }
+                });
+
+                // 触发搜索
+                self.form.dispatchEvent(new Event('submit'));
+            };
+
+            // 清除状态筛选
+            window[`clearStatusFilter_${this.tableId}`] = function() {
+                window[`setStatusFilter_${self.tableId}`]('');
+            };
+        }
+
     }
 
     // 创建全局重置函数

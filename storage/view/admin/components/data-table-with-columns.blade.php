@@ -35,6 +35,19 @@
  * @param array $searchConfig 搜索表单配置（可选，如果设置则自动在组件内渲染搜索表单）
  *   - search_fields: 搜索字段列表（数组）
  *   - fields: 字段配置数组（可选）
+ * @param array $statusFilterConfig 状态筛选卡项配置（可选，如果设置则在表格上方显示状态筛选卡项）
+ *   - filter_field: 用于筛选的字段名（必填）
+ *   - options: 筛选选项数组，每个选项包含：
+ *     - value: 选项值（必填）
+ *     - label: 显示标签（必填）
+ *     - variant: 按钮样式变体（可选，默认 'outline-secondary'）
+ *     - icon: 图标类名（可选）
+ *     - count: 计数显示（可选，如果设置则在标签后显示数量）
+ *   - show_all: 是否显示"全部"选项（可选，默认 true）
+ *   - all_label: "全部"选项的标签（可选，默认 '全部'）
+ *   - all_variant: "全部"选项的样式变体（可选，默认 'outline-secondary'）
+ *   - multiple: 是否支持多选（可选，默认 false）
+ *   - default_value: 默认选中的值（可选，可以是单个值或数组）
  * @param string $model 模型名称（可选，用于关联模式字段的异步加载）
  * @param string $batchDestroyRoute 批量删除路由（可选，如果设置则启用批量删除功能）
  *   设置此参数后，组件会自动：
@@ -940,6 +953,10 @@
     $hasSearchConfig = !empty($finalSearchConfig) && !empty($finalSearchConfig['search_fields']);
     // 搜索功能开关（搜索表单由JavaScript动态渲染）
     $showSearch = $showSearch ?? true;
+
+    // 状态筛选配置处理
+    $statusFilterConfig = $statusFilterConfig ?? null;
+    $hasStatusFilter = !empty($statusFilterConfig) && !empty($statusFilterConfig['filter_field']) && !empty($statusFilterConfig['options']);
     $pageSizeOptions = $pageSizeOptions ?? [10, 15, 20, 50, 100];
     $enablePageSizeStorage = $enablePageSizeStorage ?? true;
     $defaultSortField = $defaultSortField ?? 'id';
@@ -1003,6 +1020,13 @@
 
 {{-- 组件样式 --}}
 @include('admin.components.data-table.styles')
+
+@if($hasStatusFilter)
+    @include('admin.components.data-table.status-filter', [
+        'tableId' => $tableId,
+        'statusFilterConfig' => $statusFilterConfig
+    ])
+@endif
 
 @include('admin.components.data-table.search-form', [
     'showSearch' => $showSearch,
