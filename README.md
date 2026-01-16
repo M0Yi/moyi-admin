@@ -259,11 +259,19 @@ return [
 
 #### 4. 启动服务
 
-**开发环境**：
 
+**热更新开发环境**：
+```bash
+php bin/hyperf.php server:watch
+```
+
+**正式环境**：
 ```bash
 php bin/hyperf.php start
 ```
+
+
+--------------
 
 **使用 Docker**：
 

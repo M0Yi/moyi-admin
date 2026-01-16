@@ -145,6 +145,7 @@ Router::addGroup('/admin/{adminPath:[a-zA-Z0-9\-_]+}', function () {
             Router::get('', 'App\Controller\Admin\System\SiteController@edit');
             Router::put('', 'App\Controller\Admin\System\SiteController@update');
             Router::get('/options', 'App\Controller\Admin\System\SiteController@options');
+            Router::get('/status', 'App\Controller\Admin\System\SiteController@status');
         });
 
         // ========================================

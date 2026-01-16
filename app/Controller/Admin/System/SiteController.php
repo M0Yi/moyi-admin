@@ -14,6 +14,7 @@ use Hyperf\Di\Annotation\Inject;
 use Hyperf\HttpServer\Contract\RequestInterface;
 use Hyperf\Validation\Contract\ValidatorFactoryInterface;
 use Psr\Http\Message\ResponseInterface;
+use function Hyperf\Config\config;
 
 /**
  * 站点设置控制器
@@ -291,6 +292,28 @@ class SiteController extends AbstractController
             'options' => $options,
             'current_site_id' => site_id(),
         ]);
+    }
+
+    /**
+     * 获取系统状态信息
+     */
+    public function status(): ResponseInterface
+    {
+        // 检查热更新状态
+        $isWatcherRunning = is_watcher_running();
+
+        // 获取其他系统信息
+        $status = [
+            'watcher_running' => $isWatcherRunning,
+            'hot_reload_enabled' => $isWatcherRunning,
+            'php_version' => PHP_VERSION,
+            'hyperf_version' => config('version.framework_version', 'unknown'),
+            'app_version' => APP_VERSION,
+            'server_software' => $_SERVER['SERVER_SOFTWARE'] ?? 'unknown',
+            'current_time' => date('Y-m-d H:i:s'),
+        ];
+
+        return $this->success($status);
     }
 }
 

@@ -243,3 +243,67 @@ if (! function_exists('is_super_admin')) {
         }
     }
 }
+
+if (! function_exists('is_watcher_running')) {
+    /**
+     * 检查 Hyperf Watcher 进程是否在运行
+     * 用于判断当前是否处于热更新模式
+     *
+     * @return bool
+     */
+    function is_watcher_running(): bool
+    {
+        // 方法1：尝试执行 ps 命令检查是否有 watcher 进程在运行
+        // 查找包含 "hyperf.php server:watch" 的进程
+        $command = 'ps aux | grep -v grep | grep "hyperf\.php server:watch"';
+
+        try {
+            $output = [];
+            $returnCode = 0;
+
+            // 使用 exec 执行命令
+            exec($command, $output, $returnCode);
+
+            // 如果找到了进程且命令执行成功，返回 true
+            if ($returnCode === 0 && !empty($output)) {
+                return true;
+            }
+        } catch (\Throwable $e) {
+            // 如果执行命令失败，尝试其他方法
+        }
+
+        // 方法2：检查是否有 Watcher 的 PID 文件
+        $pidFile = BASE_PATH . '/runtime/hyperf_watcher.pid';
+        if (file_exists($pidFile)) {
+            try {
+                $pid = (int) file_get_contents($pidFile);
+                if ($pid > 0) {
+                    // 检查进程是否存在（Unix/Linux 系统）
+                    if (function_exists('posix_kill')) {
+                        return posix_kill($pid, 0);
+                    }
+                    // Windows 系统或其他备选方案
+                    return true; // 假设 PID 文件存在且有效
+                }
+            } catch (\Throwable $e) {
+                // PID 文件可能损坏，删除它
+                @unlink($pidFile);
+            }
+        }
+
+        // 方法3：检查是否有 Watcher 的状态文件
+        $statusFile = BASE_PATH . '/runtime/hyperf_watcher.status';
+        if (file_exists($statusFile)) {
+            try {
+                $status = trim(file_get_contents($statusFile));
+                return $status === 'running';
+            } catch (\Throwable $e) {
+                // 状态文件可能损坏，删除它
+                @unlink($statusFile);
+            }
+        }
+
+        // 如果所有方法都失败，返回 false
+        return false;
+    }
+}

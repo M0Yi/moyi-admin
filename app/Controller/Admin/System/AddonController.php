@@ -5,10 +5,12 @@ declare(strict_types=1);
 namespace App\Controller\Admin\System;
 
 use App\Controller\AbstractController;
+use App\Exception\BusinessException;
 use App\Service\Admin\AddonService;
 use Hyperf\Di\Annotation\Inject;
 use Hyperf\HttpServer\Contract\RequestInterface;
 use Hyperf\HttpServer\Contract\ResponseInterface;
+use function Hyperf\Config\config;
 
 /**
  * 插件管理控制器
@@ -295,6 +297,8 @@ class AddonController extends AbstractController
      */
     public function enable($addonId)
     {
+        $this->checkWatcherRunning();
+
         $result = $this->addonService->enableAddonById($addonId);
         if ($result) {
             return $this->success([], '插件启用成功');
@@ -308,6 +312,8 @@ class AddonController extends AbstractController
      */
     public function disable($addonId)
     {
+        $this->checkWatcherRunning();
+
         $result = $this->addonService->disableAddonById($addonId);
 
         if ($result) {
@@ -322,6 +328,8 @@ class AddonController extends AbstractController
      */
     public function install()
     {
+        $this->checkWatcherRunning();
+
         logger()->info("[插件安装] 开始处理插件安装请求");
 
         $request = $this->request;
@@ -661,6 +669,8 @@ class AddonController extends AbstractController
      */
     public function installStoreAddon($addonId)
     {
+        $this->checkWatcherRunning();
+
         logger()->info("[应用商城安装] 开始从应用商城安装插件", ['addonId' => $addonId]);
 
         try {
@@ -805,6 +815,8 @@ class AddonController extends AbstractController
      */
     public function upgradeStoreAddon($addonId)
     {
+        $this->checkWatcherRunning();
+
         logger()->info("[应用商城升级] 开始从应用商城升级插件", ['addonId' => $addonId]);
 
         try {
@@ -978,6 +990,8 @@ class AddonController extends AbstractController
      */
     public function installAddon($addonId)
     {
+        $this->checkWatcherRunning();
+
         $addon = $this->addonService->getAddonInfoById($addonId);
 
         if (!$addon) {
@@ -1015,6 +1029,8 @@ class AddonController extends AbstractController
      */
     public function uninstall($addonId)
     {
+        $this->checkWatcherRunning();
+
         $result = $this->addonService->uninstallAddon($addonId);
 
         if ($result) {
@@ -1033,6 +1049,8 @@ class AddonController extends AbstractController
      */
     public function delete($addonId)
     {
+        $this->checkWatcherRunning();
+
         logger()->info("[插件控制器] 收到删除插件请求", [
             'addonId' => $addonId,
             'user_id' => $this->session->get('admin_user_id'),
@@ -1310,6 +1328,8 @@ class AddonController extends AbstractController
      */
     public function refresh()
     {
+        $this->checkWatcherRunning();
+
         // 清除商店插件缓存
         $this->addonService->clearStoreAddonsCache();
 
@@ -1424,6 +1444,8 @@ class AddonController extends AbstractController
      */
     public function export($addonId)
     {
+        $this->checkWatcherRunning();
+
         logger()->info("[插件导出] 开始导出插件", ['addonId' => $addonId]);
 
         $addonsBaseDir = BASE_PATH . '/addons';
@@ -1867,6 +1889,8 @@ class AddonController extends AbstractController
      */
     public function saveConfig($addonId)
     {
+        $this->checkWatcherRunning();
+
         logger()->info("[插件配置] 开始保存配置", [
             'addonId' => $addonId,
             'request_method' => $this->request->getMethod(),
@@ -1927,6 +1951,8 @@ class AddonController extends AbstractController
      */
     public function testStoreApi()
     {
+        $this->checkWatcherRunning();
+
         try {
             logger()->info('[插件商店测试] 开始测试API连接');
 
@@ -2072,6 +2098,8 @@ class AddonController extends AbstractController
      */
     public function checkAddonStatus()
     {
+        $this->checkWatcherRunning();
+
         try {
             $addonsBaseDir = BASE_PATH . '/addons';
             $addonsStoreDir = $addonsBaseDir . '/AddonsStore';
@@ -2481,5 +2509,16 @@ class AddonController extends AbstractController
         $i = (int)floor(log($bytes, 1024));
 
         return round($bytes / pow(1024, $i), 2) . ' ' . $units[$i];
+    }
+
+    /**
+     * 检查热更新模式
+     * 插件管理的所有操作都需要在热更新模式下进行
+     */
+    private function checkWatcherRunning(): void
+    {
+        if (!is_watcher_running()) {
+            throw new BusinessException(403, '插件管理功能仅在热更新模式下可用，请先启动热更新服务');
+        }
     }
 }

@@ -547,6 +547,7 @@
         ['service' => 'API 网关', 'uptime' => '99.98%', 'latency' => '112ms', 'status' => 'good'],
         ['service' => '消息队列', 'uptime' => '99.92%', 'latency' => '86ms', 'status' => 'good'],
         ['service' => 'ElasticSearch', 'uptime' => '99.31%', 'latency' => '210ms', 'status' => 'warn'],
+        ['service' => '热更新监听', 'uptime' => is_watcher_running() ? '运行中' : '未运行', 'latency' => '-', 'status' => is_watcher_running() ? 'good' : 'warn'],
     ];
 
     $teamCapacity = [
