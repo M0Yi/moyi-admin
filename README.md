@@ -19,6 +19,8 @@
 
 Moyi Admin 是一个基于 Hyperf 3.1 框架开发的后台管理系统，采用通用 CRUD 设计模式，通过配置即可完成数据管理功能，无需为每个模型重复编写代码。系统支持多数据库管理，在创建 CRUD 配置和进行数据操作时，可以选择不同的数据库连接，实现跨数据库的统一管理。
 
+Demo演示网址：https://www.moyi.vip/
+
 > **🌟 重要说明**：本项目完全基于时下最先进的 AI 技术构造开发，从架构设计、代码实现到文档编写，全程采用 AI 辅助开发，展现了 AI 在软件开发领域的强大能力。
 
 ### 核心特性
@@ -272,6 +274,15 @@ php bin/hyperf.php start
 
 
 --------------
+
+## 临时容器运行开发模式
+```bash
+docker run -it --rm --name moyi-admin-watch -v $(pwd):/data/project -w /data/project -p 6502:6501 --network 1panel-network hyperf/hyperf:8.3-alpine-v3.19-swoole php bin/hyperf.php server:watch
+```
+## 正式容器运行开发模式
+```bash
+docker run -dit --name moyi-admin -v $(pwd):/data/project -w /data/project -p 6501:6501 --network 1panel-network hyperf/hyperf:8.3-alpine-v3.19-swoole php bin/hyperf.php start
+```
 
 **使用 Docker**：
 

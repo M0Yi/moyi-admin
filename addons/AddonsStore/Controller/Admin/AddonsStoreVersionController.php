@@ -4,9 +4,9 @@ declare(strict_types=1);
 
 namespace Addons\AddonsStore\Controller\Admin;
 
+use Addons\AddonsStore\Model\AddonsStoreVersion;
 use Addons\AddonsStore\Service\AddonsStoreService;
 use App\Controller\AbstractController;
-use App\Service\Admin\AddonService;
 use Hyperf\Di\Annotation\Inject;
 use Hyperf\HttpServer\Contract\RequestInterface;
 use Psr\Http\Message\ResponseInterface;
@@ -18,9 +18,6 @@ class AddonsStoreVersionController extends AbstractController
 {
     #[Inject]
     protected AddonsStoreService $storeService;
-
-    #[Inject]
-    protected AddonService $addonService;
 
     /**
      * 版本管理页面（支持特定插件版本和所有版本）
@@ -68,21 +65,8 @@ class AddonsStoreVersionController extends AbstractController
                 // 获取所有版本
                 $result = $this->storeService->getAllVersions($params);
 
-                // 为每个版本添加当前安装版本信息
-                $data = $result['data'] ?? [];
-                foreach ($data as &$version) {
-                    $addonIdentifier = $version['addon_identifier'] ?? '';
-                    if ($addonIdentifier) {
-                        // 获取当前安装的插件信息
-                        $installedAddon = $this->addonService->getAddonInfoById($addonIdentifier);
-                        $version['current_version'] = $installedAddon ? ($installedAddon['version'] ?? '') : '';
-                    } else {
-                        $version['current_version'] = '';
-                    }
-                }
-
                 return $this->success([
-                    'data' => $data,
+                    'data' => $result['data'] ?? [],
                     'total' => $result['total'] ?? 0,
                     'page' => $result['page'] ?? 1,
                     'page_size' => $result['per_page'] ?? 15,
