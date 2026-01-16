@@ -8,7 +8,9 @@ use Addons\AddonsStore\Model\AddonsStoreAddon;
 use Addons\AddonsStore\Model\AddonsStoreVersion;
 use Addons\AddonsStore\Model\AddonsStoreDownloadLog;
 use Addons\AddonsStore\Model\AddonsStoreReview;
+use App\Service\Admin\AddonService;
 use Hyperf\DbConnection\Db;
+use Hyperf\Di\Annotation\Inject;
 use Hyperf\HttpMessage\Upload\UploadedFile;
 use function Hyperf\Config\config;
 use function Hyperf\Support\now;
@@ -19,6 +21,8 @@ use function Hyperf\Support\today;
  */
 class AddonsStoreService
 {
+    #[Inject]
+    protected AddonService $addonService;
     /**
      * 获取插件列表
      */
@@ -200,11 +204,27 @@ class AddonsStoreService
      */
     public function getAddonVersions(int $addonId): array
     {
-        return AddonsStoreVersion::byAddon($addonId)
+        $versions = AddonsStoreVersion::byAddon($addonId)
             ->enabled()
             ->latest()
             ->get()
             ->toArray();
+
+        // 获取插件信息以添加当前安装版本
+        $addonInfo = $this->getAddonInfoById($addonId);
+        $addonIdentifier = $addonInfo['addon']['identifier'] ?? '';
+
+        // 为每个版本添加当前安装版本信息
+        foreach ($versions as &$version) {
+            if ($addonIdentifier) {
+                $localAddon = $this->addonService->getAddonInfoById($addonIdentifier);
+                $version['current_version'] = $localAddon['version'] ?? '';
+            } else {
+                $version['current_version'] = '';
+            }
+        }
+
+        return $versions;
     }
 
     /**
@@ -274,8 +294,21 @@ class AddonsStoreService
         $perPage = $params['per_page'] ?? 15;
         $versions = $query->paginate($perPage);
 
+        // 为每个版本添加当前安装版本信息
+        $items = $versions->items();
+        foreach ($items as &$item) {
+            $addonIdentifier = $item['addon_identifier'] ?? '';
+            if ($addonIdentifier) {
+                // 通过插件标识符查找本地安装的插件信息
+                $localAddon = $this->addonService->getAddonInfoById($addonIdentifier);
+                $item['current_version'] = $localAddon['version'] ?? '';
+            } else {
+                $item['current_version'] = '';
+            }
+        }
+
         return [
-            'data' => $versions->items(),
+            'data' => $items,
             'total' => $versions->total(),
             'page' => $versions->currentPage(),
             'per_page' => $versions->perPage(),

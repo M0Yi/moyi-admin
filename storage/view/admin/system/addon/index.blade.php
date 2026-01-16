@@ -110,13 +110,21 @@
                     ],
                     [
                         'index' => 3,
+                        'label' => '安装版本',
+                        'field' => 'current_version',
+                        'type' => 'text',
+                        'visible' => true,
+                        'width' => '120',
+                    ],
+                    [
+                        'index' => 4,
                         'label' => '描述',
                         'field' => 'description',
                         'type' => 'text',
                         'visible' => false,
                     ],
                     [
-                        'index' => 4,
+                        'index' => 5,
                         'label' => '作者',
                         'field' => 'author',
                         'type' => 'text',
@@ -124,7 +132,7 @@
                         'width' => '120',
                     ],
                     [
-                        'index' => 5,
+                        'index' => 6,
                         'label' => '类型',
                         'field' => 'type',
                         'type' => 'badge',
@@ -133,7 +141,7 @@
                         'width' => '80',
                     ],
                     [
-                        'index' => 6,
+                        'index' => 7,
                         'label' => '分类',
                         'field' => 'category',
                         'type' => 'badge',
@@ -142,7 +150,7 @@
                         'width' => '100',
                     ],
                     [
-                        'index' => 7,
+                        'index' => 8,
                         'label' => '来源',
                         'field' => 'source',
                         'type' => 'custom',
@@ -152,7 +160,7 @@
                         'class' => 'text-center',
                     ],
                     [
-                        'index' => 8,
+                        'index' => 9,
                         'label' => '安装状态',
                         'field' => 'installed',
                         'type' => 'custom',
@@ -162,7 +170,7 @@
                         'class' => 'text-center',
                     ],
                     [
-                        'index' => 9,
+                        'index' => 10,
                         'label' => '状态',
                         'field' => 'enabled',
                         'type' => 'custom',
@@ -172,7 +180,7 @@
                         'class' => 'text-center',
                     ],
                     [
-                        'index' => 10,
+                        'index' => 11,
                         'label' => '操作',
                         'type' => 'actions',
                         'actions' => [
@@ -206,8 +214,8 @@
                                 'icon' => 'bi-arrow-up-circle',
                                 'variant' => 'warning',
                                 'title' => '升级插件到最新版本',
-                                // 使用 visible 字段控制显示：已安装且可升级时显示
-                                'visible' => 'function(value, row, column) { return row.installed === true && row.can_upgrade === true; }'
+                                // 使用 visible 字段控制显示：已安装且版本不同时显示
+                                'visible' => 'function(value, row, column) { return row.installed === true && row.current_version !== row.version && row.current_version && row.version; }'
                             ],
                             // 插件管理相关操作
                             [

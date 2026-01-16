@@ -621,9 +621,13 @@
      * 从应用商城升级插件
      */
     window.upgradeStoreAddon = function(addonId, addonName, currentVersion, latestVersion) {
-        if (!confirm(`确定要将插件 "${addonName}" 从 v${currentVersion} 升级到 v${latestVersion} 吗？\n\n这将从应用商城下载最新版本并覆盖当前安装。`)) {
-            return;
+        // 显示升级功能暂未开通的提示
+        if (typeof showToast === 'function') {
+            showToast('warning', '当前升级功能暂未开通');
+        } else {
+            alert('当前升级功能暂未开通');
         }
+        return;
 
         // 显示加载状态
         if (typeof showToast === 'function') {

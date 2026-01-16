@@ -472,6 +472,10 @@ class AddonController extends AbstractController
                 return $this->error('插件安装失败：' . $e->getMessage());
             }
 
+            // 清除插件商店缓存
+            $this->addonService->clearStoreAddonsCache();
+            logger()->info("[插件安装] 已清除插件商店缓存", ['addonId' => $addonId]);
+
             logger()->info("[插件安装] 插件 {$addonId} 安装成功", [
                 'addonId' => $addonId,
                 'addonName' => $addonInfoData['name'] ?? 'unknown',
@@ -771,6 +775,10 @@ class AddonController extends AbstractController
                 return $this->error('插件安装失败');
             }
 
+            // 清除插件商店缓存
+            $this->addonService->clearStoreAddonsCache();
+            logger()->info("[应用商城安装] 已清除插件商店缓存", ['addonId' => $addonId]);
+
             logger()->info("[应用商城安装] 插件安装成功", [
                 'addonId' => $addonId,
                 'addonName' => $addonInfo['addon_info']['name'] ?? 'unknown'
@@ -938,6 +946,10 @@ class AddonController extends AbstractController
                 logger()->warning("[应用商城升级] 插件重新安装失败，但升级已完成", ['addonId' => $addonId]);
             }
 
+            // 清除插件商店缓存
+            $this->addonService->clearStoreAddonsCache();
+            logger()->info("[应用商城升级] 已清除插件商店缓存", ['addonId' => $addonId]);
+
             logger()->info("[应用商城升级] 插件升级成功", [
                 'addonId' => $addonId,
                 'fromVersion' => $addonInfo['current_version'] ?? 'unknown',
@@ -1006,6 +1018,10 @@ class AddonController extends AbstractController
         $result = $this->addonService->uninstallAddon($addonId);
 
         if ($result) {
+            // 清除插件商店缓存
+            $this->addonService->clearStoreAddonsCache();
+            logger()->info("[插件卸载] 已清除插件商店缓存", ['addonId' => $addonId]);
+
             return $this->success([], '插件卸载成功');
         } else {
             return $this->error('插件卸载失败');
@@ -1116,6 +1132,10 @@ class AddonController extends AbstractController
                 ]);
                 return $this->error('插件目录删除失败');
             }
+
+            // 清除插件商店缓存
+            $this->addonService->clearStoreAddonsCache();
+            logger()->info("[插件删除] 已清除插件商店缓存", ['addonId' => $addonId]);
 
             logger()->info("[插件控制器] 插件删除成功", [
                 'addonId' => $addonId,
