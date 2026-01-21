@@ -67,15 +67,6 @@
                     ],
                     [
                         'index' => 3,
-                        'label' => '当前安装版本',
-                        'field' => 'current_version',
-                        'type' => 'text',
-                        'visible' => true,
-                        'width' => '130',
-                        'class' => 'text-info'
-                    ],
-                    [
-                        'index' => 4,
                         'label' => '应用分类',
                         'field' => 'addon_category',
                         'type' => 'custom',
@@ -84,7 +75,7 @@
                         'width' => '100',
                     ],
                     [
-                        'index' => 5,
+                        'index' => 4,
                         'label' => '文件大小',
                         'field' => 'filesize',
                         'type' => 'custom',
@@ -94,7 +85,7 @@
                         'class' => 'text-center'
                     ],
                     [
-                        'index' => 6,
+                        'index' => 5,
                         'label' => '下载次数',
                         'field' => 'downloads',
                         'type' => 'number',
@@ -103,7 +94,7 @@
                         'class' => 'text-center'
                     ],
                     [
-                        'index' => 7,
+                        'index' => 6,
                         'label' => '状态',
                         'field' => 'status',
                         'type' => 'custom',
@@ -113,7 +104,7 @@
                         'class' => 'text-center'
                     ],
                     [
-                        'index' => 8,
+                        'index' => 7,
                         'label' => '发布时间',
                         'field' => 'released_at',
                         'type' => 'date',
@@ -122,7 +113,7 @@
                         'width' => '150'
                     ],
                     [
-                        'index' => 9,
+                        'index' => 8,
                         'label' => '操作',
                         'type' => 'actions',
                         'actions' => [

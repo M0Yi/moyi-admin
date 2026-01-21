@@ -65,6 +65,10 @@ class RouteLoader
             return;
         }
 
+        // 第一步：检查是否有首页替换插件，如果有则覆盖默认首页路由
+        // $this->handleHomepageReplacement();
+
+        // 第二步：加载所有启用的插件路由
         $routeFiles = $this->scanRouteFiles();
 
         foreach ($routeFiles as $file) {
@@ -75,6 +79,61 @@ class RouteLoader
             } else {
                 // 记录跳过加载的插件（可选）
                 $this->logSkippedAddon($addonName);
+            }
+        }
+    }
+
+    /**
+     * 处理首页替换
+     *
+     * 检查是否有插件配置了首页替换，如果有则覆盖默认首页路由
+     */
+    private function handleHomepageReplacement(): void
+    {
+        try {
+            $homepageReplacer = $this->addonService->getHomepageReplacementAddon();
+
+            if ($homepageReplacer) {
+                $addonName = $homepageReplacer['addon_name'];
+                $controller = $homepageReplacer['controller'];
+                $action = $homepageReplacer['action'];
+                $middleware = $homepageReplacer['middleware'];
+
+                // 构建完整的控制器类名
+                $fullController = "Addons\\{$addonName}\\Controller\\{$controller}";
+
+                // 覆盖默认首页路由
+                Router::addRoute(['GET', 'POST', 'HEAD'], '/', $fullController . '@' . $action, [
+                    'middleware' => $middleware
+                ]);
+
+                // 记录首页替换操作
+                if (class_exists(ApplicationContext::class) && ApplicationContext::hasContainer()) {
+                    try {
+                        $logger = ApplicationContext::getContainer()->get(\Hyperf\Contract\StdoutLoggerInterface::class);
+                        $logger->info("[首页替换] 插件 {$addonName} 替换了默认首页", [
+                            'controller' => $fullController,
+                            'action' => $action,
+                            'middleware' => $middleware
+                        ]);
+                    } catch (\Throwable $loggerError) {
+                        // logger不可用时静默跳过
+                    }
+                }
+            }
+        } catch (\Throwable $e) {
+            // 首页替换失败时记录错误，但不影响其他路由加载
+            if (class_exists(ApplicationContext::class) && ApplicationContext::hasContainer()) {
+                try {
+                    $logger = ApplicationContext::getContainer()->get(\Hyperf\Contract\StdoutLoggerInterface::class);
+                    $logger->error("[首页替换] 处理首页替换时出错: " . $e->getMessage(), [
+                        'error' => $e->getMessage(),
+                        'trace' => $e->getTraceAsString()
+                    ]);
+                } catch (\Throwable $loggerError) {
+                    // logger不可用时使用error_log
+                    error_log("[首页替换] 处理首页替换时出错: " . $e->getMessage());
+                }
             }
         }
     }

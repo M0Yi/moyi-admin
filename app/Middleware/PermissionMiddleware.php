@@ -1,6 +1,14 @@
 <?php
 
 declare(strict_types=1);
+/**
+ * This file is part of Hyperf.
+ *
+ * @link     https://www.hyperf.io
+ * @document https://hyperf.wiki
+ * @contact  group@hyperf.io
+ * @license  https://github.com/hyperf/hyperf/blob/master/LICENSE
+ */
 
 namespace App\Middleware;
 
@@ -10,13 +18,14 @@ use App\Model\Admin\AdminUser;
 use Hyperf\Context\Context;
 use Hyperf\Contract\StdoutLoggerInterface;
 use Hyperf\HttpServer\Contract\ResponseInterface as HttpResponse;
+use Hyperf\View\RenderInterface;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Server\MiddlewareInterface;
 use Psr\Http\Server\RequestHandlerInterface;
 
 /**
- * 管理后台权限中间件
+ * 管理后台权限中间件.
  *
  * 职责：
  * - 基于当前请求的「业务路径 + HTTP 方法」匹配权限规则（admin_permissions.path + method）
@@ -32,13 +41,14 @@ class PermissionMiddleware implements MiddlewareInterface
 {
     public function __construct(
         private readonly HttpResponse $response,
-        private readonly StdoutLoggerInterface $logger
+        private readonly StdoutLoggerInterface $logger,
+        protected RenderInterface $render
     ) {
     }
 
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
     {
-        /** @var AdminUser|null $user */
+        /** @var null|AdminUser $user */
         $user = Context::get('admin_user');
 
         // 未登录或无法获取用户，交给上游的认证中间件处理
@@ -137,9 +147,13 @@ class PermissionMiddleware implements MiddlewareInterface
                 'message' => '无权访问',
             ])->withStatus(403);
         }
+        return $this->render->render('errors.403', [
+            'requestPath' => $request?->getUri()->getPath(),
+            'requestMethod' => $request?->getMethod(),
+        ]);
 
         // 页面请求抛业务异常，由全局异常处理器渲染
-        throw new BusinessException(403, '无权访问');
+        //        throw new BusinessException(403, '无权访问');
     }
 
     /**
@@ -171,7 +185,7 @@ class PermissionMiddleware implements MiddlewareInterface
     }
 
     /**
-     * 判断请求是否为 API 请求（参考 AdminAuthMiddleware）
+     * 判断请求是否为 API 请求（参考 AdminAuthMiddleware）.
      */
     private function isApiRequest(ServerRequestInterface $request): bool
     {
@@ -198,7 +212,7 @@ class PermissionMiddleware implements MiddlewareInterface
     }
 
     /**
-     * 使用简单的通配符规则（*）判断路径是否匹配
+     * 使用简单的通配符规则（*）判断路径是否匹配.
      *
      * 规则：
      * - * 匹配任意长度的任意字符
@@ -218,8 +232,3 @@ class PermissionMiddleware implements MiddlewareInterface
         return (bool) preg_match($regex, $path);
     }
 }
-
-
-
-
-

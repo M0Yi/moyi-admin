@@ -23,3 +23,5 @@ docs/
 !docs/images
 !storage/app
 addons/
+ghost/
+uniapp/

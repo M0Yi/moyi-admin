@@ -30,6 +30,13 @@ class IndexController extends AbstractController
 {
     protected string $connection = 'admin';
 
+
+    //测试接口
+    public function test(RenderInterface $render, HttpResponse $response): ResponseInterface
+    {
+        return $this->success(['test',['name' => 'moyi','addons_config' => addons_config('AddonsStore', 'store_name')]]);
+    }
+
     public function index(RenderInterface $render, HttpResponse $response): ResponseInterface
     {
         $currentSite = site();

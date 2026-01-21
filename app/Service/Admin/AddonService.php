@@ -742,6 +742,70 @@ class AddonService
     }
 
     /**
+     * 获取首页替换插件
+     *
+     * 查找所有启用的插件中配置了 replace_homepage 的插件，
+     * 返回优先级最高的插件信息
+     *
+     * @return array|null 返回插件信息，包含：
+     *   - addon_name: 插件目录名
+     *   - controller: 控制器类名
+     *   - action: 方法名
+     *   - middleware: 额外中间件
+     *   - priority: 优先级
+     */
+    public function getHomepageReplacementAddon(): ?array
+    {
+        $addons = $this->scanAddons();
+        $homepageReplacers = [];
+
+        foreach ($addons as $addon) {
+            $addonName = $addon['name'];
+
+            // 只检查启用的插件
+            if (!$this->isAddonEnabled($addonName)) {
+                continue;
+            }
+
+            $config = $this->getAddonConfig($addonName);
+
+            // 检查是否有首页替换配置
+            if (!isset($config['replace_homepage']) ||
+                !is_array($config['replace_homepage']) ||
+                !isset($config['replace_homepage']['enabled']) ||
+                !$config['replace_homepage']['enabled']) {
+                continue;
+            }
+
+            $replacementConfig = $config['replace_homepage'];
+
+            // 验证必需字段
+            if (!isset($replacementConfig['controller']) || !isset($replacementConfig['action'])) {
+                logger()->warning("[首页替换] 插件 {$addonName} 首页替换配置不完整，缺少必需字段", [
+                    'config' => $replacementConfig
+                ]);
+                continue;
+            }
+
+            $homepageReplacers[] = [
+                'addon_name' => $addonName,
+                'controller' => $replacementConfig['controller'],
+                'action' => $replacementConfig['action'],
+                'middleware' => $replacementConfig['middleware'] ?? [],
+                'priority' => $replacementConfig['priority'] ?? 10,
+            ];
+        }
+
+        // 按优先级排序（优先级高的在前）
+        usort($homepageReplacers, function ($a, $b) {
+            return $b['priority'] <=> $a['priority'];
+        });
+
+        // 返回优先级最高的插件
+        return $homepageReplacers[0] ?? null;
+    }
+
+    /**
      * 启用插件
      *
      * 启用插件时会自动执行安装操作（部署资源文件）
@@ -934,24 +998,27 @@ class AddonService
     /**
      * 保存插件配置
      *
-     * @param string $addonName 插件名称
+     * @param string $addonId 插件ID
      * @param array $configData 配置数据
      * @return bool
      */
-    public function saveAddonConfig(string $addonName, array $configData): bool
+    public function saveAddonConfig(string $addonId, array $configData): bool
     {
         logger()->info("[插件配置] 开始处理配置保存", [
-            'addonName' => $addonName,
+            'addonId' => $addonId,
             'configData_keys' => array_keys($configData),
             'configData_count' => count($configData)
         ]);
 
-        $addonDir = $this->addonPath . '/' . $addonName;
+        // 获取正确的插件目录名（将ID转换为目录名）
+        $addonDirName = $this->getAddonDirById($addonId);
+        $addonDir = $this->addonPath . '/' . $addonDirName;
         $configFile = $addonDir . '/config.php';
 
         if (!file_exists($configFile)) {
             logger()->error("[插件配置] 配置文件不存在", [
-                'addonName' => $addonName,
+                'addonId' => $addonId,
+                'addonDirName' => $addonDirName,
                 'configFile' => $configFile
             ]);
             return false;
@@ -959,20 +1026,21 @@ class AddonService
 
         try {
             // 采用更优雅的配置保存方案：重新生成配置文件
-            logger()->info("[插件配置] 采用重新生成方案保存配置", ['addonName' => $addonName]);
+            logger()->info("[插件配置] 采用重新生成方案保存配置", ['addonId' => $addonId, 'addonDirName' => $addonDirName]);
 
             // 读取并解析原始配置文件
             $originalConfig = $this->parseConfigFile($configFile);
             if (!is_array($originalConfig)) {
                 logger()->warning("[插件配置] 原始配置解析失败，使用默认配置", [
-                    'addonName' => $addonName,
+                    'addonId' => $addonId,
+                    'addonDirName' => $addonDirName,
                     'originalConfig_type' => gettype($originalConfig)
                 ]);
                 $originalConfig = ['enabled' => true, 'configs' => []];
             }
 
             // 更新配置项的值
-            $updatedConfig = $this->updateConfigValues($originalConfig, $configData, $addonName);
+            $updatedConfig = $this->updateConfigValues($originalConfig, $configData, $addonId);
 
             // 重新生成配置文件
             $newContent = $this->generateConfigFile($configFile, $updatedConfig);
@@ -981,7 +1049,8 @@ class AddonService
             $backupFile = $configFile . '.backup.' . date('YmdHis');
             if (copy($configFile, $backupFile)) {
                 logger()->info("[插件配置] 原配置文件已备份", [
-                    'addonName' => $addonName,
+                    'addonId' => $addonId,
+                    'addonDirName' => $addonDirName,
                     'backupFile' => $backupFile
                 ]);
             }
@@ -990,14 +1059,16 @@ class AddonService
             $writeResult = file_put_contents($configFile, $newContent);
             if ($writeResult === false) {
                 logger()->error("[插件配置] 配置文件写入失败", [
-                    'addonName' => $addonName,
+                    'addonId' => $addonId,
+                    'addonDirName' => $addonDirName,
                     'configFile' => $configFile
                 ]);
                 return false;
             }
 
             logger()->info("[插件配置] 配置保存成功", [
-                'addonName' => $addonName,
+                'addonId' => $addonId,
+                'addonDirName' => $addonDirName,
                 'configFile' => $configFile,
                 'written_bytes' => $writeResult
             ]);
@@ -1005,7 +1076,8 @@ class AddonService
             return true;
         } catch (\Throwable $e) {
             logger()->error("[插件配置] 保存配置异常", [
-                'addonName' => $addonName,
+                'addonId' => $addonId,
+                'addonDirName' => $addonDirName,
                 'exception' => $e->getMessage(),
                 'file' => $e->getFile(),
                 'line' => $e->getLine(),
@@ -1041,7 +1113,7 @@ class AddonService
      * @param string $addonName
      * @return array
      */
-    private function updateConfigValues(array $originalConfig, array $newData, string $addonName): array
+    private function updateConfigValues(array $originalConfig, array $newData, string $addonId): array
     {
         $updatedConfig = $originalConfig;
         $updatedFields = [];
@@ -1062,7 +1134,7 @@ class AddonService
                     $newValue = $this->convertConfigValue($newData[$fieldName], $fieldType);
 
                     logger()->info("[插件配置] 更新配置字段", [
-                        'addonName' => $addonName,
+                        'addonId' => $addonId,
                         'fieldName' => $fieldName,
                         'fieldType' => $fieldType,
                         'oldValue' => $oldValue,
@@ -1071,13 +1143,17 @@ class AddonService
                     ]);
 
                     $configItem['value'] = $newValue;
+
+                    // 同时更新一级数组中的对应值
+                    $updatedConfig[$fieldName] = $newValue;
+
                     $updatedFields[] = $fieldName;
                 }
             }
         }
 
         logger()->info("[插件配置] 配置值更新完成", [
-            'addonName' => $addonName,
+            'addonId' => $addonId,
             'updatedFields' => $updatedFields,
             'updatedCount' => count($updatedFields)
         ]);

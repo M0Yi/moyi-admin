@@ -14,10 +14,12 @@ namespace App\Exception\Handler;
 
 use App\Exception\BusinessException;
 use App\Exception\ValidationException;
-use App\Service\Admin\InterceptLogService;
+use App\Model\Admin\AdminInterceptLog;
 use App\Service\Admin\ErrorStatisticService;
+use App\Service\Admin\InterceptLogService;
 use Hyperf\Context\Context;
 use Hyperf\Contract\StdoutLoggerInterface;
+use Hyperf\Coroutine\Coroutine;
 use Hyperf\Database\Exception\QueryException;
 use Hyperf\ExceptionHandler\ExceptionHandler;
 use Hyperf\HttpMessage\Exception\MethodNotAllowedHttpException;
@@ -41,7 +43,6 @@ class AppExceptionHandler extends ExceptionHandler
 
     public function handle(Throwable $throwable, ResponseInterface $response): ResponseInterface
     {
-
         $request = Context::get(ServerRequestInterface::class);
         $isApiRequest = $this->isApiRequest($request);
 
@@ -204,11 +205,11 @@ class AppExceptionHandler extends ExceptionHandler
     }
 
     /**
-     * 记录拦截日志
+     * 记录拦截日志.
      */
     protected function recordInterceptLog(?ServerRequestInterface $request, int $statusCode, string $reason): void
     {
-        if (!$request) {
+        if (! $request) {
             return;
         }
 
@@ -242,7 +243,7 @@ class AppExceptionHandler extends ExceptionHandler
             };
 
             // 异步记录拦截日志
-            \Hyperf\Coroutine\Coroutine::create(function () use (
+            Coroutine::create(function () use (
                 $siteId,
                 $adminEntryPath,
                 $method,
@@ -256,7 +257,7 @@ class AppExceptionHandler extends ExceptionHandler
                 $statusCode
             ) {
                 try {
-                    \App\Model\Admin\AdminInterceptLog::create([
+                    AdminInterceptLog::create([
                         'site_id' => $siteId,
                         'admin_entry_path' => $adminEntryPath,
                         'method' => $method,
@@ -270,7 +271,7 @@ class AppExceptionHandler extends ExceptionHandler
                         'status_code' => $statusCode,
                         'duration' => null,
                     ]);
-                } catch (\Throwable $e) {
+                } catch (Throwable $e) {
                     $this->logger->error('记录异常拦截日志失败', [
                         'error' => $e->getMessage(),
                         'status_code' => $statusCode,
@@ -278,7 +279,7 @@ class AppExceptionHandler extends ExceptionHandler
                     ]);
                 }
             });
-        } catch (\Throwable $e) {
+        } catch (Throwable $e) {
             // 记录日志失败不影响异常处理
             $this->logger->error('准备异常拦截日志数据失败', [
                 'error' => $e->getMessage(),
@@ -293,7 +294,7 @@ class AppExceptionHandler extends ExceptionHandler
     {
         // 优先从 X-Forwarded-For 获取
         $xForwardedFor = $request->getHeaderLine('X-Forwarded-For');
-        if (!empty($xForwardedFor)) {
+        if (! empty($xForwardedFor)) {
             $ips = array_map('trim', explode(',', $xForwardedFor));
             $ip = $ips[0];
             if ($this->isValidIp($ip)) {
@@ -305,7 +306,7 @@ class AppExceptionHandler extends ExceptionHandler
         $otherHeaders = ['X-Real-IP', 'CF-Connecting-IP', 'True-Client-IP'];
         foreach ($otherHeaders as $header) {
             $ip = trim($request->getHeaderLine($header));
-            if (!empty($ip) && $this->isValidIp($ip)) {
+            if (! empty($ip) && $this->isValidIp($ip)) {
                 return $ip;
             }
         }
@@ -321,7 +322,7 @@ class AppExceptionHandler extends ExceptionHandler
     }
 
     /**
-     * 验证IP地址是否有效
+     * 验证IP地址是否有效.
      */
     private function isValidIp(string $ip): bool
     {
@@ -329,7 +330,7 @@ class AppExceptionHandler extends ExceptionHandler
     }
 
     /**
-     * 获取客户端IP列表
+     * 获取客户端IP列表.
      */
     private function getClientIpList(ServerRequestInterface $request): array
     {
@@ -337,7 +338,7 @@ class AppExceptionHandler extends ExceptionHandler
 
         // X-Forwarded-For
         $xForwardedFor = $request->getHeaderLine('X-Forwarded-For');
-        if (!empty($xForwardedFor)) {
+        if (! empty($xForwardedFor)) {
             $parts = array_map('trim', explode(',', $xForwardedFor));
             foreach ($parts as $ip) {
                 if ($this->isValidIp($ip)) {
@@ -350,7 +351,7 @@ class AppExceptionHandler extends ExceptionHandler
         $otherHeaders = ['X-Real-IP', 'CF-Connecting-IP', 'True-Client-IP'];
         foreach ($otherHeaders as $header) {
             $ip = trim($request->getHeaderLine($header));
-            if (!empty($ip) && $this->isValidIp($ip)) {
+            if (! empty($ip) && $this->isValidIp($ip)) {
                 $ips[] = $ip;
             }
         }
@@ -366,7 +367,7 @@ class AppExceptionHandler extends ExceptionHandler
     }
 
     /**
-     * 获取请求参数
+     * 获取请求参数.
      */
     private function getRequestParams(ServerRequestInterface $request): array
     {
@@ -374,13 +375,13 @@ class AppExceptionHandler extends ExceptionHandler
 
         // 获取查询参数
         $queryParams = $request->getQueryParams();
-        if (!empty($queryParams)) {
+        if (! empty($queryParams)) {
             $params['query'] = $queryParams;
         }
 
         // 获取请求体参数（限制大小）
         $parsedBody = $request->getParsedBody();
-        if (!empty($parsedBody) && is_array($parsedBody)) {
+        if (! empty($parsedBody) && is_array($parsedBody)) {
             // 限制参数数量和长度
             $params['body'] = $this->limitParams($parsedBody);
         }
@@ -390,7 +391,7 @@ class AppExceptionHandler extends ExceptionHandler
     }
 
     /**
-     * 限制参数大小
+     * 限制参数大小.
      */
     private function limitParams(array $params, int $maxKeys = 5, int $maxValueLength = 50): array
     {
@@ -414,18 +415,18 @@ class AppExceptionHandler extends ExceptionHandler
                 $limited[$key] = $value;
             }
 
-            $count++;
+            ++$count;
         }
 
         return $limited;
     }
 
     /**
-     * 过滤敏感信息
+     * 过滤敏感信息.
      */
     private function filterSensitiveData(mixed $data): mixed
     {
-        if (!is_array($data)) {
+        if (! is_array($data)) {
             return $data;
         }
 

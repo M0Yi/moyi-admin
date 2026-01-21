@@ -68,7 +68,7 @@
       "name": "addons_store",
       "title": "应用市场",
       "icon": "bi bi-shop",
-      "path": null,
+      "path": "/addons_store_group",
       "component": null,
       "redirect": null,
       "type": "group",

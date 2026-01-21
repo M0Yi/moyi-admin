@@ -210,20 +210,6 @@ class AddonsStoreService
             ->get()
             ->toArray();
 
-        // 获取插件信息以添加当前安装版本
-        $addonInfo = $this->getAddonInfoById($addonId);
-        $addonIdentifier = $addonInfo['addon']['identifier'] ?? '';
-
-        // 为每个版本添加当前安装版本信息
-        foreach ($versions as &$version) {
-            if ($addonIdentifier) {
-                $localAddon = $this->addonService->getAddonInfoById($addonIdentifier);
-                $version['current_version'] = $localAddon['version'] ?? '';
-            } else {
-                $version['current_version'] = '';
-            }
-        }
-
         return $versions;
     }
 
@@ -294,21 +280,8 @@ class AddonsStoreService
         $perPage = $params['per_page'] ?? 15;
         $versions = $query->paginate($perPage);
 
-        // 为每个版本添加当前安装版本信息
-        $items = $versions->items();
-        foreach ($items as &$item) {
-            $addonIdentifier = $item['addon_identifier'] ?? '';
-            if ($addonIdentifier) {
-                // 通过插件标识符查找本地安装的插件信息
-                $localAddon = $this->addonService->getAddonInfoById($addonIdentifier);
-                $item['current_version'] = $localAddon['version'] ?? '';
-            } else {
-                $item['current_version'] = '';
-            }
-        }
-
         return [
-            'data' => $items,
+            'data' => $versions->items(),
             'total' => $versions->total(),
             'page' => $versions->currentPage(),
             'per_page' => $versions->perPage(),

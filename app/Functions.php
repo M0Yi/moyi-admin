@@ -1,6 +1,7 @@
 <?php
 
 use App\Model\Admin\AdminSite;
+use App\Service\Admin\AddonService;
 use Hyperf\Contract\StdoutLoggerInterface;
 use HyperfExtension\Auth\Contracts\GuardInterface;
 use HyperfExtension\Auth\Contracts\StatefulGuardInterface;
@@ -305,5 +306,55 @@ if (! function_exists('is_watcher_running')) {
 
         // 如果所有方法都失败，返回 false
         return false;
+    }
+}
+
+if (! function_exists('addons_config')) {
+    /**
+     * 获取插件配置项
+     *
+     * @param string $addonName 插件名称
+     * @param string $key 配置键名（支持点号分隔，如 'database.host'）
+     * @param mixed $default 默认值
+     * @return mixed
+     *
+     * @example
+     * // 获取 AddonsStore 插件的启用状态
+     * $enabled = addons_config('AddonsStore', 'enabled');
+     *
+     * // 获取嵌套配置项
+     * $host = addons_config('MyPlugin', 'database.host', 'localhost');
+     *
+     * // 获取配置数组
+     * $configs = addons_config('MyPlugin', 'configs');
+     *
+     * // 不存在的插件或配置项会返回默认值
+     * $value = addons_config('UnknownPlugin', 'any.key', 'default');
+     */
+    function addons_config(string $addonName, string $key, mixed $default = null): mixed
+    {
+        try {
+            $addonService = make(AddonService::class);
+            $config = $addonService->getAddonConfig($addonName);
+
+            if (empty($config)) {
+                return $default;
+            }
+
+            // 支持点号分隔的键名，如 'database.host'
+            $keys = explode('.', $key);
+            $value = $config;
+
+            foreach ($keys as $k) {
+                if (! is_array($value) || ! array_key_exists($k, $value)) {
+                    return $default;
+                }
+                $value = $value[$k];
+            }
+
+            return $value;
+        } catch (\Throwable $e) {
+            return $default;
+        }
     }
 }
