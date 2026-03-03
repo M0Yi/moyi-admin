@@ -92,7 +92,7 @@
                         'label' => '状态',
                         'field' => 'status',
                         'type' => 'switch',
-                        'onChange' => 'toggleStatus({id}, this, \'' . admin_route('system/users') . '/{id}/toggle-status\', \'status\')',
+                        'onChange' => "toggleStatus({id}, this, '" . admin_route('system/users') . "/{id}/toggle-status', 'status')",
                         'visible' => true,
                         'width' => '80',
                     ],
@@ -174,11 +174,11 @@ document.addEventListener('DOMContentLoaded', function () {
         window.UserPage.initList({
             tableId: 'userTable',
             destroyRoute: '{{ admin_route("system/users") }}',
-        logPrefix: '[User]'
-    });
+            logPrefix: '[User]'
+        });
     } else {
         console.warn('[UserPage] initList 未定义');
-}
+    }
 });
 </script>
 @if ($hasSearchConfig)

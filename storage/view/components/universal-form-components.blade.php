@@ -2,6 +2,7 @@
 通用表单组件包
 
 包含 UniversalFormRenderer 所需的所有组件：
+- TinyMCE 富文本编辑器 (tinymce)
 - 颜色选择器 (color-picker)
 - 图标选择器 (icon-picker)
 - 渐变选择器 (gradient-picker)
@@ -23,6 +24,10 @@
     $iconPickerParams = $iconPickerParams ?? [];
     $gradientPickerParams = $gradientPickerParams ?? [];
 @endphp
+
+{{-- TinyMCE 富文本编辑器 --}}
+@include('components.plugin.tinymce-js')
+@include('components.plugin.tinymce-i18n-js')
 
 {{-- 颜色选择器组件 --}}
 @include('components.color-picker', $colorPickerParams)

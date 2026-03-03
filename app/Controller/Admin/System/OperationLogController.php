@@ -141,7 +141,7 @@ class OperationLogController extends BaseModelCrudController
      */
     public function show(RequestInterface $request, int $id): ResponseInterface
     {
-        $log = $this->operationLogService->getById($id);
+        $log = $this->operationLogService->find($id);
         
         return $this->renderAdmin('admin.system.operation-log.show', [
             'log' => $log,

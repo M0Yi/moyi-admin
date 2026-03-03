@@ -40,14 +40,23 @@ class AdminAuthMiddleware implements MiddlewareInterface
 
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
     {
+        $requestId = uniqid('auth_', true);
+        $startTime = microtime(true);
+
         $guard = $this->auth->guard('admin');
+        $requestPath = $request->getUri()->getPath();
+        $requestMethod = $request->getMethod();
 
         // 日志：开始认证检查
         try {
-            logger()->info('AdminAuthMiddleware start', [
-                'path' => $request->getUri()->getPath(),
-                'method' => $request->getMethod(),
+            logger()->info('AdminAuthMiddleware START', [
+                'request_id' => $requestId,
+                'path' => $requestPath,
+                'method' => $requestMethod,
+                'query' => $request->getQueryParams(),
                 'accept' => $request->getHeaderLine('Accept'),
+                'user_agent' => $request->getHeaderLine('User-Agent'),
+                'ip' => $request->getHeaderLine('X-Real-IP') ?: ($request->getServerParams()['REMOTE_ADDR'] ?? 'unknown'),
             ]);
         } catch (\Throwable $_) {
             // 忽略记录日志错误
@@ -71,8 +80,9 @@ class AdminAuthMiddleware implements MiddlewareInterface
                 logger()->warning('AdminAuthMiddleware guard->user() threw', ['error' => $e->getMessage()]);
             }
             logger()->info('AdminAuthMiddleware guard state', [
+                'request_id' => $requestId,
                 'guard_check' => $guardCheck,
-                'guard_user' => $guardUser,
+                'guard_user_exists' => !empty($guardUser),
             ]);
         } catch (\Throwable $_) {}
 
@@ -81,17 +91,18 @@ class AdminAuthMiddleware implements MiddlewareInterface
             // 如果 guard 未通过，尝试从 Session 回退获取用户（兼容手动设置 session 的登录逻辑）
             try {
                 logger()->info('AdminAuthMiddleware guard check failed, attempting session fallback', [
-                    'path' => $request->getUri()->getPath(),
+                    'request_id' => $requestId,
+                    'path' => $requestPath,
                 ]);
             } catch (\Throwable $_) {}
+
             $sessionUser = $this->getAuthUser($request);
             if ($sessionUser) {
                 try {
                     logger()->info('AdminAuthMiddleware session fallback succeeded', [
+                        'request_id' => $requestId,
                         'user_id' => $sessionUser['id'] ?? null,
                         'username' => $sessionUser['username'] ?? null,
-                        'request_cookie' => $request->getHeaderLine('Cookie'),
-                        'server_params' => $request->getServerParams(),
                     ]);
                 } catch (\Throwable $_) {}
                 // 将用户信息写入上下文，允许后续权限检查继续
@@ -100,8 +111,11 @@ class AdminAuthMiddleware implements MiddlewareInterface
                 // 继续处理请求
             } else {
                 try {
-                    logger()->info('AdminAuthMiddleware session fallback failed', [
-                        'path' => $request->getUri()->getPath(),
+                    logger()->info('AdminAuthMiddleware session fallback failed - not authenticated', [
+                        'request_id' => $requestId,
+                        'path' => $requestPath,
+                        'is_api' => $this->isApiRequest($request),
+                        'is_iframe' => $this->isEmbeddedRequest($request),
                     ]);
                 } catch (\Throwable $_) {}
                 // 用户未登录，判断是否为 API 请求
@@ -151,6 +165,19 @@ class AdminAuthMiddleware implements MiddlewareInterface
         $userId = is_object($user) ? $user->id : ($user['id'] ?? null);
         Context::set('admin_user_id', $userId);
 
+        // ===== 认证成功，继续处理请求 =====
+        try {
+            $duration = round((microtime(true) - $startTime) * 1000, 2);
+            logger()->info('AdminAuthMiddleware PASSED', [
+                'request_id' => $requestId,
+                'user_id' => $userId,
+                'username' => is_object($user) ? ($user->username ?? null) : ($user['username'] ?? null),
+                'path' => $requestPath,
+                'method' => $requestMethod,
+                'duration_ms' => $duration,
+            ]);
+        } catch (\Throwable $_) {}
+
         return $handler->handle($request);
     }
 
@@ -159,6 +186,8 @@ class AdminAuthMiddleware implements MiddlewareInterface
      */
     protected function getAuthUser(ServerRequestInterface $request): ?array
     {
+        $requestId = uniqid('getAuth_', true);
+
         // 1. 优先从 JWT Token 获取（API 请求）
         $token = $this->getTokenFromRequest($request);
         if ($token) {
@@ -167,19 +196,55 @@ class AdminAuthMiddleware implements MiddlewareInterface
             // if ($user) {
             //     return $user;
             // }
+            try {
+                logger()->debug('AdminAuthMiddleware getAuthUser found token', [
+                    'request_id' => $requestId,
+                    'token_preview' => substr($token, 0, 20) . '...',
+                ]);
+            } catch (\Throwable $_) {}
         }
 
         $this->auth->guard('admin')->check();
+
+        try {
+            logger()->debug('AdminAuthMiddleware getAuthUser checking session', [
+                'request_id' => $requestId,
+            ]);
+        } catch (\Throwable $_) {}
+
         // 2. 从 Session 获取用户信息（页面请求）
         $userId = $this->session->get('admin_user_id');
         $siteId = $this->session->get('admin_site_id');
 
+        try {
+            logger()->debug('AdminAuthMiddleware getAuthUser session values', [
+                'request_id' => $requestId,
+                'admin_user_id' => $userId,
+                'admin_site_id' => $siteId,
+            ]);
+        } catch (\Throwable $_) {}
+
         if (!$userId || !$siteId) {
+            try {
+                logger()->debug('AdminAuthMiddleware getAuthUser missing session data', [
+                    'request_id' => $requestId,
+                ]);
+            } catch (\Throwable $_) {}
             return null;
         }
 
         // 3. 从数据库获取用户完整信息
-        return $this->getUserById((int)$userId, (int)$siteId);
+        $user = $this->getUserById((int)$userId, (int)$siteId);
+
+        try {
+            logger()->debug('AdminAuthMiddleware getAuthUser result', [
+                'request_id' => $requestId,
+                'found' => !empty($user),
+                'user_id' => $userId,
+            ]);
+        } catch (\Throwable $_) {}
+
+        return $user;
     }
 
     /**

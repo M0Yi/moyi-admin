@@ -109,7 +109,7 @@ class RoleController extends BaseModelCrudController
      */
     public function edit(RequestInterface $request, int $id): ResponseInterface
     {
-        $role = $this->roleService->getById($id);
+        $role = $this->roleService->find($id);
         $fields = $this->roleService->getFormFields('update', $role);
         $formSchema = [
             'title' => '编辑角色',

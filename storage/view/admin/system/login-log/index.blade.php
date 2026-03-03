@@ -86,8 +86,6 @@ document.addEventListener('DOMContentLoaded', function () {
         }).catch(()=>alert('删除失败'));
     };
 
-    // 批量删除功能已移除
-
     @if ($hasSearchConfig)
     // 搜索表单渲染器
     const config = @json($loginLogSearchConfig);
@@ -118,5 +116,4 @@ document.addEventListener('DOMContentLoaded', function () {
 });
 </script>
 @endpush
-
 

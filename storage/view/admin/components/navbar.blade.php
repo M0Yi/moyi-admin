@@ -3,7 +3,7 @@
         <div class="admin-topbar-layout admin-topbar-layout--desktop">
             <div class="admin-tab-toolbar">
                 <div class="topbar-actions d-flex align-items-center flex-wrap gap-2">
-                    @stack('admin_sidebar_nav_actions')
+                    @stack('admin_sidebar_nav_actions_desktop')
                 </div>
                 <div class="admin-tab-scroll">
                     <div class="admin-tab-scroll-list" data-role="tab-list"></div>
@@ -21,7 +21,7 @@
         <div class="admin-topbar-layout admin-topbar-layout--mobile">
             <div class="admin-topbar-mobile-left">
                 <div class="topbar-actions d-flex align-items-center flex-wrap gap-2">
-                    @stack('admin_sidebar_nav_actions')
+                    @stack('admin_sidebar_nav_actions_mobile')
                 </div>
             </div>
             <div class="admin-topbar-mobile-right">

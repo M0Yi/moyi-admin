@@ -1140,6 +1140,15 @@ body:has(.sidebar.collapsed) .admin-topbar {
     margin-left: var(--sidebar-collapsed-width);
     width: calc(100% - var(--sidebar-collapsed-width));
 }
+
+/* 确保移动端样式有足够特异性覆盖 :has() 选择器 */
+@media (max-width: 768px) {
+    /* 强制覆盖 :has() 选择器的样式 */
+    body:has(.sidebar.collapsed) .admin-topbar {
+        margin-left: 0 !important;
+        width: 100% !important;
+    }
+}
 .admin-topbar-inner {
     width: 100%;
     margin: 0;

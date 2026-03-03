@@ -117,7 +117,7 @@ class LoginLogController extends BaseModelCrudController
 
     public function show(RequestInterface $request, int $id): ResponseInterface
     {
-        $log = $this->loginLogService->getById($id);
+        $log = $this->loginLogService->find($id);
         return $this->renderAdmin('admin.system.login-log.show', ['log' => $log]);
     }
 

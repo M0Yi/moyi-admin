@@ -48,16 +48,33 @@ class PermissionMiddleware implements MiddlewareInterface
 
     public function process(ServerRequestInterface $request, RequestHandlerInterface $handler): ResponseInterface
     {
+        $requestId = uniqid('perm_', true);
+        $startTime = microtime(true);
+
         /** @var null|AdminUser $user */
         $user = Context::get('admin_user');
 
         // 未登录或无法获取用户，交给上游的认证中间件处理
         if (! $user instanceof AdminUser) {
+            try {
+                logger()->debug('PermissionMiddleware skipped: not logged in', [
+                    'request_id' => $requestId,
+                    'path' => $request->getUri()->getPath(),
+                ]);
+            } catch (\Throwable $_) {}
             return $handler->handle($request);
         }
 
         // 超级管理员拥有所有权限，直接放行
         if ((int) $user->is_admin === 1) {
+            try {
+                logger()->debug('PermissionMiddleware skipped: super admin', [
+                    'request_id' => $requestId,
+                    'user_id' => $user->id,
+                    'username' => $user->username,
+                    'path' => $request->getUri()->getPath(),
+                ]);
+            } catch (\Throwable $_) {}
             return $handler->handle($request);
         }
 
@@ -68,6 +85,7 @@ class PermissionMiddleware implements MiddlewareInterface
         $businessPath = $this->normalizeBusinessPath($rawPath);
 
         $this->logger->debug('Permission check start', [
+            'request_id' => $requestId,
             'user_id' => $user->id ?? null,
             'username' => $user->username ?? null,
             'method' => $method,
@@ -125,21 +143,29 @@ class PermissionMiddleware implements MiddlewareInterface
         // 检查当前用户是否拥有其中任意一个权限
         foreach ($matchedSlugs as $slug) {
             if ($user->hasPermission($slug)) {
+                $duration = round((microtime(true) - $startTime) * 1000, 2);
                 $this->logger->debug('Permission check passed', [
+                    'request_id' => $requestId,
                     'user_id' => $user->id,
+                    'username' => $user->username,
                     'slug' => $slug,
+                    'matched_slugs' => $matchedSlugs,
+                    'duration_ms' => $duration,
                 ]);
                 return $handler->handle($request);
             }
         }
 
         // 无匹配权限：根据请求类型返回 JSON 或抛出业务异常
+        $duration = round((microtime(true) - $startTime) * 1000, 2);
         $this->logger->warning('Permission denied', [
+            'request_id' => $requestId,
             'user_id' => $user->id ?? null,
             'username' => $user->username ?? null,
             'method' => $method,
             'path' => $businessPath,
             'matched_slugs' => $matchedSlugs,
+            'duration_ms' => $duration,
         ]);
         if ($this->isApiRequest($request)) {
             return $this->response->json([

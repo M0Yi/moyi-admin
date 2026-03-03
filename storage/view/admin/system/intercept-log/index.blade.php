@@ -257,7 +257,7 @@ function batchDelete_interceptLogTable() {
 
     const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
 
-    fetch(`{{ admin_route("system/intercept-logs") }}/batch-destroy`, {
+    fetch(`{{ admin_route("system/intercept-logs"))/batch-destroy`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
@@ -289,7 +289,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
         const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
 
-        fetch(`{{ admin_route("system/intercept-logs") }}/${id}`, {
+        fetch(`{{ admin_route("system/intercept-logs"))/${id}`, {
             method: 'DELETE',
             headers: {
                 'Content-Type': 'application/json',

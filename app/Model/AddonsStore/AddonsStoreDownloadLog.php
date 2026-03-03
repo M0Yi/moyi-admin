@@ -48,3 +48,4 @@ class AddonsStoreDownloadLog extends Model
     }
 }
 
+

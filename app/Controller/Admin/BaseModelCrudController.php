@@ -10,6 +10,7 @@ use App\Model\Model;
 use Hyperf\Database\Model\SoftDeletes;
 use Hyperf\DbConnection\Db;
 use Hyperf\Di\Annotation\Inject;
+use Hyperf\HttpMessage\Stream\SwooleStream;
 use Hyperf\HttpServer\Contract\RequestInterface;
 use Hyperf\Validation\Contract\ValidatorFactoryInterface;
 use Psr\Http\Message\ResponseInterface;
@@ -18,44 +19,13 @@ use function Hyperf\Support\class_uses_recursive;
 /**
  * 基于 Hyperf Model 的 CRUD 基类控制器
  *
- * 适用于使用 Eloquent Model 的场景，提供完整的 CRUD 功能
- * 子类需要指定具体的 Model 类，并可以重写方法以实现自定义逻辑
+ * 职责分离设计：
+ * - 查询逻辑：getListQuery() 系列方法
+ * - 验证逻辑：validateData() 系列方法
+ * - 软删除逻辑：trash 系列方法
+ * - 模型操作：store/update/destroy 方法
  *
- * 功能特性：
- * - 列表查询（支持搜索、过滤、排序、分页）
- * - 创建记录
- * - 编辑记录
- * - 删除记录（支持软删除和硬删除）
- * - 切换字段值（如状态切换）
- * - 数据导出
- * - 回收站管理（如果启用软删除）
- * - 数据验证
- * - 站点过滤（如果模型有 site_id 字段）
- *
- * 使用示例：
- * ```php
- * class UserController extends BaseModelCrudController
- * {
- *     protected function getModelClass(): string
- *     {
- *         return AdminUser::class;
- *     }
- *
- *     protected function getValidationRules(string $scene, ?int $id = null): array
- *     {
- *         return [
- *             'create' => [
- *                 'username' => 'required|string|max:50|unique:admin_users',
- *                 'email' => 'required|email|unique:admin_users',
- *             ],
- *             'update' => [
- *                 'username' => 'required|string|max:50|unique:admin_users,username,' . $id,
- *                 'email' => 'required|email|unique:admin_users,email,' . $id,
- *             ],
- *         ][$scene] ?? [];
- *     }
- * }
- * ```
+ * 子类只需实现必要的抽象方法即可获得完整 CRUD 功能
  *
  * @package App\Controller\Admin
  */
@@ -64,56 +34,37 @@ abstract class BaseModelCrudController extends AbstractController
     #[Inject]
     protected ValidatorFactoryInterface $validatorFactory;
 
+    // ============================================
+    // 抽象方法（子类必须实现）
+    // ============================================
+
     /**
      * 获取 Model 类名
-     * 子类必须实现此方法，返回对应的 Model 类名
-     *
-     * @return string Model 类名，例如：AdminUser::class
      */
     abstract protected function getModelClass(): string;
 
+    // ============================================
+    // 可选覆盖方法（验证规则）
+    // ============================================
+
     /**
      * 获取验证规则
-     * 子类可以重写此方法以自定义验证规则
      *
      * @param string $scene 场景：create 或 update
-     * @param int|null $id 记录ID（用于 update 场景的唯一性验证）
-     * @return array 验证规则数组
+     * @param int|null $id 记录ID
+     * @return array
      */
     protected function getValidationRules(string $scene, ?int $id = null): array
     {
         return [];
     }
 
-    /**
-     * 获取列表查询构建器
-     * 子类可以重写此方法以自定义查询逻辑（如添加关联、作用域等）
-     *
-     * @return \Hyperf\Database\Model\Builder 查询构建器
-     */
-    protected function getListQuery()
-    {
-        $modelClass = $this->getModelClass();
-        $query = $modelClass::query();
-
-        // 自动添加站点过滤（如果模型有 site_id 字段且不是超级管理员）
-        if ($this->hasSiteId() && site_id() && !is_super_admin()) {
-            $query->where('site_id', site_id());
-        }
-
-        // 自动过滤软删除记录（如果模型使用 SoftDeletes）
-        if ($this->usesSoftDeletes()) {
-            $query->whereNull('deleted_at');
-        }
-
-        return $query;
-    }
+    // ============================================
+    // 可选覆盖方法（查询构建）
+    // ============================================
 
     /**
-     * 获取可搜索字段列表
-     * 子类可以重写此方法以指定可搜索的字段
-     *
-     * @return array 字段名数组，例如：['username', 'email', 'real_name']
+     * 获取可搜索字段
      */
     protected function getSearchableFields(): array
     {
@@ -121,10 +72,7 @@ abstract class BaseModelCrudController extends AbstractController
     }
 
     /**
-     * 获取可排序字段列表
-     * 子类可以重写此方法以指定可排序的字段
-     *
-     * @return array 字段名数组，例如：['id', 'created_at', 'updated_at']
+     * 获取可排序字段
      */
     protected function getSortableFields(): array
     {
@@ -133,8 +81,6 @@ abstract class BaseModelCrudController extends AbstractController
 
     /**
      * 获取默认排序字段
-     *
-     * @return string 字段名
      */
     protected function getDefaultSortField(): string
     {
@@ -143,8 +89,6 @@ abstract class BaseModelCrudController extends AbstractController
 
     /**
      * 获取默认排序方向
-     *
-     * @return string asc 或 desc
      */
     protected function getDefaultSortOrder(): string
     {
@@ -153,8 +97,6 @@ abstract class BaseModelCrudController extends AbstractController
 
     /**
      * 获取每页数量
-     *
-     * @return int
      */
     protected function getPageSize(): int
     {
@@ -162,9 +104,38 @@ abstract class BaseModelCrudController extends AbstractController
     }
 
     /**
+     * 获取每页数量（兼容方法）
+     */
+    protected function getDefaultPageSize(): int
+    {
+        return $this->getPageSize();
+    }
+
+    // ============================================
+    // 可选覆盖方法（字段标签）
+    // ============================================
+
+    /**
+     * 获取字段标签映射
+     */
+    protected function getFieldLabels(): array
+    {
+        return [
+            'status' => '状态',
+            'visible' => '可见性',
+            'status_enabled' => '已启用',
+            'status_disabled' => '已禁用',
+            'visible_enabled' => '已显示',
+            'visible_disabled' => '已隐藏',
+        ];
+    }
+
+    // ============================================
+    // 辅助方法（模型检测）
+    // ============================================
+
+    /**
      * 检查模型是否使用软删除
-     *
-     * @return bool
      */
     protected function usesSoftDeletes(): bool
     {
@@ -182,8 +153,6 @@ abstract class BaseModelCrudController extends AbstractController
 
     /**
      * 检查模型是否有 site_id 字段
-     *
-     * @return bool
      */
     protected function hasSiteId(): bool
     {
@@ -194,47 +163,33 @@ abstract class BaseModelCrudController extends AbstractController
 
         $model = new $modelClass();
         $fillable = $model->getFillable();
-        $guarded = $model->getGuarded();
 
-        // 检查 fillable 中是否有 site_id
-        if (in_array('site_id', $fillable, true)) {
-            return true;
-        }
-
-        // 如果 guarded 为空，说明所有字段都可填充，检查表结构
-        if (empty($guarded) || $guarded === ['*']) {
-            // 尝试查询表结构（简单检查，不实际查询数据库）
-            return true; // 默认假设有 site_id（大多数表都有）
-        }
-
-        return false;
+        return in_array('site_id', $fillable, true);
     }
 
+    // ============================================
+    // 核心方法（列表查询）
+    // ============================================
+
     /**
-     * 列表页面
+     * 获取列表查询构建器
      */
-    public function index(RequestInterface $request): ResponseInterface
+    protected function getListQuery()
     {
-        // 判断是否是 API 请求
-        if ($request->input('_ajax') === '1') {
-            return $this->listData($request);
+        $modelClass = $this->getModelClass();
+        $query = $modelClass::query();
+
+        // 站点过滤
+        if ($this->hasSiteId() && site_id() && !is_super_admin()) {
+            $query->where('site_id', site_id());
         }
 
-        // 返回列表页面（子类需要实现视图）
-        return $this->renderListPage($request);
-    }
+        // 软删除过滤
+        if ($this->usesSoftDeletes()) {
+            $query->whereNull('deleted_at');
+        }
 
-    /**
-     * 渲染列表页面
-     * 子类可以重写此方法以自定义视图
-     *
-     * @param RequestInterface $request
-     * @return ResponseInterface
-     */
-    protected function renderListPage(RequestInterface $request): ResponseInterface
-    {
-        // 默认实现：返回 JSON 提示需要实现视图
-        return $this->error('请实现 renderListPage 方法或创建对应的视图');
+        return $query;
     }
 
     /**
@@ -243,116 +198,83 @@ abstract class BaseModelCrudController extends AbstractController
     public function listData(RequestInterface $request): ResponseInterface
     {
         try {
-            // 获取查询参数
-            $keyword = $this->normalizeKeyword($request->input('keyword', ''));
-            $filters = $this->normalizeFilters($request->input('filters', []));
-            $page = (int)$request->input('page', 1);
-            $pageSize = (int)$request->input('page_size', $this->getPageSize());
-            $sortField = $request->input('sort_field', $this->getDefaultSortField());
-            $sortOrder = $request->input('sort_order', $this->getDefaultSortOrder());
-
-            // 构建查询
+            $params = $this->prepareListParams($request);
             $query = $this->getListQuery();
 
-            // 关键词搜索
-            if (!empty($keyword)) {
-                $searchFields = $this->getSearchableFields();
-                $query->where(function ($q) use ($searchFields, $keyword) {
-                    foreach ($searchFields as $field) {
-                        $q->orWhere($field, 'like', '%' . $keyword . '%');
-                    }
-                });
-            }
+            // 应用搜索
+            $this->applyKeywordSearch($query, $params['keyword']);
 
-            // 应用过滤条件
-            if (!empty($filters) && is_array($filters)) {
-                $this->applyFilters($query, $filters);
-            }
+            // 应用过滤
+            $this->applyFilters($query, $params['filters']);
 
-            // 排序
-            $sortableFields = $this->getSortableFields();
-            if (in_array($sortField, $sortableFields, true)) {
-                $query->orderBy($sortField, $sortOrder);
-            } else {
-                $query->orderBy($this->getDefaultSortField(), $this->getDefaultSortOrder());
-            }
+            // 应用排序
+            $this->applySorting($query, $params['sort_field'], $params['sort_order']);
 
-            // 分页处理：如果 page_size 为 0，返回所有数据
-            if ($pageSize > 0) {
-                $paginator = $query->paginate($pageSize, ['*'], 'page', $page);
-                
-                $data = $paginator->items();
-                $total = $paginator->total();
-                $currentPage = $paginator->currentPage();
-                $perPage = $paginator->perPage();
-                $lastPage = $paginator->lastPage();
-            } else {
-                // page_size 为 0，返回所有数据
-                $total = $query->count();
-                $data = $query->get()->toArray();
-                $currentPage = 1;
-                $perPage = $total > 0 ? $total : 0;
-                $lastPage = 1;
-            }
-
-            // 格式化数据（子类可以重写 formatListData 方法）
-            $data = $this->formatListData($data);
+            // 分页处理
+            $data = $this->paginateQuery($query, $params);
 
             return $this->success([
-                'data' => $data,
-                'total' => $total,
-                'page' => $currentPage,
-                'page_size' => $perPage,
-                'last_page' => $lastPage,
+                'data' => $data['items'],
+                'total' => $data['total'],
+                'page' => $data['page'],
+                'page_size' => $data['page_size'],
+                'last_page' => $data['last_page'],
             ]);
         } catch (\Throwable $e) {
             logger()->error('[BaseModelCrudController] 获取列表数据失败', [
                 'model' => $this->getModelClass(),
                 'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
             ]);
             return $this->error($e->getMessage());
         }
     }
 
     /**
-     * 格式化列表数据
-     * 子类可以重写此方法以自定义数据格式化逻辑
-     *
-     * @param array $data 原始数据数组（可能是 Model 对象数组或数组）
-     * @return array 格式化后的数据数组
+     * 准备列表查询参数
      */
-    protected function formatListData(array $data): array
+    protected function prepareListParams(RequestInterface $request): array
     {
-        // 默认实现：将 Model 对象转换为数组
-        $formatted = [];
-        foreach ($data as $item) {
-            $formatted[] = is_array($item) ? $item : $item->toArray();
+        return [
+            'keyword' => $this->normalizeKeyword($request->input('keyword', '')),
+            'filters' => $this->normalizeFilters($request->input('filters', [])),
+            'page' => (int)$request->input('page', 1),
+            'page_size' => (int)$request->input('page_size', $this->getPageSize()),
+            'sort_field' => $request->input('sort_field', $this->getDefaultSortField()),
+            'sort_order' => $request->input('sort_order', $this->getDefaultSortOrder()),
+        ];
+    }
+
+    /**
+     * 应用关键词搜索
+     */
+    protected function applyKeywordSearch($query, string $keyword): void
+    {
+        if (!empty($keyword)) {
+            $searchFields = $this->getSearchableFields();
+            if (!empty($searchFields)) {
+                $query->where(function ($q) use ($searchFields, $keyword) {
+                    foreach ($searchFields as $field) {
+                        $q->orWhere($field, 'like', '%' . $keyword . '%');
+                    }
+                });
+            }
         }
-        return $formatted;
     }
 
     /**
      * 应用过滤条件
-     * 子类可以重写此方法以自定义过滤逻辑
-     *
-     * @param \Hyperf\Database\Model\Builder $query 查询构建器
-     * @param array $filters 过滤条件数组
      */
     protected function applyFilters($query, array $filters): void
     {
         foreach ($filters as $field => $value) {
-            // 跳过空值
             if ($value === '' || $value === null) {
                 continue;
             }
 
-            // 跳过系统保留字段
             if (str_starts_with($field, '_')) {
                 continue;
             }
 
-            // 处理数组值（多选）
             if (is_array($value)) {
                 $value = array_filter($value, fn($v) => $v !== '' && $v !== null);
                 if (!empty($value)) {
@@ -361,337 +283,81 @@ abstract class BaseModelCrudController extends AbstractController
                 continue;
             }
 
-            // 处理区间字段（_min 和 _max 后缀）
             if (str_ends_with($field, '_min')) {
                 $baseField = substr($field, 0, -4);
                 $query->where($baseField, '>=', $value);
                 continue;
             }
+
             if (str_ends_with($field, '_max')) {
                 $baseField = substr($field, 0, -4);
                 $query->where($baseField, '<=', $value);
                 continue;
             }
 
-            // 默认：精确匹配
             $query->where($field, $value);
         }
     }
 
     /**
-     * 创建页面
-     * 子类可以重写此方法以自定义创建页面
+     * 应用排序
      */
-    public function create(RequestInterface $request): ResponseInterface
+    protected function applySorting($query, string $sortField, string $sortOrder): void
     {
-        return $this->renderCreatePage($request);
-    }
-
-    /**
-     * 渲染创建页面
-     * 子类可以重写此方法以自定义视图
-     *
-     * @param RequestInterface $request
-     * @return ResponseInterface
-     */
-    protected function renderCreatePage(RequestInterface $request): ResponseInterface
-    {
-        return $this->error('请实现 renderCreatePage 方法或创建对应的视图');
-    }
-
-    /**
-     * 保存数据
-     */
-    public function store(RequestInterface $request): ResponseInterface
-    {
-        try {
-            $data = $request->all();
-
-            // 数据验证
-            $this->validateData($data, 'create');
-
-            // 创建记录
-            $modelClass = $this->getModelClass();
-            $model = new $modelClass();
-
-            // 过滤可填充字段
-            $fillable = $model->getFillable();
-            if (!empty($fillable)) {
-                $data = array_intersect_key($data, array_flip($fillable));
-            }
-
-            // 自动填充 site_id（如果模型有该字段且当前有站点ID）
-            if ($this->hasSiteId() && site_id() && !isset($data['site_id'])) {
-                $data['site_id'] = site_id();
-            }
-
-            // 填充数据
-            $model->fill($data);
-            $model->save();
-
-            return $this->success(['id' => $model->id], '创建成功');
-        } catch (ValidationException $e) {
-            return $this->error($e->getMessage(), [
-                'errors' => $e->getErrors(),
-            ], 422);
-        } catch (\Throwable $e) {
-            logger()->error('[BaseModelCrudController] 创建记录失败', [
-                'model' => $this->getModelClass(),
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
-            ]);
-            return $this->error($e->getMessage());
+        $sortableFields = $this->getSortableFields();
+        if (in_array($sortField, $sortableFields, true)) {
+            $query->orderBy($sortField, $sortOrder);
+        } else {
+            $query->orderBy($this->getDefaultSortField(), $this->getDefaultSortOrder());
         }
     }
 
     /**
-     * 编辑页面
-     * 子类可以重写此方法以自定义编辑页面
+     * 分页查询
      */
-    public function edit(RequestInterface $request, int $id): ResponseInterface
+    protected function paginateQuery($query, array $params): array
     {
-        try {
-            $modelClass = $this->getModelClass();
-            $model = $this->findModel($id);
+        $page = $params['page'];
+        $pageSize = $params['page_size'];
 
-            if (!$model) {
-                return $this->error('记录不存在', code: 404);
-            }
+        if ($pageSize > 0) {
+            $paginator = $query->paginate($pageSize, ['*'], 'page', $page);
 
-            return $this->renderEditPage($request, $model);
-        } catch (\Throwable $e) {
-            return $this->error($e->getMessage());
+            return [
+                'items' => $this->formatListData($paginator->items()),
+                'total' => $paginator->total(),
+                'page' => $paginator->currentPage(),
+                'page_size' => $paginator->perPage(),
+                'last_page' => $paginator->lastPage(),
+            ];
         }
-    }
 
-    /**
-     * 渲染编辑页面
-     * 子类可以重写此方法以自定义视图
-     *
-     * @param RequestInterface $request
-     * @param Model $model 模型实例
-     * @return ResponseInterface
-     */
-    protected function renderEditPage(RequestInterface $request, Model $model): ResponseInterface
-    {
-        return $this->error('请实现 renderEditPage 方法或创建对应的视图');
-    }
-
-    /**
-     * 更新数据
-     */
-    public function update(RequestInterface $request, int $id): ResponseInterface
-    {
-        try {
-            $data = $request->all();
-
-            // 查找记录
-            $model = $this->findModel($id);
-            if (!$model) {
-                return $this->error('记录不存在', code: 404);
-            }
-
-            // 数据验证
-            $this->validateData($data, 'update', $id);
-
-            // 过滤可填充字段
-            $fillable = $model->getFillable();
-            if (!empty($fillable)) {
-                $data = array_intersect_key($data, array_flip($fillable));
-            }
-
-            // 移除不允许更新的字段
-            unset($data['id'], $data['created_at']);
-
-            // 如果模型有 site_id，不允许更新
-            if ($this->hasSiteId()) {
-                unset($data['site_id']);
-            }
-
-            // 更新数据
-            $model->fill($data);
-            $model->save();
-
-            return $this->success([], '更新成功');
-        } catch (ValidationException $e) {
-            return $this->error($e->getMessage(), [
-                'errors' => $e->getErrors(),
-            ], 422);
-        } catch (\Throwable $e) {
-            logger()->error('[BaseModelCrudController] 更新记录失败', [
-                'model' => $this->getModelClass(),
-                'id' => $id,
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
-            ]);
-            return $this->error($e->getMessage());
-        }
-    }
-
-    /**
-     * 删除数据
-     * 支持软删除和硬删除（根据模型是否使用 SoftDeletes trait）
-     */
-    public function destroy(RequestInterface $request, int $id): ResponseInterface
-    {
-        try {
-            $model = $this->findModel($id);
-            if (!$model) {
-                return $this->error('记录不存在或已被删除', code: 404);
-            }
-
-            // 如果模型使用软删除，执行软删除
-            if ($this->usesSoftDeletes()) {
-                $model->delete(); // Eloquent 会自动处理软删除
-                $message = '删除成功（已移至回收站）';
-            } else {
-                $model->forceDelete(); // 硬删除
-                $message = '删除成功';
-            }
-
-            return $this->success([], $message);
-        } catch (\Throwable $e) {
-            logger()->error('[BaseModelCrudController] 删除记录失败', [
-                'model' => $this->getModelClass(),
-                'id' => $id,
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
-            ]);
-            return $this->error($e->getMessage());
-        }
-    }
-
-    /**
-     * 批量删除
-     */
-    public function batchDestroy(RequestInterface $request): ResponseInterface
-    {
-        try {
-            $ids = $request->input('ids', []);
-            if (empty($ids) || !is_array($ids)) {
-                return $this->error('请选择要删除的记录');
-            }
-
-            // 验证 ID
-            $ids = array_filter(array_map('intval', $ids), fn($id) => $id > 0);
-            if (empty($ids)) {
-                return $this->error('无效的记录ID');
-            }
-
-            $modelClass = $this->getModelClass();
-            $query = $modelClass::query()->whereIn('id', $ids);
-
-            // 站点过滤
-            if ($this->hasSiteId() && site_id() && !is_super_admin()) {
-                $query->where('site_id', site_id());
-            }
-
-            $count = 0;
-            if ($this->usesSoftDeletes()) {
-                $count = $query->delete(); // 软删除
-                $message = "成功删除 {$count} 条记录（已移至回收站）";
-            } else {
-                $count = $query->forceDelete(); // 硬删除
-                $message = "成功删除 {$count} 条记录";
-            }
-
-            return $this->success(['count' => $count], $message);
-        } catch (\Throwable $e) {
-            logger()->error('[BaseModelCrudController] 批量删除失败', [
-                'model' => $this->getModelClass(),
-                'error' => $e->getMessage(),
-            ]);
-            return $this->error($e->getMessage());
-        }
-    }
-
-    /**
-     * 切换字段值（通用方法）
-     * 通过 field 参数指定要切换的字段，默认切换 status 字段
-     */
-    public function toggleStatus(RequestInterface $request, int $id): ResponseInterface
-    {
-        try {
-            $field = $request->input('field', 'status');
-
-            // 验证字段名
-            if (!preg_match('/^[a-z_][a-z0-9_]*$/i', $field)) {
-                return $this->error('无效的字段名', code: 400);
-            }
-
-            $model = $this->findModel($id);
-            if (!$model) {
-                return $this->error('记录不存在', code: 404);
-            }
-
-            // 切换字段值（0/1 切换）
-            $currentValue = $model->{$field} ?? 0;
-            $newValue = $currentValue == 1 ? 0 : 1;
-            $model->{$field} = $newValue;
-            $model->save();
-
-            $fieldLabels = $this->getFieldLabels();
-            $fieldLabel = $fieldLabels[$field] ?? $field;
-            $message = $newValue == 1
-                ? ($fieldLabels[$field . '_enabled'] ?? "{$fieldLabel}已启用")
-                : ($fieldLabels[$field . '_disabled'] ?? "{$fieldLabel}已禁用");
-
-            return $this->success([$field => $newValue], $message);
-        } catch (\Throwable $e) {
-            logger()->error('[BaseModelCrudController] 切换字段值失败', [
-                'model' => $this->getModelClass(),
-                'id' => $id,
-                'field' => $field ?? 'status',
-                'error' => $e->getMessage(),
-            ]);
-            throw $e;
-        }
-    }
-
-    /**
-     * 获取字段标签映射
-     * 子类可以重写此方法以自定义字段标签
-     *
-     * @return array 字段标签映射
-     */
-    protected function getFieldLabels(): array
-    {
+        $total = $query->count();
         return [
-            'status' => '状态',
-            'visible' => '可见性',
-            'status_enabled' => '已启用',
-            'status_disabled' => '已禁用',
-            'visible_enabled' => '已显示',
-            'visible_disabled' => '已隐藏',
+            'items' => $this->formatListData($query->get()->toArray()),
+            'total' => $total,
+            'page' => 1,
+            'page_size' => $total,
+            'last_page' => 1,
         ];
     }
 
     /**
-     * 查找模型实例
-     *
-     * @param int $id 记录ID
-     * @return Model|null
+     * 格式化列表数据
      */
-    protected function findModel(int $id): ?Model
+    protected function formatListData(array $data): array
     {
-        $modelClass = $this->getModelClass();
-        $query = $modelClass::query()->where('id', $id);
-
-        // 站点过滤
-        if ($this->hasSiteId() && site_id() && !is_super_admin()) {
-            $query->where('site_id', site_id());
-        }
-
-        return $query->first();
+        return array_map(function ($item) {
+            return is_array($item) ? $item : $item->toArray();
+        }, $data);
     }
+
+    // ============================================
+    // 核心方法（验证逻辑）
+    // ============================================
 
     /**
      * 验证数据
-     *
-     * @param array $data 数据数组
-     * @param string $scene 场景：create 或 update
-     * @param int|null $id 记录ID（用于 update 场景）
-     * @throws ValidationException
      */
     protected function validateData(array $data, string $scene, ?int $id = null): void
     {
@@ -710,11 +376,7 @@ abstract class BaseModelCrudController extends AbstractController
     }
 
     /**
-     * 转换验证错误消息为中文友好的格式
-     *
-     * @param array $errors 原始错误信息
-     * @param array $fieldLabels 字段标签映射
-     * @return array 转换后的错误信息
+     * 转换验证错误消息
      */
     protected function translateValidationErrors(array $errors, array $fieldLabels): array
     {
@@ -723,28 +385,21 @@ abstract class BaseModelCrudController extends AbstractController
             $fieldLabel = $fieldLabels[$field] ?? $field;
             $translated[$field] = [];
             foreach ($fieldErrors as $error) {
-                $translatedError = $this->translateErrorMessage($error, $fieldLabel);
-                $translated[$field][] = $translatedError;
+                $translated[$field][] = $this->translateErrorMessage($error, $fieldLabel);
             }
         }
         return $translated;
     }
 
     /**
-     * 转换单个错误消息
-     *
-     * @param string $error 原始错误消息
-     * @param string $fieldLabel 字段标签
-     * @return string 转换后的错误消息
+     * 转换错误消息
      */
     protected function translateErrorMessage(string $error, string $fieldLabel): string
     {
-        // 如果已经是中文消息，直接返回
         if (preg_match('/[\x{4e00}-\x{9fa5}]/u', $error)) {
             return $error;
         }
 
-        // 处理常见的验证错误消息
         if (preg_match('/^The (.+?) (?:field )?is required$/i', $error)) {
             return "{$fieldLabel}不能为空";
         }
@@ -752,7 +407,7 @@ abstract class BaseModelCrudController extends AbstractController
             return "{$fieldLabel}必须是有效的邮箱地址";
         }
         if (preg_match('/^The (.+?) has already been taken$/i', $error)) {
-            return "{$fieldLabel}已存在，请使用其他值";
+            return "{$fieldLabel}已存在";
         }
         if (preg_match('/^The (.+?) may not be greater than (\d+)/i', $error, $matches)) {
             return "{$fieldLabel}不能超过{$matches[2]}个字符";
@@ -761,16 +416,100 @@ abstract class BaseModelCrudController extends AbstractController
             return "{$fieldLabel}至少需要{$matches[2]}个字符";
         }
 
-        // 默认：返回字段标签 + 原始错误消息
-        $cleaned = preg_replace('/^The (.+?) /i', '', $error);
-        return "{$fieldLabel}：{$cleaned}";
+        return "{$fieldLabel}：" . preg_replace('/^The (.+?) /i', '', $error);
+    }
+
+    // ============================================
+    // 核心方法（模型操作）
+    // ============================================
+
+    /**
+     * 查找模型
+     */
+    protected function findModel(int $id): ?\Hyperf\DbConnection\Model\Model
+    {
+        $modelClass = $this->getModelClass();
+        $query = $modelClass::query()->where('id', $id);
+
+        if ($this->hasSiteId() && site_id() && !is_super_admin()) {
+            $query->where('site_id', site_id());
+        }
+
+        // 软删除过滤：与 getListQuery 保持一致
+        if ($this->usesSoftDeletes()) {
+            $query->whereNull('deleted_at');
+        }
+
+        return $query->first();
     }
 
     /**
+     * 创建记录
+     */
+    protected function storeModel(array $data): Model
+    {
+        $modelClass = $this->getModelClass();
+        $model = new $modelClass();
+
+        // 过滤可填充字段
+        $fillable = $model->getFillable();
+        if (!empty($fillable)) {
+            $data = array_intersect_key($data, array_flip($fillable));
+        }
+
+        // 自动填充 site_id
+        if ($this->hasSiteId() && site_id() && !isset($data['site_id'])) {
+            $data['site_id'] = site_id();
+        }
+
+        $model->fill($data);
+        $model->save();
+
+        return $model;
+    }
+
+    /**
+     * 更新记录
+     */
+    protected function updateModel(Model $model, array $data): Model
+    {
+        // 过滤可填充字段
+        $fillable = $model->getFillable();
+        if (!empty($fillable)) {
+            $data = array_intersect_key($data, array_flip($fillable));
+        }
+
+        // 移除不允许更新的字段
+        unset($data['id'], $data['created_at']);
+
+        // 不允许更新 site_id
+        if ($this->hasSiteId()) {
+            unset($data['site_id']);
+        }
+
+        $model->fill($data);
+        $model->save();
+
+        return $model;
+    }
+
+    /**
+     * 删除记录
+     */
+    protected function deleteModel(Model $model): bool
+    {
+        if ($this->usesSoftDeletes()) {
+            return $model->delete() !== false;
+        }
+        return $model->forceDelete() !== false;
+    }
+
+    // ============================================
+    // 辅助方法（参数处理）
+    // ============================================
+
+    /**
      * 规范化关键词
-     *
-     * @param mixed $keyword
-     * @return string
      */
     protected function normalizeKeyword($keyword): string
     {
@@ -782,13 +521,9 @@ abstract class BaseModelCrudController extends AbstractController
 
     /**
      * 规范化过滤条件
-     *
-     * @param mixed $filters
-     * @return array
      */
     protected function normalizeFilters($filters): array
     {
-        // 如果是 JSON 字符串，解析它
         if (is_string($filters) && !empty($filters)) {
             try {
                 $decoded = json_decode($filters, true);
@@ -804,7 +539,6 @@ abstract class BaseModelCrudController extends AbstractController
             $filters = [];
         }
 
-        // 移除系统保留参数
         return array_filter(
             $filters,
             fn($value, $key) => is_string($key) && !str_starts_with($key, '_'),
@@ -812,8 +546,206 @@ abstract class BaseModelCrudController extends AbstractController
         );
     }
 
+    // ============================================
+    // 公开方法（Controller 入口）
+    // ============================================
+
     /**
-     * 回收站页面（如果启用软删除）
+     * 列表页面
+     */
+    public function index(RequestInterface $request): ResponseInterface
+    {
+        if ($request->input('_ajax') === '1') {
+            return $this->listData($request);
+        }
+        return $this->renderListPage($request);
+    }
+
+    /**
+     * 渲染列表页面
+     */
+    protected function renderListPage(RequestInterface $request): ResponseInterface
+    {
+        return $this->error('请实现 renderListPage 方法');
+    }
+
+    /**
+     * 创建页面
+     */
+    public function create(RequestInterface $request): ResponseInterface
+    {
+        return $this->renderCreatePage($request);
+    }
+
+    /**
+     * 渲染创建页面
+     */
+    protected function renderCreatePage(RequestInterface $request): ResponseInterface
+    {
+        return $this->error('请实现 renderCreatePage 方法');
+    }
+
+    /**
+     * 保存数据
+     */
+    public function store(RequestInterface $request): ResponseInterface
+    {
+        try {
+            $data = $request->all();
+            $this->validateData($data, 'create');
+            $model = $this->storeModel($data);
+            return $this->success(['id' => $model->id], '创建成功');
+        } catch (ValidationException $e) {
+            return $this->error($e->getMessage(), ['errors' => $e->getErrors()], 422);
+        } catch (\Throwable $e) {
+            logger()->error('[BaseModelCrudController] 创建记录失败', ['error' => $e->getMessage()]);
+            return $this->error($e->getMessage());
+        }
+    }
+
+    /**
+     * 编辑页面
+     */
+    public function edit(RequestInterface $request, int $id): ResponseInterface
+    {
+        try {
+            $model = $this->findModel($id);
+            if (!$model) {
+                return $this->error('记录不存在', code: 404);
+            }
+            return $this->renderEditPage($request, $model);
+        } catch (\Throwable $e) {
+            return $this->error($e->getMessage());
+        }
+    }
+
+    /**
+     * 渲染编辑页面
+     */
+    protected function renderEditPage(RequestInterface $request, Model $model): ResponseInterface
+    {
+        return $this->error('请实现 renderEditPage 方法');
+    }
+
+    /**
+     * 更新数据
+     */
+    public function update(RequestInterface $request, int $id): ResponseInterface
+    {
+        try {
+            $data = $request->all();
+            $model = $this->findModel($id);
+            if (!$model) {
+                return $this->error('记录不存在', code: 404);
+            }
+            $this->validateData($data, 'update', $id);
+            $this->updateModel($model, $data);
+            return $this->success([], '更新成功');
+        } catch (ValidationException $e) {
+            return $this->error($e->getMessage(), ['errors' => $e->getErrors()], 422);
+        } catch (\Throwable $e) {
+            logger()->error('[BaseModelCrudController] 更新记录失败', ['error' => $e->getMessage()]);
+            return $this->error($e->getMessage());
+        }
+    }
+
+    /**
+     * 删除数据
+     */
+    public function destroy(RequestInterface $request, int $id): ResponseInterface
+    {
+        try {
+            $model = $this->findModel($id);
+            if (!$model) {
+                return $this->error('记录不存在或已被删除', code: 404);
+            }
+            $this->deleteModel($model);
+            $message = $this->usesSoftDeletes() ? '删除成功（已移至回收站）' : '删除成功';
+            return $this->success([], $message);
+        } catch (\Throwable $e) {
+            logger()->error('[BaseModelCrudController] 删除记录失败', ['error' => $e->getMessage()]);
+            return $this->error($e->getMessage());
+        }
+    }
+
+    /**
+     * 批量删除
+     */
+    public function batchDestroy(RequestInterface $request): ResponseInterface
+    {
+        try {
+            $ids = $request->input('ids', []);
+            if (empty($ids) || !is_array($ids)) {
+                return $this->error('请选择要删除的记录');
+            }
+
+            $ids = array_filter(array_map('intval', $ids), fn($id) => $id > 0);
+            if (empty($ids)) {
+                return $this->error('无效的记录ID');
+            }
+
+            $modelClass = $this->getModelClass();
+            $query = $modelClass::query()->whereIn('id', $ids);
+
+            if ($this->hasSiteId() && site_id() && !is_super_admin()) {
+                $query->where('site_id', site_id());
+            }
+
+            $count = $this->usesSoftDeletes()
+                ? $query->delete()
+                : $query->forceDelete();
+
+            $message = $this->usesSoftDeletes()
+                ? "成功删除 {$count} 条记录（已移至回收站）"
+                : "成功删除 {$count} 条记录";
+
+            return $this->success(['count' => $count], $message);
+        } catch (\Throwable $e) {
+            logger()->error('[BaseModelCrudController] 批量删除失败', ['error' => $e->getMessage()]);
+            return $this->error($e->getMessage());
+        }
+    }
+
+    /**
+     * 切换字段值
+     */
+    public function toggleStatus(RequestInterface $request, int $id): ResponseInterface
+    {
+        try {
+            $field = $request->input('field', 'status');
+            if (!preg_match('/^[a-z_][a-z0-9_]*$/i', $field)) {
+                return $this->error('无效的字段名', code: 400);
+            }
+
+            $model = $this->findModel($id);
+            if (!$model) {
+                return $this->error('记录不存在', code: 404);
+            }
+
+            $currentValue = $model->{$field} ?? 0;
+            $newValue = $currentValue == 1 ? 0 : 1;
+            $model->{$field} = $newValue;
+            $model->save();
+
+            $fieldLabels = $this->getFieldLabels();
+            $fieldLabel = $fieldLabels[$field] ?? $field;
+            $message = $newValue == 1
+                ? ($fieldLabels[$field . '_enabled'] ?? "{$fieldLabel}已启用")
+                : ($fieldLabels[$field . '_disabled'] ?? "{$fieldLabel}已禁用");
+
+            return $this->success([$field => $newValue], $message);
+        } catch (\Throwable $e) {
+            logger()->error('[BaseModelCrudController] 切换字段值失败', ['error' => $e->getMessage()]);
+            throw $e;
+        }
+    }
+
+    // ============================================
+    // 软删除方法（回收站）
+    // ============================================
+
+    /**
+     * 回收站页面
      */
     public function trash(RequestInterface $request): ResponseInterface
     {
@@ -830,59 +762,35 @@ abstract class BaseModelCrudController extends AbstractController
 
     /**
      * 渲染回收站页面
-     * 子类可以重写此方法以自定义视图
-     *
-     * @param RequestInterface $request
-     * @return ResponseInterface
      */
     protected function renderTrashPage(RequestInterface $request): ResponseInterface
     {
-        return $this->error('请实现 renderTrashPage 方法或创建对应的视图');
+        return $this->error('请实现 renderTrashPage 方法');
     }
 
     /**
-     * 获取回收站数据（只查询已删除的记录）
+     * 获取回收站数据
      */
     public function trashData(RequestInterface $request): ResponseInterface
     {
         try {
-            $keyword = $this->normalizeKeyword($request->input('keyword', ''));
-            $filters = $this->normalizeFilters($request->input('filters', []));
-            $page = (int)$request->input('page', 1);
-            $pageSize = (int)$request->input('page_size', $this->getPageSize());
-            $sortField = $request->input('sort_field', 'deleted_at');
-            $sortOrder = $request->input('sort_order', 'desc');
-
+            $params = $this->prepareListParams($request);
             $modelClass = $this->getModelClass();
-            $query = $modelClass::query()->onlyTrashed(); // 只查询已删除的记录
+            $query = $modelClass::query()->onlyTrashed();
 
-            // 站点过滤
             if ($this->hasSiteId() && site_id() && !is_super_admin()) {
                 $query->where('site_id', site_id());
             }
 
-            // 关键词搜索
-            if (!empty($keyword)) {
-                $searchFields = $this->getSearchableFields();
-                $query->where(function ($q) use ($searchFields, $keyword) {
-                    foreach ($searchFields as $field) {
-                        $q->orWhere($field, 'like', '%' . $keyword . '%');
-                    }
-                });
-            }
+            $this->applyKeywordSearch($query, $params['keyword']);
+            $this->applyFilters($query, $params['filters']);
+            $query->orderBy('deleted_at', 'desc');
 
-            // 应用过滤条件
-            if (!empty($filters)) {
-                $this->applyFilters($query, $filters);
-            }
+            $page = $params['page'];
+            $pageSize = $params['page_size'];
 
-            // 排序
-            $query->orderBy($sortField, $sortOrder);
-
-            // 分页处理：如果 page_size 为 0，返回所有数据
             if ($pageSize > 0) {
                 $paginator = $query->paginate($pageSize, ['*'], 'page', $page);
-                
                 return $this->success([
                     'data' => $paginator->items(),
                     'total' => $paginator->total(),
@@ -890,19 +798,16 @@ abstract class BaseModelCrudController extends AbstractController
                     'page_size' => $paginator->perPage(),
                     'last_page' => $paginator->lastPage(),
                 ]);
-            } else {
-                // page_size 为 0，返回所有数据
-                $total = $query->count();
-                $data = $query->get()->toArray();
-                
-                return $this->success([
-                    'data' => $data,
-                    'total' => $total,
-                    'page' => 1,
-                    'page_size' => $total > 0 ? $total : 0,
-                    'last_page' => 1,
-                ]);
             }
+
+            $total = $query->count();
+            return $this->success([
+                'data' => $query->get()->toArray(),
+                'total' => $total,
+                'page' => 1,
+                'page_size' => $total,
+                'last_page' => 1,
+            ]);
         } catch (\Throwable $e) {
             return $this->error($e->getMessage());
         }
@@ -914,14 +819,9 @@ abstract class BaseModelCrudController extends AbstractController
     public function restore(RequestInterface $request, int $id): ResponseInterface
     {
         try {
-            if (!$this->usesSoftDeletes()) {
-                return $this->error('该模型未启用软删除功能');
-            }
-
             $modelClass = $this->getModelClass();
             $query = $modelClass::query()->onlyTrashed()->where('id', $id);
 
-            // 站点过滤
             if ($this->hasSiteId() && site_id() && !is_super_admin()) {
                 $query->where('site_id', site_id());
             }
@@ -932,7 +832,6 @@ abstract class BaseModelCrudController extends AbstractController
             }
 
             $model->restore();
-
             return $this->success([], '恢复成功');
         } catch (\Throwable $e) {
             return $this->error($e->getMessage());
@@ -940,19 +839,14 @@ abstract class BaseModelCrudController extends AbstractController
     }
 
     /**
-     * 永久删除记录
+     * 永久删除
      */
     public function forceDelete(RequestInterface $request, int $id): ResponseInterface
     {
         try {
-            if (!$this->usesSoftDeletes()) {
-                return $this->error('该模型未启用软删除功能');
-            }
-
             $modelClass = $this->getModelClass();
             $query = $modelClass::query()->onlyTrashed()->where('id', $id);
 
-            // 站点过滤
             if ($this->hasSiteId() && site_id() && !is_super_admin()) {
                 $query->where('site_id', site_id());
             }
@@ -963,7 +857,6 @@ abstract class BaseModelCrudController extends AbstractController
             }
 
             $model->forceDelete();
-
             return $this->success([], '永久删除成功');
         } catch (\Throwable $e) {
             return $this->error($e->getMessage());
@@ -976,10 +869,6 @@ abstract class BaseModelCrudController extends AbstractController
     public function batchRestore(RequestInterface $request): ResponseInterface
     {
         try {
-            if (!$this->usesSoftDeletes()) {
-                return $this->error('该模型未启用软删除功能');
-            }
-
             $ids = $request->input('ids', []);
             if (empty($ids) || !is_array($ids)) {
                 return $this->error('请选择要恢复的记录');
@@ -993,13 +882,11 @@ abstract class BaseModelCrudController extends AbstractController
             $modelClass = $this->getModelClass();
             $query = $modelClass::query()->onlyTrashed()->whereIn('id', $ids);
 
-            // 站点过滤
             if ($this->hasSiteId() && site_id() && !is_super_admin()) {
                 $query->where('site_id', site_id());
             }
 
             $count = $query->restore();
-
             return $this->success(['count' => $count], "成功恢复 {$count} 条记录");
         } catch (\Throwable $e) {
             return $this->error($e->getMessage());
@@ -1012,10 +899,6 @@ abstract class BaseModelCrudController extends AbstractController
     public function batchForceDelete(RequestInterface $request): ResponseInterface
     {
         try {
-            if (!$this->usesSoftDeletes()) {
-                return $this->error('该模型未启用软删除功能');
-            }
-
             $ids = $request->input('ids', []);
             if (empty($ids) || !is_array($ids)) {
                 return $this->error('请选择要永久删除的记录');
@@ -1029,13 +912,11 @@ abstract class BaseModelCrudController extends AbstractController
             $modelClass = $this->getModelClass();
             $query = $modelClass::query()->onlyTrashed()->whereIn('id', $ids);
 
-            // 站点过滤
             if ($this->hasSiteId() && site_id() && !is_super_admin()) {
                 $query->where('site_id', site_id());
             }
 
             $count = $query->forceDelete();
-
             return $this->success(['count' => $count], "成功永久删除 {$count} 条记录");
         } catch (\Throwable $e) {
             return $this->error($e->getMessage());
@@ -1048,14 +929,9 @@ abstract class BaseModelCrudController extends AbstractController
     public function clearTrash(RequestInterface $request): ResponseInterface
     {
         try {
-            if (!$this->usesSoftDeletes()) {
-                return $this->error('该模型未启用软删除功能');
-            }
-
             $modelClass = $this->getModelClass();
             $query = $modelClass::query()->onlyTrashed();
 
-            // 站点过滤
             if ($this->hasSiteId() && site_id() && !is_super_admin()) {
                 $query->where('site_id', site_id());
             }
@@ -1063,13 +939,384 @@ abstract class BaseModelCrudController extends AbstractController
             $count = $query->forceDelete();
 
             if ($count === 0) {
-                return $this->success(['count' => 0], '回收站已经是空的，没有记录需要删除');
+                return $this->success(['count' => 0], '回收站已经是空的');
             }
 
-            return $this->success(['count' => $count], "成功清空回收站，共永久删除 {$count} 条记录");
+            return $this->success(['count' => $count], "成功清空回收站，永久删除 {$count} 条记录");
         } catch (\Throwable $e) {
             return $this->error($e->getMessage());
         }
     }
-}
 
+    // ============================================
+    // 导入导出功能
+    // ============================================
+
+    /**
+     * 导出数据
+     */
+    public function export(RequestInterface $request): ResponseInterface
+    {
+        try {
+            $params = $request->all();
+            $query = $this->getListQuery();
+
+            // 应用搜索
+            $this->applyKeywordSearch($query, $params['keyword'] ?? '');
+
+            // 应用过滤
+            $this->applyFilters($query, $this->normalizeFilters($params['filters'] ?? []));
+
+            // 排序
+            $sortField = $params['sort_field'] ?? $this->getDefaultSortField();
+            $sortOrder = $params['sort_order'] ?? $this->getDefaultSortOrder();
+            $this->applySorting($query, $sortField, $sortOrder);
+
+            // 获取导出字段（子类可覆盖）
+            $exportFields = $this->getExportFields();
+            $data = $query->get()->toArray();
+
+            // 格式化导出数据
+            $exportData = $this->formatExportData($data, $exportFields);
+
+            $filename = $this->getExportFilename();
+            return $this->exportToCsv($exportData, $filename);
+        } catch (\Exception $e) {
+            return $this->error('导出失败：' . $e->getMessage());
+        }
+    }
+
+    /**
+     * 下载导入模板
+     */
+    public function exportTemplate(RequestInterface $request): ResponseInterface
+    {
+        try {
+            $templateData = $this->getImportTemplate();
+            $filename = $this->getExportFilename() . '_template';
+            return $this->exportToCsv($templateData, $filename);
+        } catch (\Exception $e) {
+            return $this->error('模板生成失败：' . $e->getMessage());
+        }
+    }
+
+    /**
+     * 导入数据
+     */
+    public function import(RequestInterface $request): ResponseInterface
+    {
+        try {
+            $file = $request->file('file');
+            if (!$file) {
+                return $this->error('请上传文件');
+            }
+
+            $extension = strtolower($file->getExtension());
+            if (!in_array($extension, ['xlsx', 'xls', 'csv'])) {
+                return $this->error('仅支持 xlsx、xls、csv 格式文件');
+            }
+
+            if ($file->getSize() > 10 * 1024 * 1024) { // 10MB
+                return $this->error('文件大小不能超过 10MB');
+            }
+
+            $tempPath = $file->getRealPath();
+            $data = $this->readImportFile($extension, $tempPath);
+
+            if (empty($data)) {
+                return $this->error('文件内容为空');
+            }
+
+            $headers = array_shift($data);
+            if (!$this->validateImportHeaders($headers)) {
+                return $this->error('文件格式不正确，请下载模板后按模板格式填写');
+            }
+
+            $result = $this->processImportData($data, $headers);
+
+            return $this->success([
+                'created' => $result['created'],
+                'updated' => $result['updated'],
+                'failed' => $result['failed'],
+                'errors' => array_slice($result['errors'], 0, 10),
+            ], sprintf('导入完成：新增 %d 条，更新 %d 条，失败 %d 条', $result['created'], $result['updated'], $result['failed']));
+        } catch (\Exception $e) {
+            return $this->error('导入失败：' . $e->getMessage());
+        }
+    }
+
+    /**
+     * 获取导出字段（子类可覆盖）
+     */
+    protected function getExportFields(): array
+    {
+        $modelClass = $this->getModelClass();
+        $model = new $modelClass();
+        $fillable = $model->getFillable();
+
+        // 默认导出字段：id + fillable
+        return array_merge(['id'], $fillable);
+    }
+
+    /**
+     * 获取导出文件名
+     */
+    protected function getExportFilename(): string
+    {
+        $modelClass = $this->getModelClass();
+        $shortName = (new \ReflectionClass($modelClass))->getShortName();
+        return strtolower($shortName) . '_' . date('YmdHis');
+    }
+
+    /**
+     * 格式化导出数据
+     */
+    protected function formatExportData(array $data, array $fields): array
+    {
+        return array_map(function ($item) use ($fields) {
+            $row = [];
+            foreach ($fields as $field) {
+                $row[$field] = $item[$field] ?? '';
+            }
+            return $row;
+        }, $data);
+    }
+
+    /**
+     * 获取导入模板数据
+     */
+    protected function getImportTemplate(): array
+    {
+        $fields = $this->getExportFields();
+        $headers = array_map(function ($field) {
+            return match ($field) {
+                'id' => 'ID',
+                'name' => '名称',
+                'title' => '标题',
+                'slug' => '标识',
+                'description' => '描述',
+                'content' => '内容',
+                'status' => '状态',
+                'sort_order' => '排序',
+                'is_active' => '是否启用',
+                'type' => '类型',
+                'url' => '链接',
+                'position' => '位置',
+                'parent_id' => '父级ID',
+                'category_id' => '分类ID',
+                'author' => '作者',
+                default => $field,
+            };
+        }, $fields);
+
+        // 添加一行示例数据
+        $exampleData = [];
+        foreach ($fields as $field) {
+            $exampleData[$field] = match ($field) {
+                'id' => '',
+                'status' => 1,
+                'is_active' => '是',
+                'sort_order' => 0,
+                default => '',
+            };
+        }
+
+        return array_merge([$headers], [$exampleData]);
+    }
+
+    /**
+     * 验证导入文件表头
+     */
+    protected function validateImportHeaders(array $headers): bool
+    {
+        // 默认验证：至少包含 ID 和一个其他字段
+        return in_array('ID', $headers) || in_array('名称', $headers) || in_array('标题', $headers);
+    }
+
+    /**
+     * 处理导入数据（子类可覆盖）
+     */
+    protected function processImportData(array $data, array $headers): array
+    {
+        $success = 0;
+        $created = 0;
+        $updated = 0;
+        $failed = 0;
+        $errors = [];
+
+        // 获取导入字段映射
+        $fieldMap = $this->getImportFieldMap($headers);
+        if (empty($fieldMap)) {
+            return ['created' => 0, 'updated' => 0, 'failed' => count($data), 'errors' => ['无法识别表头字段']];
+        }
+
+        $modelClass = $this->getModelClass();
+        $model = new $modelClass();
+        $fillable = $model->getFillable();
+
+        foreach ($data as $rowIndex => $row) {
+            try {
+                // 跳过空行
+                if (empty(array_filter($row))) {
+                    continue;
+                }
+
+                // 构建数据
+                $rowData = [];
+                foreach ($fieldMap as $header => $field) {
+                    $value = $row[array_search($header, $headers)] ?? '';
+                    $rowData[$field] = $this->convertImportValue($field, $value);
+                }
+
+                // 过滤不可填充字段
+                $rowData = array_intersect_key($rowData, array_flip($fillable));
+
+                // 移除 id 和时间戳（让数据库自动生成）
+                unset($rowData['id'], $rowData['created_at'], $rowData['updated_at']);
+
+                // 根据 ID 判断新增或更新
+                $id = $rowData['id'] ?? null;
+                unset($rowData['id']);
+
+                if (!empty($id)) {
+                    $existing = $modelClass::find($id);
+                    if ($existing) {
+                        $existing->fill($rowData);
+                        $existing->save();
+                        $updated++;
+                        $success++;
+                        continue;
+                    }
+                }
+
+                // 创建新记录
+                $modelClass::create($rowData);
+                $created++;
+                $success++;
+            } catch (\Exception $e) {
+                $failed++;
+                $errors[] = "第" . ($rowIndex + 2) . "行：" . $e->getMessage();
+            }
+        }
+
+        return [
+            'created' => $created,
+            'updated' => $updated,
+            'failed' => $failed,
+            'errors' => $errors,
+        ];
+    }
+
+    /**
+     * 获取导入字段映射
+     */
+    protected function getImportFieldMap(array $headers): array
+    {
+        $map = [];
+        $fieldLabels = [
+            'ID' => 'id',
+            '名称' => 'name',
+            '标题' => 'title',
+            '标识' => 'slug',
+            '描述' => 'description',
+            '内容' => 'content',
+            '状态' => 'status',
+            '排序' => 'sort_order',
+            '是否启用' => 'is_active',
+            '类型' => 'type',
+            '链接' => 'url',
+            '位置' => 'position',
+            '父级ID' => 'parent_id',
+            '分类ID' => 'category_id',
+            '作者' => 'author',
+        ];
+
+        foreach ($headers as $header) {
+            if (isset($fieldLabels[$header])) {
+                $map[$header] = $fieldLabels[$header];
+            }
+        }
+
+        return $map;
+    }
+
+    /**
+     * 转换导入值
+     */
+    protected function convertImportValue(string $field, mixed $value): mixed
+    {
+        // 处理布尔值
+        if (in_array($field, ['status', 'is_active', 'is_featured', 'is_pinned', 'visible'])) {
+            if ($value === '是' || $value === 'true' || $value === '1') {
+                return 1;
+            }
+            if ($value === '否' || $value === 'false' || $value === '0') {
+                return 0;
+            }
+            return (int) $value;
+        }
+
+        // 处理整数
+        if (in_array($field, ['sort_order', 'view_count', 'parent_id', 'category_id'])) {
+            return (int) $value;
+        }
+
+        return $value;
+    }
+
+    /**
+     * 读取导入文件
+     */
+    private function readImportFile(string $extension, string $tempPath): array
+    {
+        $data = [];
+
+        if (in_array($extension, ['xlsx', 'xls'])) {
+            $reader = \PhpOffice\PhpSpreadsheet\IOFactory::createReaderForFile($tempPath);
+            $spreadsheet = $reader->load($tempPath);
+            $sheet = $spreadsheet->getActiveSheet();
+            $data = $sheet->toArray();
+        } elseif ($extension === 'csv') {
+            $content = file_get_contents($tempPath);
+            // 移除 BOM
+            if (str_starts_with($content, "\xef\xbb\xbf")) {
+                $content = substr($content, 3);
+            }
+            // 编码转换
+            $content = mb_convert_encoding($content, 'UTF-8', 'UTF-8,GBK,GB2312');
+
+            $lines = explode("\n", $content);
+            foreach ($lines as $line) {
+                $line = trim($line);
+                if ($line) {
+                    $data[] = str_getcsv($line);
+                }
+            }
+        }
+
+        return $data;
+    }
+
+    /**
+     * 导出为 CSV
+     */
+    private function exportToCsv(array $data, string $filename): ResponseInterface
+    {
+        if (empty($data)) {
+            $data = [['无数据']];
+        }
+
+        $content = "\xef\xbb\xbf";
+        foreach ($data as $line) {
+            $content .= implode(',', array_map(function ($item) {
+                return '"' . str_replace('"', '""', (string) $item) . '"';
+            }, $line)) . "\n";
+        }
+
+        return $this->response
+            ->withHeader('Content-Type', 'text/csv; charset=utf-8')
+            ->withHeader('Content-Disposition', "attachment; filename={$filename}.csv")
+            ->withHeader('Content-Length', (string) strlen($content))
+            ->withBody(new SwooleStream($content));
+    }
+}

@@ -22,7 +22,14 @@ return [
     // 日志配置：需要打印 context 内容的标签前缀
     // 匹配的日志消息前缀，满足条件时会打印 context 数组内容
     'log_context_tags' => [
-        '[插件配置]',
+        // '博客',
+        '[导航菜单数据]',
+        'JianhuiOrg categoryBySlug'
+        // '[SimpleBlog]'
+        // '[PostgreSQL触发器]',
+        // '[PostgreSQL表升级]'
+        // '[PostgreSQL管理]',
+        // '[插件配置]',
         // '[插件商店]',
         // '[插件导入]',
         // '[插件导出]',
@@ -36,7 +43,7 @@ return [
         'log_level' => [
 //            LogLevel::ALERT,
 //            LogLevel::CRITICAL,
-//           LogLevel::DEBUG,
+            // LogLevel::DEBUG,
             LogLevel::EMERGENCY,
             LogLevel::ERROR,
             LogLevel::INFO,

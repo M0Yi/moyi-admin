@@ -31,6 +31,48 @@
     'use strict';
 
     /**
+     * 刷新去重追踪器
+     * 用于防止在短时间内重复刷新导致的性能问题
+     */
+    const refreshTracker = {
+        lastRefreshTime: 0,
+        refreshCooldown: 500,  // 刷新冷却时间（毫秒）
+        pendingRefresh: null,   // 待执行的刷新操作
+
+        /**
+         * 检查是否可以执行刷新
+         * @returns {boolean} true 表示可以刷新，false 表示需要等待
+         */
+        canRefresh() {
+            const now = Date.now();
+            if (now - this.lastRefreshTime >= this.refreshCooldown) {
+                return true;
+            }
+            return false;
+        },
+
+        /**
+         * 记录刷新时间
+         */
+        recordRefresh() {
+            this.lastRefreshTime = Date.now();
+        },
+
+        /**
+         * 延迟刷新（用于冷却期间的刷新请求）
+         * @param {Function} refreshFn - 刷新函数
+         */
+        scheduleRefresh(refreshFn) {
+            if (this.canRefresh()) {
+                this.recordRefresh();
+                refreshFn();
+            } else {
+                console.log(`[RefreshParentListener] 刷新冷却中，跳过重复刷新请求`);
+            }
+        }
+    };
+
+    /**
      * 初始化刷新父页面监听器
      * 
      * @param {string|string[]} tableId - 数据表格的 ID，可以是单个字符串或数组
@@ -114,8 +156,11 @@
                     payload: payload,
                     tableIds: tableIds
                 });
-                
-                refreshDataTable();
+
+                // 使用刷新追踪器防止重复刷新
+                refreshTracker.scheduleRefresh(() => {
+                    refreshDataTable();
+                });
             }
         }
 

@@ -80,6 +80,8 @@
     {{-- iframe-shell 组件：用于在弹窗中打开页面 --}}
     @include('components.iframe-shell')
 
+    {{-- Toast 通知容器：全局显示 --}}
+    @include('components.alpine.toast.container', ['position' => 'top-end'])
 
     @if($isEmbedded)
         <main class="admin-embed-main">
@@ -207,11 +209,29 @@ window.AI_CONFIG = @json($aiConfig);
     @include('components.admin-script', ['path' => '/js/components/ai-service.js'])
     {{-- AI 输入增强组件 --}}
     @include('components.admin-script', ['path' => '/js/components/ai-input-enhancer.js'])
+
     {{-- 外部 JavaScript 资源（按需引入） --}}
     @include('components.plugin.bootstrap-js')
     @include('components.plugin.tom-select-js')
     @include('components.plugin.flatpickr-js')
     @include('components.plugin.flatpickr-zh')
+    {{-- ========== Alpine.js 集成（前端交互框架） ========== --}}
+    {{-- Alpine.js 核心（必须在其他 Alpine 组件之前加载） --}}
+    @include('components.plugin.alpinejs')
+
+    {{-- Alpine.js 相关组件（必须在 Alpine.js 之后加载） --}}
+    {{-- 通用工具函数（无依赖） --}}
+    @include('components.alpine.helper-js')
+    {{-- HTTP 请求封装（依赖 helper-js） --}}
+    @include('components.alpine.request-js')
+    {{-- Toast 通知组件（依赖 request-js） --}}
+    @include('components.alpine.toast-js')
+    {{-- Loading 组件（依赖 toast-js） --}}
+    @include('components.alpine.loading-js')
+    {{-- Confirm 确认对话框（依赖 loading-js） --}}
+    @include('components.alpine.confirm-js')
+    {{-- Modal 弹窗组件（依赖 confirm-js） --}}
+    @include('components.alpine.modal-js')
 
     {{-- iframe-shell.js：在所有页面加载，用于处理弹窗打开功能 --}}
     @include('components.iframe-shell-js')
@@ -225,6 +245,11 @@ window.AI_CONFIG = @json($aiConfig);
     --}}
     @stack('admin_shell_scripts')
 @endif
+
+{{-- 插槽：admin_sidebar_scripts
+    功能：输出侧边栏相关的脚本（在所有模式下都执行，包括 iframe 模式）
+--}}
+@stack('admin_sidebar_scripts')
 
 @if ($isEmbedded)
     {{-- 插槽：admin_scripts

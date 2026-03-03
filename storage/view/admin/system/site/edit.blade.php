@@ -261,13 +261,21 @@ document.addEventListener('DOMContentLoaded', function () {
     }
     
     // 初始化通用表单渲染器（先渲染到默认容器）
+    // 注意：表单提交由 UniversalFormRenderer 处理，SiteForm.prepareSubmitData 用于数据预处理
     const renderer = new UniversalFormRenderer({
         schema: window.SiteFormPage.formSchema,
         config: {},
         formId: 'siteForm',
         fieldsWrapperSelector: '#siteFormFields-basic', // 先渲染到基本信息容器
         submitButtonId: 'submitBtn',
-        loadingIndicatorId: 'siteFormLoading'
+        loadingIndicatorId: 'siteFormLoading',
+        // 自定义提交数据处理函数
+        customPrepareSubmitData: function(formData) {
+            if (window.SiteForm && window.SiteForm.prepareSubmitData) {
+                return window.SiteForm.prepareSubmitData(formData);
+            }
+            return Object.fromEntries(formData);
+        }
     });
     
     // 渲染完成后，按分组移动字段到对应容器
@@ -348,84 +356,6 @@ document.addEventListener('DOMContentLoaded', function () {
             window.SiteForm.init();
         }
     }, 300);
-    
-    // 处理表单提交
-    const form = document.getElementById('siteForm');
-    if (form) {
-        form.addEventListener('submit', function(event) {
-            event.preventDefault();
-            
-            const formData = new FormData(form);
-            
-            try {
-                // 使用 SiteForm 处理提交数据
-                const jsonData = window.SiteForm && window.SiteForm.prepareSubmitData 
-                    ? window.SiteForm.prepareSubmitData(formData)
-                    : Object.fromEntries(formData);
-                
-                // 发送 PUT 请求
-                const submitBtn = document.getElementById('submitBtn');
-                submitBtn.disabled = true;
-                submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>保存中...';
-                
-                fetch('{{ admin_route("system/sites") }}', {
-                    method: 'PUT',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '',
-                    },
-                    body: JSON.stringify(jsonData)
-                })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.code === 200) {
-                        const message = data.msg || '保存成功';
-                        
-                        const successEvent = new CustomEvent('submit-success', {
-                            bubbles: true,
-                            cancelable: true,
-                            detail: {
-                                message: message,
-                                redirect: null,
-                            }
-                        });
-                        form.dispatchEvent(successEvent);
-                        
-                        submitBtn.disabled = false;
-                        submitBtn.innerHTML = '保存';
-                    } else {
-                        const errorMsg = data.msg || data.message || '保存失败';
-                        if (window.Admin && typeof window.Admin.utils?.showToast === 'function') {
-                            window.Admin.utils.showToast('danger', errorMsg);
-                        } else {
-                            alert(errorMsg);
-                        }
-                        submitBtn.disabled = false;
-                        submitBtn.innerHTML = '保存';
-                    }
-                })
-                .catch(error => {
-                    console.error('Error:', error);
-                    const errorMsg = '保存失败：' + error.message;
-                    if (window.Admin && typeof window.Admin.utils?.showToast === 'function') {
-                        window.Admin.utils.showToast('danger', errorMsg);
-                    } else {
-                        alert(errorMsg);
-                    }
-                    submitBtn.disabled = false;
-                    submitBtn.innerHTML = '保存';
-                });
-            } catch (error) {
-                console.error('Error:', error);
-                const errorMsg = error.message || '表单数据验证失败';
-                if (window.Admin && typeof window.Admin.utils?.showToast === 'function') {
-                    window.Admin.utils.showToast('danger', errorMsg);
-                } else {
-                    alert(errorMsg);
-                }
-            }
-        });
-    }
 });
 </script>
 @endpush

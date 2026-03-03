@@ -141,7 +141,7 @@
                     <div class="mt-3">
                         <div class="d-flex align-items-center justify-content-between">
                             <span class="text-muted small">最新 payload</span>
-                            <code class="text-muted small">{{ $diagnostics['channel'] ?? 'channel: iframe-demo-modal' }}</code>
+                            <code class="text-muted small">{{ $diagnostics['channel'] ?? 'channel: iframe-demo-modal</code>
                         </div>
                         <pre class="bg-dark text-white rounded-3 p-3 small mt-2 mb-0" style="max-height: 180px; overflow-y: auto;" data-modal-preview>{}</pre>
                     </div>

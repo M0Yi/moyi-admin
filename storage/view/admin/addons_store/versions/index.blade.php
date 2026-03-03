@@ -234,7 +234,7 @@ function batchDelete_versionManagementTable() {
 
     const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
 
-    fetch(`{{ admin_route("addons_store/versions") }}/batch-destroy`, {
+    fetch(`{{ admin_route("addons_store/versions"))/batch-destroy`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
@@ -260,7 +260,7 @@ function batchDelete_versionManagementTable() {
 document.addEventListener('DOMContentLoaded', function () {
     // 下载版本
     window.downloadVersion = function(versionId) {
-        const url = '{{ admin_route('addons_store/versions') }}/' + versionId + '/download';
+        const url = '{{ admin_route('addons_store/versions'))/' + versionId + '/download';
         window.open(url, '_blank');
     };
 
@@ -272,7 +272,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
         const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
 
-        fetch(`{{ admin_route('addons_store/versions') }}/${versionId}`, {
+        fetch(`{{ admin_route('addons_store/versions'))/${versionId}`, {
             method: 'DELETE',
             headers: {
                 'Content-Type': 'application/json',

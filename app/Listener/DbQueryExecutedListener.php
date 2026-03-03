@@ -59,7 +59,7 @@ class DbQueryExecutedListener implements ListenerInterface
                     $position += strlen($value);
                 }
             }
-
+            logger()->info('[SQL] ' . $sql);
             $this->logger->info(sprintf('[%s] %s', $event->time, $sql));
         }
     }

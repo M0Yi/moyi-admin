@@ -241,7 +241,7 @@ document.addEventListener('DOMContentLoaded', function () {
     if (window.UploadFilePage && typeof window.UploadFilePage.initList === 'function') {
         window.UploadFilePage.initList({
             tableId: 'uploadFileTable',
-            destroyRoute: '{{ admin_route("system/upload-files") }}',
+            destroyRoute: '{{ admin_route("system/upload-files"))',
             logPrefix: '[UploadFile]'
         });
     } else {
@@ -272,7 +272,7 @@ function renderFilePreview(value, column, row) {
     const isImage = contentType && contentType.startsWith('image/');
     
     if (isImage) {
-        const previewUrl = '{{ admin_route("system/upload-files") }}/' + row.id + '/preview';
+        const previewUrl = '{{ admin_route("system/upload-files"))/' + row.id + '/preview';
         const safeFilename = (originalFilename || '').replace(/['"]/g, '&quot;');
         return `<img src="${fileUrl}" alt="${safeFilename}" 
                      class="img-thumbnail" 
@@ -302,7 +302,7 @@ function renderFilePreview(value, column, row) {
         }
     }
     
-    const previewUrl = '{{ admin_route("system/upload-files") }}/' + row.id + '/preview';
+    const previewUrl = '{{ admin_route("system/upload-files"))/' + row.id + '/preview';
     const safeFilename = (originalFilename || '').replace(/['"]/g, '&quot;');
     return `<i class="bi ${icon} fs-4 text-secondary" 
                style="cursor: pointer;"

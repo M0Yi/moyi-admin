@@ -15,8 +15,12 @@
      * @param {Object} options 配置选项
      */
     function initAddonPage(options = {}) {
+        console.log('[初始化] initAddonPage 被调用');
+        console.log('[初始化] 接收到的 options:', JSON.stringify(options, null, 2));
+
         // 保存路由配置
         addonRoutes = options.routes || {};
+        console.log('[初始化] addonRoutes 设置为:', JSON.stringify(addonRoutes, null, 2));
 
         // 初始化数据表格
         if (window.DataTableManager && typeof window.DataTableManager.init === 'function') {
@@ -25,7 +29,7 @@
 
         // 自定义渲染函数
         window.renderAddonStatus = function(value, row, column) {
-            const source = row.source || 'local';
+             const source = row.source || 'local';
 
             if (source === 'store') {
                 // 商店插件：显示安装状态
@@ -119,7 +123,7 @@
      * @returns {string} 完整URL
      */
     function getAddonRoute(path = '') {
-        const baseUrl = addonRoutes.base || '/admin/admin/system/addons';
+        const baseUrl = addonRoutes.base || '/admin/system/addons';
         return path ? `${baseUrl}/${path}` : baseUrl;
     }
 
@@ -127,23 +131,41 @@
      * 开启插件
      */
     window.enableAddon = function(addonId) {
+        console.log('[插件启用] ===== 开始启用插件 =====');
+        console.log('[插件启用] 插件ID:', addonId);
+
         // 立即更新UI状态
         const switchElement = document.getElementById(`addon-status-${addonId}`);
         if (switchElement) {
             switchElement.checked = true;
             switchElement.disabled = true; // 防止重复点击
+            console.log('[插件启用] UI状态已更新为开启');
         }
 
-        fetch(getAddonRoute(`${addonId}/enable`), {
+        const url = getAddonRoute(`${addonId}/enable`);
+        console.log('[插件启用] 请求URL:', url);
+
+        fetch(url, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || ''
             }
         })
-        .then(response => response.json())
+        .then(response => {
+            console.log('[插件启用] 收到响应:', {
+                status: response.status,
+                statusText: response.statusText,
+                ok: response.ok,
+                contentType: response.headers.get('content-type')
+            });
+            return response.json();
+        })
         .then(data => {
+            console.log('[插件启用] 解析响应数据:', JSON.stringify(data, null, 2));
+
             if (data.code === 200) {
+                console.log('[插件启用] 启用成功');
                 if (typeof showToast === 'function') {
                     showToast('success', '开启成功');
                 }
@@ -161,18 +183,102 @@
                     }, 3000);
                 }
             } else {
+                console.log('[插件启用] 启用失败，错误码:', data.code);
+                console.log('[插件启用] 错误信息:', data.msg);
+                console.log('[插件启用] 完整响应数据:', data);
+
                 // 操作失败，回滚UI状态
                 if (switchElement) {
                     switchElement.checked = false;
                     switchElement.disabled = false;
+                    console.log('[插件启用] UI状态已回滚');
                 }
-                if (typeof showToast === 'function') {
-                    showToast('danger', data.msg || '开启失败');
+
+                // 构建详细的错误信息（只要有错误就显示 modal）
+                let errorHtml = '';
+                let hasErrors = false;
+                let hasWarnings = false;
+
+                // 收集所有错误信息
+                const checkErrors = data.data?.check_errors || [];
+                const checkWarnings = data.data?.check_warnings || [];
+                const checkResult = data.data?.check_result;
+
+                console.log('[插件启用] checkErrors:', checkErrors);
+                console.log('[插件启用] checkWarnings:', checkWarnings);
+                console.log('[插件启用] checkResult:', checkResult);
+
+                // 如果 check_result 存在但 check_errors 不存在，从 check_result 中提取
+                const finalErrors = checkErrors.length > 0 ? checkErrors :
+                    (checkResult?.errors || []);
+                const finalWarnings = checkWarnings.length > 0 ? checkWarnings :
+                    (checkResult?.warnings || []);
+
+                console.log('[插件启用] finalErrors:', finalErrors);
+                console.log('[插件启用] finalWarnings:', finalWarnings);
+
+                hasErrors = finalErrors.length > 0;
+                hasWarnings = finalWarnings.length > 0;
+
+                // 如果有错误或警告，构建 HTML
+                if (hasErrors || hasWarnings) {
+                    // 错误信息
+                    if (finalErrors.length > 0) {
+                        errorHtml += `<div class="alert alert-danger mb-3">
+                            <h6 class="alert-heading"><i class="bi bi-exclamation-triangle-fill me-2"></i>环境检查未通过</h6>
+                            <ul class="mb-0 ps-3">`;
+                        finalErrors.forEach((error) => {
+                            const lines = error.split('\n');
+                            errorHtml += `<li class="mb-2">${lines[0]}`;
+                            if (lines.length > 1) {
+                                errorHtml += `<pre class="mt-2 p-2 bg-light rounded small text-muted" style="white-space: pre-wrap; font-size: 12px;">${lines.slice(1).join('\n')}</pre>`;
+                            }
+                            errorHtml += `</li>`;
+                        });
+                        errorHtml += `</ul></div>`;
+                    }
+
+                    // 警告信息
+                    if (finalWarnings.length > 0) {
+                        errorHtml += `<div class="alert alert-warning">
+                            <h6 class="alert-heading"><i class="bi bi-exclamation-circle-fill me-2"></i>警告</h6>
+                            <ul class="mb-0 ps-3">`;
+                        finalWarnings.forEach(warning => {
+                            errorHtml += `<li>${warning}</li>`;
+                        });
+                        errorHtml += `</ul></div>`;
+                    }
+                }
+
+                // 显示错误详情弹窗
+                console.log('[插件启用] hasErrors:', hasErrors, 'hasWarnings:', hasWarnings, 'window.$modal:', !!window.$modal);
+
+                if ((hasErrors || hasWarnings) && window.$modal) {
+                    console.log('[插件启用] 显示错误Modal');
+                    window.$modal.show({
+                        title: '<i class="bi bi-x-circle text-danger me-2"></i>插件启用失败',
+                        content: errorHtml,
+                        size: 'lg',
+                        scrollable: true,
+                        showCancel: false,  // 不显示取消按钮
+                        confirmText: '我知道了',
+                        onClose: () => {}
+                    });
+                } else {
+                    // 降级方案：使用 toast 或 alert
+                    const errorMessage = data.msg || data.message || '开启失败';
+                    console.log('[插件启用] 使用降级方案，错误信息:', errorMessage);
+                    if (typeof showToast === 'function') {
+                        showToast('danger', errorMessage);
+                    } else {
+                        alert(errorMessage);
+                    }
                 }
             }
         })
         .catch(error => {
-            console.error('Error:', error);
+            console.error('[插件启用] 请求异常:', error);
+            console.error('[插件启用] 错误堆栈:', error.stack);
             // 操作失败，回滚UI状态
             if (switchElement) {
                 switchElement.checked = false;
@@ -187,6 +293,7 @@
             if (switchElement) {
                 switchElement.disabled = false;
             }
+            console.log('[插件启用] ===== 启用流程结束 =====');
         });
     };
 

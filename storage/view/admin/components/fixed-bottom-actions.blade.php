@@ -1,47 +1,48 @@
 {{--
-固定底部操作栏组件（增强版 - 深度集成 iframeshell）
-
-参数（所有参数均为可选，提供智能默认值）：
-- $formId: 要提交的表单ID（默认：自动查找页面中第一个 form 元素）
-- $submitBtnId: 提交按钮ID（默认："submitBtn"）
-- $cancelUrl: 取消按钮的链接（默认：自动检测，iframe 中无效）
-- $cancelText: 取消按钮文本（默认："取消"）
-- $submitText: 提交按钮文本（默认："保存"）
-- $infoText: 提示文本（默认："填写完成后点击保存按钮提交"）
-- $infoIcon: 提示图标（默认："bi-info-circle"）
-- $showInfo: 是否显示提示信息（默认：true）
-- $autoDetectEmbed: 是否自动检测 iframe 环境（默认：true）
-- $onSuccess: 提交成功后的回调配置（默认：自动处理 iframe 关闭）
-    - close: 是否关闭当前 iframe（默认：true）
-    - refreshParent: 是否刷新父级标签页（默认：true）
-    - refreshMainFrame: bool|array 主框架整体刷新，array 可传 message/delay/toastType（默认：false）
-
-使用示例（最简）：
-@include('admin.components.fixed-bottom-actions', [
-    'formId' => 'menuForm'
-])
-
-使用示例（完整）：
-@include('admin.components.fixed-bottom-actions', [
-    'formId' => 'menuForm',
-    'cancelUrl' => admin_route('system/menus'),
-    'submitText' => '保存',
-    'infoText' => '填写完成后点击保存按钮提交'
-])
-
-特性：
-- ✅ 自动检测 iframe 环境（通过 AdminIframeClient 或 URL 参数）
-- ✅ 智能处理取消按钮（iframe 中自动关闭，普通页面自动跳转）
-- ✅ 深度集成 iframeshell（提交成功后自动发送 success 消息）
-- ✅ 自动查找表单（如果未指定 formId）
-- ✅ 支持通过 data 属性配置（data-fixed-action-*）
---}}
+|固定底部操作栏组件（增强版 - 深度集成 iframeshell）
+|
+|参数（所有参数均为可选，提供智能默认值）：
+|- $formId: 要提交的表单ID（默认：自动查找页面中第一个 form 元素）
+|- $submitBtnId: 提交按钮ID（默认："submitBtn"）
+|- $cancelUrl: 取消按钮的链接（默认：自动检测，iframe 中无效）
+|- $cancelText: 取消按钮文本（默认："取消"）
+|- $submitText: 提交按钮文本（默认："保存"）
+|- $infoText: 提示文本（默认："填写完成后点击保存按钮提交"）
+|- $infoIcon: 提示图标（默认："bi-info-circle"）
+|- $showInfo: 是否显示提示信息（默认：true）
+|- $autoDetectEmbed: 是否自动检测 iframe 环境（默认：true）
+|- $onSuccess: 提交成功后的回调配置（默认：自动处理 iframe 关闭）
+|    - close: 是否关闭当前 iframe（默认：true）
+|    - refreshParent: 是否刷新父级标签页（默认：true）
+|    - refreshMainFrame: bool|array 主框架整体刷新，array 可传 message/delay/toastType（默认：false）
+|
+|使用示例（最简）：
+|@include('admin.components.fixed-bottom-actions', [
+|    'formId' => 'menuForm'
+|])
+|
+|使用示例（完整）：
+|@include('admin.components.fixed-bottom-actions', [
+|    'formId' => 'menuForm',
+|    'cancelUrl' => admin_route('dashboard'),
+|    'submitText' => '保存',
+|    'infoText' => '填写完成后点击保存按钮提交'
+|])
+|
+|特性：
+|- 自动检测 iframe 环境（通过 AdminIframeClient 或 URL 参数）
+|- 智能处理取消按钮（iframe 中自动关闭，普通页面自动跳转）
+|- 深度集成 iframeshell（提交成功后自动发送 success 消息）
+|- 自动查找表单（如果未指定 formId）
+|- 支持通过 data 属性配置（data-fixed-action-*）
+|--}}
 
 @php
     // 基础参数
     $formId = $formId ?? null;
     $submitBtnId = $submitBtnId ?? 'submitBtn';
     $cancelUrl = $cancelUrl ?? null;
+    
     // 如果未传 cancelUrl，尝试智能推断：优先使用 HTTP_REFERER，其次使用后台首页
     if (empty($cancelUrl)) {
         $referer = $_SERVER['HTTP_REFERER'] ?? null;
@@ -136,7 +137,7 @@
 @once
     @push('admin_scripts')
         <script>
-        (function () {
+        (function() {
             'use strict';
 
             /**
@@ -162,7 +163,7 @@
                 try {
                     if (window.frameElement !== null) {
                         return true;
-                }
+                    }
                 } catch (e) {
                     // ignore cross-origin errors
                 }
@@ -261,7 +262,7 @@
                         cancelBtn.addEventListener('click', function(event) {
                             if (isEmbeddedPage) {
                                 // iframe 环境：关闭 iframe
-                        event.preventDefault();
+                                event.preventDefault();
 
                                 if (window.AdminIframeClient && typeof window.AdminIframeClient.close === 'function') {
                                     window.AdminIframeClient.close({
@@ -322,7 +323,6 @@
                             });
                             
                             // 触发事件，让表单的 submit 事件处理器处理
-                            // 注意：如果事件处理器调用了 preventDefault()，eventDispatched 会返回 false，这是正常的
                             const eventDispatched = targetForm.dispatchEvent(submitEvent);
                             
                             if (!eventDispatched) {
@@ -331,7 +331,6 @@
                                 console.log('[FixedBottomActions] 表单提交事件已触发，但未调用 preventDefault()');
                             }
                             
-                            // 无论事件是否被阻止，都认为提交已开始（由事件处理器负责实际的提交逻辑）
                             console.log('[FixedBottomActions] 提交按钮点击处理完成，等待表单提交事件处理器执行');
                         });
                     } else {
@@ -405,12 +404,20 @@
                                                 Object.assign(refreshOptions, detail.refreshMainFrameOptions);
                                             }
 
-                                            const messageSource = detail.refreshMainFrameMessage
-                                                || refreshOptions.message
-                                                || payload.message
-                                                || '主框架即将刷新以载入最新配置';
+                                            // 如果 refreshMainFrameMessage 未指定，则不显示重复消息
+                                            // 避免与 success() 的消息重复显示
+                                            if (!detail.refreshMainFrameMessage && !refreshOptions.message) {
+                                                refreshOptions.message = undefined;
+                                                refreshOptions.showToast = false;
+                                                console.log('[FixedBottomActions] 清除 refreshMainFrame 消息，避免与 success 消息重复显示');
+                                            } else {
+                                                const messageSource = detail.refreshMainFrameMessage
+                                                    || refreshOptions.message
+                                                    || payload.message
+                                                    || '主框架即将刷新以载入最新配置';
 
-                                            refreshOptions.message = messageSource;
+                                                refreshOptions.message = messageSource;
+                                            }
 
                                             console.log('[FixedBottomActions] 调用 AdminIframeClient.refreshMainFrame，参数:', refreshOptions);
                                             window.AdminIframeClient.refreshMainFrame(refreshOptions);
@@ -479,8 +486,8 @@
                                 
                                 if (!targetForm) {
                                     console.warn('[FixedBottomActions] 未找到表单元素');
-                            return;
-                        }
+                                    return;
+                                }
 
                                 const event = new CustomEvent('submit-success', {
                                     bubbles: true,
@@ -492,7 +499,7 @@
                             }
                         };
                     }
-                    });
+                });
             }
 
             // DOM 加载完成后初始化

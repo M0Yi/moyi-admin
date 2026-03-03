@@ -499,8 +499,8 @@ class UniversalCrudService
             }
             
             // 类型特定属性
-            // textarea 和 rich_text 类型：rows
-            if (in_array($formType, ['textarea', 'rich_text'])) {
+            // textarea 和 rich_text、tinymce 类型：rows
+            if (in_array($formType, ['textarea', 'rich_text', 'tinymce'])) {
                 if (isset($field['rows'])) {
                     $fieldConfig['rows'] = (int)$field['rows'];
                 }
@@ -2459,7 +2459,7 @@ class UniversalCrudService
                             $query->where("main.{$safeField}", $numericValue);
                         }
                         // 文本类型（form_type 为 text、textarea 等）：使用 LIKE 模糊搜索
-                        elseif (in_array($formType, ['text', 'textarea', 'rich_text', 'email', 'url', 'password'])) {
+                        elseif (in_array($formType, ['text', 'textarea', 'rich_text', 'tinymce', 'email', 'url', 'password'])) {
                             $whereClause = "main.{$safeField} LIKE ?";
                             logger()->info("[UniversalCrudService] 应用查询条件（单个-普通字段-form_type=文本）: {$field}", [
                                 'where_clause' => $whereClause,

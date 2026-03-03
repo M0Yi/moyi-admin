@@ -395,7 +395,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
         const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
 
-        fetch(`{{ admin_route("addons_store") }}/${id}`, {
+        fetch(`{{ admin_route("addons_store"))/${id}`, {
             method: 'DELETE',
             headers: {
                 'Content-Type': 'application/json',

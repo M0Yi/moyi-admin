@@ -51,8 +51,47 @@ class MultiSiteRedisHandler extends BaseRedisHandler
     public function write(string $id, string $data): bool
     {
         $key = $this->getSessionKey($id);
-        
-        return (bool) $this->redis->setEx($key, $this->gcMaxLifeTime, $data);
+
+        // 检查是否为"保持登录"模式
+        $ttl = $this->getSessionTtl($data);
+
+        return (bool) $this->redis->setEx($key, $ttl, $data);
+    }
+
+    /**
+     * 获取 Session 过期时间
+     */
+    protected function getSessionTtl(string $data): int
+    {
+        // 解析 Session 数据，检查是否包含 remember_me 标志
+        $decoded = $this->decodeSessionData($data);
+
+        // 如果包含 admin_remember_me 标志且为 true，设置为 24 小时
+        if (isset($decoded['admin_remember_me']) && $decoded['admin_remember_me']) {
+            return 24 * 60 * 60; // 24小时
+        }
+
+        // 否则使用默认过期时间
+        return $this->gcMaxLifeTime;
+    }
+
+    /**
+     * 解析 Session 数据
+     */
+    protected function decodeSessionData(string $data): array
+    {
+        try {
+            // Session 数据通常是序列化的，这里尝试反序列化
+            if (empty($data)) {
+                return [];
+            }
+
+            $unserialized = unserialize($data);
+            return is_array($unserialized) ? $unserialized : [];
+        } catch (\Throwable $e) {
+            // 如果反序列化失败，返回空数组
+            return [];
+        }
     }
 
     /**

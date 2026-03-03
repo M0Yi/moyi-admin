@@ -51,12 +51,19 @@ class AppExceptionHandler extends ExceptionHandler
         }
 
         if ($throwable instanceof BusinessException) {
+            // 使用 BusinessException 的 getHttpStatusCode 方法获取正确的 HTTP 状态码
+            $httpStatusCode = $throwable->getHttpStatusCode();
+
+            // 获取错误数据
+            $errorData = $throwable->getErrorData();
+
             $payload = [
-                'code' => $throwable->getCode() > 0 ? $throwable->getCode() : 500,
+                'code' => $throwable->getCode() > 0 ? $throwable->getCode() : 400,
                 'msg' => $throwable->getMessage(),
-                'data' => null,
+                'data' => $errorData ?: null,
             ];
 
+            // 始终返回 HTTP 200，通过响应体中的 code 区分成功和业务错误
             return $this->jsonResponse($response, $payload, 200);
         }
 
@@ -68,6 +75,7 @@ class AppExceptionHandler extends ExceptionHandler
                 'errors' => $throwable->getErrors(),
             ];
 
+            // 始终返回 HTTP 200，通过响应体中的 code 区分成功和业务错误
             return $this->jsonResponse($response, $payload, 200);
         }
 
@@ -83,7 +91,8 @@ class AppExceptionHandler extends ExceptionHandler
                 'data' => null,
             ];
 
-            return $this->jsonResponse($response, $payload, 500);
+            // 始终返回 HTTP 200，通过响应体中的 code 区分成功和业务错误
+            return $this->jsonResponse($response, $payload, 200);
         }
 
         if (! $isApiRequest) {

@@ -344,7 +344,7 @@
                                         <label class="form-check-label" for="featureSearchToggle">
                                             启用搜索
                                         </label>
-                </div>
+                                    </div>
                                     <small class="text-muted">控制列表页是否展示搜索区域。</small>
                                 </div>
                                 <div class="col-md-3 col-sm-6">
@@ -382,7 +382,7 @@
                                 </div>
                                 <div class="col-md-3 col-sm-6">
                                     <div class="form-check form-switch">
-                                    <input type="hidden" name="features[export]" value="0">
+                                        <input type="hidden" name="features[export]" value="0">
                                         <input class="form-check-input" type="checkbox" name="features[export]" value="1"
                                                id="featureExportToggle">
                                         <label class="form-check-label" for="featureExportToggle">

@@ -15,7 +15,16 @@
         isOpen: false,
         config: null,
         handlers: [],
-        listenersAttached: false  // 标记全局事件监听器是否已附加
+        listenersAttached: false,  // 标记全局事件监听器是否已附加
+        displayedMessages: new Map()  // 消息去重追踪器：key: messageId, value: timestamp
+    };
+
+    // 消息去重配置
+    const MESSAGE_DEDUP_CONFIG = {
+        /** 相同消息的去重时间窗口（毫秒） */
+        timeWindow: 1000,
+        /** 用于生成消息唯一标识的字段 */
+        idFields: ['message', 'action']
     };
 
     const defaultOptions = {
@@ -23,6 +32,65 @@
         autoCloseOnSuccess: true,
         hideActions: false  // 是否隐藏"新标签"和"新窗口"按钮
     };
+
+    /**
+     * 生成消息的唯一标识符
+     * @param {Object} data - postMessage 的完整数据
+     * @returns {string} 消息唯一标识符
+     */
+    function generateMessageId(data) {
+        const { action, payload } = data || {};
+        const message = payload?.message || '';
+
+        // 使用消息内容、action 和来源生成唯一标识
+        const idParts = [
+            action || '',
+            message,
+            payload?.source || ''
+        ];
+
+        return idParts.join(':');
+    }
+
+    /**
+     * 检查消息是否应该被显示（去重）
+     * @param {Object} data - postMessage 的完整数据
+     * @returns {boolean} true 表示消息应该被显示，false 表示应该跳过
+     */
+    function shouldShowMessage(data) {
+        // 如果 payload 中没有 message，直接显示（不需要去重）
+        if (!data?.payload?.message) {
+            return true;
+        }
+
+        const messageId = generateMessageId(data);
+        const now = Date.now();
+
+        // 清理过期消息（超过时间窗口的记录）
+        const expiryTime = now - MESSAGE_DEDUP_CONFIG.timeWindow;
+        for (const [id, timestamp] of state.displayedMessages.entries()) {
+            if (timestamp < expiryTime) {
+                state.displayedMessages.delete(id);
+            }
+        }
+
+        // 检查消息是否已存在
+        if (state.displayedMessages.has(messageId)) {
+            console.log(`[IframeShell] 消息去重：跳过重复消息 - "${data.payload.message}" (ID: ${messageId})`);
+            return false;
+        }
+
+        // 记录消息
+        state.displayedMessages.set(messageId, now);
+
+        // 限制 Map 大小，防止内存泄漏
+        if (state.displayedMessages.size > 100) {
+            const firstKey = state.displayedMessages.keys().next().value;
+            state.displayedMessages.delete(firstKey);
+        }
+
+        return true;
+    }
 
     function getTabManager() {
         // 1. 优先从当前窗口获取
@@ -527,11 +595,12 @@
         console.log(logMessage);
 
         // 显示消息提示（如果 payload 中包含 message，且不是 refresh-main，避免重复提示）
-        const shouldShowToast = data.payload 
-            && typeof data.payload === 'object' 
-            && data.payload.message 
+        // 添加消息去重检查，防止 iframe 连续发送 success 和 refresh-main 导致消息重复
+        const shouldShowToast = data.payload
+            && typeof data.payload === 'object'
+            && data.payload.message
             && data.action !== 'refresh-main';
-        if (shouldShowToast) {
+        if (shouldShowToast && shouldShowMessage(data)) {
             showMessageToast(data.action, data.payload.message, data.payload.toastType);
         }
 
@@ -931,12 +1000,30 @@
         }
 
         // 如果当前窗口就是主框架且存在 TabManager，则交由 TabManager 统一处理，避免重复提示与多次刷新
-        const hasTabManager = window.self === window.top 
-            && window.Admin 
+        const hasTabManager = window.self === window.top
+            && window.Admin
             && window.Admin.tabManager;
         if (hasTabManager) {
             console.log('[IframeShell] 检测到 TabManager，refresh-main 交由其处理');
             return;
+        }
+
+        // 添加消息去重检查，防止与之前的 success 消息重复
+        if (options.showToast) {
+            // 构造一个虚拟的消息对象用于去重检查
+            const refreshMessageData = {
+                action: 'refresh-main',
+                payload: {
+                    message: options.message,
+                    source: 'triggerMainFrameRefresh'
+                }
+            };
+
+            if (!shouldShowMessage(refreshMessageData)) {
+                console.log('[IframeShell] refresh-main 消息已因去重被跳过');
+                // 仍然执行刷新，但不显示 toast
+                options.showToast = false;
+            }
         }
 
         if (options.showToast) {

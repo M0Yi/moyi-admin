@@ -166,7 +166,7 @@ class UserController extends BaseModelCrudController
      */
     public function edit(RequestInterface $request, int $id): ResponseInterface
     {
-        $user = $this->userService->getById($id);
+        $user = $this->userService->find($id);
         $fields = $this->userService->getFormFields('update', $user);
         $formSchema = [
             'title' => '编辑用户',

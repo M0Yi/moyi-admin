@@ -57,7 +57,8 @@ class PermissionController extends BaseModelCrudController
     public function listData(RequestInterface $request): ResponseInterface
     {
         $params = $request->all();
-        $data = $this->permissionService->getList($params);
+        // 使用 getFlatList 获取扁平化列表数据（返回纯数组）
+        $data = $this->permissionService->getFlatList($params);
         
         // 扁平化列表不需要 total 等分页信息，直接返回 data
         return $this->success([
@@ -106,7 +107,7 @@ class PermissionController extends BaseModelCrudController
      */
     public function edit(RequestInterface $request, int $id): ResponseInterface
     {
-        $permission = $this->permissionService->getById($id);
+        $permission = $this->permissionService->find($id);
         $fields = $this->permissionService->getFormFields('update', $permission);
         $formSchema = [
             'title' => '编辑权限',

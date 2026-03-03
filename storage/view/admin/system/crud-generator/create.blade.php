@@ -105,7 +105,7 @@
                                 <code class="text-primary">{{ $table['name'] }}</code>
                             </td>
                             <td>
-                                {{ $table['comment'] ?: '-' }}
+                                {{ $table['comment'] ?: '-
                             </td>
                             <td class="text-center">
                                 <span class="badge bg-info">{{ number_format($table['rows']) }}</span>

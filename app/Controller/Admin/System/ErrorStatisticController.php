@@ -175,7 +175,7 @@ class ErrorStatisticController extends BaseModelCrudController
      */
     public function show(RequestInterface $request, int $id): ResponseInterface
     {
-        $errorStat = $this->errorStatisticService->getById($id);
+        $errorStat = $this->errorStatisticService->find($id);
 
         return $this->renderAdmin('admin.system.error-statistic.show', [
             'errorStat' => $errorStat,

@@ -66,7 +66,8 @@
             const fragment = document.createDocumentFragment();
 
             fields.forEach((field) => {
-                const fieldType = (field.type || '').toLowerCase();
+                // 优先使用 ui_type，否则使用 type
+                const fieldType = (field.ui_type || field.type || '').toLowerCase();
                 
                 // 处理卡片分组
                 if (fieldType === 'card') {
@@ -130,7 +131,19 @@
                 return;
             }
 
-            const payload = this.buildPayload();
+            // 同步富文本字段的值到隐藏输入框
+            this.syncRichTextFields();
+            this.syncTinymceFields();
+
+            // 使用自定义提交数据处理函数（如果配置了）
+            let payload;
+            if (typeof this.config.customPrepareSubmitData === 'function') {
+                const formData = new FormData(this.form);
+                payload = this.config.customPrepareSubmitData(formData);
+            } else {
+                payload = this.buildPayload();
+            }
+            
             this.toggleSubmitState(true);
 
             // 从 schema 中获取 HTTP 方法，默认为 POST
@@ -429,7 +442,8 @@
         
         renderFieldsToHtml(fields = []) {
             return fields.map((field) => {
-                const fieldType = (field.type || '').toLowerCase();
+                // 优先使用 ui_type，否则使用 type
+                const fieldType = (field.ui_type || field.type || '').toLowerCase();
                 
                 // 卡片内不支持嵌套卡片、分组和分隔线（避免过度嵌套）
                 if (fieldType === 'card' || fieldType === 'group' || fieldType === 'divider') {
@@ -524,7 +538,8 @@
         }
 
         renderFieldControl(field) {
-            const type = (field.type || 'text').toLowerCase();
+            // 优先使用 ui_type（UI组件类型），否则使用 type
+            const type = (field.ui_type || field.type || 'text').toLowerCase();
 
             switch (type) {
                 case 'email':
@@ -564,6 +579,8 @@
                     return this.renderFilesField(field);
                 case 'rich_text':
                     return this.renderRichTextField(field);
+                case 'tinymce':
+                    return this.renderTinymceField(field);
                 case 'permission_tree':
                     return this.renderPermissionTreeField(field);
                 case 'color':
@@ -810,7 +827,8 @@
 
         renderSelect(field) {
             const id = this.getFieldId(field);
-            const isRelation = field.type === 'relation' || field.type === 'relation_multi';
+            // 优先使用 ui_type，否则使用 type
+            const isRelation = field.ui_type === 'relation' || field.ui_type === 'relation_multi' || field.type === 'relation' || field.type === 'relation_multi';
             const multiple = this.isMultiple(field);
             const selectName = multiple ? `${field.name}[]` : field.name;
             const options = this.getOptions(field);
@@ -1208,15 +1226,55 @@
         renderRichTextField(field) {
             const id = this.getFieldId(field);
             const value = this.getFieldValue(field);
+            const placeholder = field.placeholder ?? '请输入内容...';
+            
+            // 处理工具栏配置
+            let toolbarConfigAttr = '';
+            if (field.toolbarConfig) {
+                toolbarConfigAttr = `data-toolbar-config="${this.escapeAttr(JSON.stringify(field.toolbarConfig))}"`;
+            }
 
             return `
-                <textarea
-                    class="form-control"
-                    id="${id}"
-                    name="${this.escapeAttr(field.name)}"
-                    rows="${field.rows ? parseInt(field.rows, 10) : 10}"
-                    placeholder="${this.escapeAttr(field.placeholder ?? '请输入内容...')}"
-                >${this.escape(value)}</textarea>
+                <div class="rich-text-field" data-rich-text-field data-name="${this.escapeAttr(field.name)}" ${toolbarConfigAttr}>
+                    <div id="${this.escapeAttr(id)}_toolbar" class="wang-editor-toolbar" style="border: 1px solid #dee2e6; border-bottom: none; border-radius: 0.25rem 0.25rem 0 0;"></div>
+                    <div id="${this.escapeAttr(id)}_editor" class="wang-editor-container" style="border: 1px solid #dee2e6; border-radius: 0 0 0.25rem 0.25rem; min-height: ${(field.rows ? parseInt(field.rows, 10) : 10) * 1.5}em;"></div>
+                    <input
+                        type="hidden"
+                        name="${this.escapeAttr(field.name)}"
+                        id="${this.escapeAttr(id)}"
+                        value="${this.escapeAttr(value)}"
+                        data-role="rich-text-value"
+                    >
+                    <div class="form-text text-muted small mt-1">${this.escape(placeholder)}</div>
+                </div>
+            `;
+        }
+
+        renderTinymceField(field) {
+            const id = this.getFieldId(field);
+            const value = this.getFieldValue(field);
+            const placeholder = field.placeholder ?? '请输入内容...';
+            const rows = field.rows || 15;
+
+            // 处理工具栏配置
+            let toolbarConfigAttr = '';
+            if (field.toolbarConfig) {
+                toolbarConfigAttr = `data-toolbar-config="${this.escapeAttr(JSON.stringify(field.toolbarConfig))}"`;
+            }
+
+            return `
+                <div class="tinymce-field" data-tinymce-field data-name="${this.escapeAttr(field.name)}" ${toolbarConfigAttr}>
+                    <textarea
+                        name="${this.escapeAttr(field.name)}"
+                        id="${this.escapeAttr(id)}"
+                        data-role="tinymce-value"
+                        rows="${rows}"
+                        class="form-control"
+                        placeholder="${this.escape(placeholder)}"
+                        style="min-height: ${rows * 1.5}em;"
+                    >${this.escape(value)}</textarea>
+                    <div class="form-text text-muted small mt-1">${this.escape(placeholder)}</div>
+                </div>
             `;
         }
 
@@ -2115,6 +2173,8 @@
             this.initializeFileFields();
             this.initializeMultiFileFields();
             this.initializeDateInputs();
+            this.initializeRichTextFields();
+            this.initializeTinymceFields();
             this.initializePermissionTreeFields();
             this.initializeSiteSelectors();
             this.initializeKeyValueFields();
@@ -2993,6 +3053,304 @@
             });
         }
 
+        initializeRichTextFields() {
+            // 检查 wangEditor 是否已加载 (v5.x API)
+            const wangEditor = window.wangEditor || window;
+            if (typeof wangEditor.createEditor !== 'function') {
+                console.warn('[UniversalFormRenderer] wangEditor 未加载，富文本字段将显示为普通文本框');
+                return;
+            }
+
+            const wrappers = this.form.querySelectorAll('[data-rich-text-field]');
+
+            wrappers.forEach((wrapper) => {
+                // 如果已经初始化过，跳过
+                if (wrapper._wangEditorInstance) {
+                    return;
+                }
+
+                const hiddenInput = wrapper.querySelector('input[data-role="rich-text-value"]');
+                const toolbarContainer = wrapper.querySelector('.wang-editor-toolbar');
+                const editorContainer = wrapper.querySelector('.wang-editor-container');
+
+                if (!hiddenInput || !editorContainer) {
+                    console.warn('[UniversalFormRenderer] 富文本字段容器不完整');
+                    return;
+                }
+
+                const fieldName = wrapper.dataset.name;
+                const id = hiddenInput.id;
+                const initialValue = hiddenInput.value || '';
+
+                // 使用 wangEditor v5.x API: createEditor
+                const createEditor = wangEditor.createEditor;
+                const createToolbar = wangEditor.createToolbar;
+
+                if (!createEditor) {
+                    console.warn('[UniversalFormRenderer] wangEditor createEditor 函数未找到');
+                    return;
+                }
+
+                // 如果没有工具栏容器，则只创建编辑器（不显示工具栏）
+                const showToolbar = !!toolbarContainer;
+
+                try {
+                    // 创建编辑器
+                    const editor = createEditor({
+                        selector: editorContainer,
+                        html: initialValue,
+                        mode: 'default',
+                        config: {
+                            placeholder: hiddenInput.getAttribute('placeholder') || '请输入内容...',
+                            MENU_CONF: {
+                                // 配置上传图片
+                                uploadImage: {
+                                    maxFileSize: 5 * 1024 * 1024, // 5MB
+                                    maxNumberOfFiles: 10,
+                                    allowedFileTypes: ['image/*'],
+                                },
+                                // 配置上传视频
+                                uploadVideo: {
+                                    maxFileSize: 100 * 1024 * 1024, // 100MB
+                                    allowedFileTypes: ['video/*'],
+                                },
+                            },
+                        },
+                    });
+
+                    // 如果有工具栏容器，创建工具栏
+                    if (showToolbar && createToolbar && toolbarContainer) {
+                        // 获取字段配置中的工具栏选项
+                        let toolbarConfigStr = wrapper.dataset.toolbarConfig;
+                        let fieldConfig = toolbarConfigStr ? JSON.parse(toolbarConfigStr) : null;
+                        
+                        // 默认工具栏配置（包含源码显示）
+                        const defaultToolbarKeys = [
+                            'header', 'bold', 'italic', 'underline', 'strikeThrough', 'color',
+                            'bgColor', 'fontSize', 'fontFamily', 'lineHeight', 'indent',
+                            'justifyLeft', 'justifyCenter', 'justifyRight', 'justifyJustify',
+                            'quote', 'ul', 'ol', 'del', 'insertLink', 'insertImage', 
+                            'insertVideo', 'emotion', 'insertTable', 'codeBlock',
+                            'showSourceCode',  // 源码显示
+                            'undo', 'redo'
+                        ];
+                        
+                        const toolbarConfig = {
+                            selector: toolbarContainer,
+                            editor: editor,
+                            mode: 'default',
+                        };
+                        
+                        // 如果有自定义配置，使用自定义配置
+                        if (fieldConfig && fieldConfig.toolbarKeys) {
+                            toolbarConfig.toolbarKeys = fieldConfig.toolbarKeys;
+                        } else {
+                            toolbarConfig.toolbarKeys = defaultToolbarKeys;
+                        }
+                        
+                        createToolbar(toolbarConfig);
+                    }
+
+                    // 保存编辑器实例到包装器
+                    wrapper._wangEditorInstance = editor;
+
+                    // 监听内容变化，同步到隐藏输入框
+                    editor.on('change', function () {
+                        hiddenInput.value = editor.getHtml();
+                    });
+
+                    // 表单提交时确保内容同步
+                    wrapper._syncRichTextValue = function () {
+                        hiddenInput.value = editor.getHtml();
+                    };
+
+                    console.log('[wangEditor] 初始化完成，ID:', id);
+                } catch (error) {
+                    console.error('[wangEditor] 初始化失败:', error);
+                }
+            });
+        }
+
+        syncRichTextFields() {
+            const wrappers = this.form.querySelectorAll('[data-rich-text-field]');
+            wrappers.forEach((wrapper) => {
+                if (typeof wrapper._syncRichTextValue === 'function') {
+                    wrapper._syncRichTextValue();
+                }
+            });
+        }
+
+        initializeTinymceFields() {
+            // 检查 TinyMCE 是否已加载
+            if (typeof window.tinymce !== 'object') {
+                console.warn('[UniversalFormRenderer] TinyMCE 未加载，富文本字段将显示为普通文本框');
+                return;
+            }
+
+            const wrappers = this.form.querySelectorAll('[data-tinymce-field]');
+            // 保存 this 引用
+            const self = this;
+
+            wrappers.forEach((wrapper) => {
+                // 如果已经初始化过，跳过
+                if (wrapper._tinymceInstance) {
+                    return;
+                }
+
+                const textarea = wrapper.querySelector('textarea[data-role="tinymce-value"]');
+                if (!textarea) {
+                    console.warn('[UniversalFormRenderer] TinyMCE 文本框未找到');
+                    return;
+                }
+
+                const fieldName = wrapper.dataset.name;
+                const textareaId = textarea.id;
+
+                // 获取字段配置中的工具栏选项
+                let toolbarConfigStr = wrapper.dataset.toolbarConfig;
+                let fieldConfig = toolbarConfigStr ? JSON.parse(toolbarConfigStr) : null;
+
+                // 获取语言包配置
+                const languagePath = window.tinymceLanguagePath || '';
+                const defaultLanguage = window.tinymceDefaultLanguage || 'zh-CN';
+
+                // 默认工具栏配置
+                const defaultToolbar = 'undo redo | formatselect | bold italic underline strikethrough | alignleft aligncenter alignright alignjustify | bullist numlist outdent indent | link image table | removeformat code';
+
+                // 自定义工具栏（包含源码和视频上传）
+                const fullToolbar = 'undo redo | formatselect | bold italic underline strikethrough | alignleft aligncenter alignright alignjustify | bullist numlist outdent indent | link image customvideo media table | removeformat | code | sourcecode';
+
+                try {
+                    // 获取 base URL
+                    const getBaseUrl = () => {
+                        const scripts = document.querySelectorAll('script[src*="tinymce"]');
+                        for (let script of scripts) {
+                            const match = script.src.match(/^(.+?)\/tinymce\.min\.js$/);
+                            if (match) return match[1];
+                        }
+                        return '/npm/tinymce@8.3.2';
+                    };
+
+                    const baseUrl = getBaseUrl();
+
+                    // 使用 textarea 的 ID 作为选择器，TinyMCE 会自动替换该元素
+                    const editorConfig = {
+                        selector: '#' + textareaId,
+                        height: 500,
+                        // 添加许可证密钥以消除警告 (GPL 许可)
+                        license_key: 'gpl',
+                        language: defaultLanguage,
+                        language_url: languagePath ? languagePath + '/' + defaultLanguage + '.js' : undefined,
+                        // TinyMCE 8.x 使用 oxide 皮肤
+                        skin: 'oxide',
+                        // 指定皮肤路径
+                        skin_url: baseUrl + '/skins/ui/oxide',
+                        content_css: baseUrl + '/skins/content/default/content.css',
+                        menubar: true,
+                        // 使用 npm 包中存在的插件
+                        plugins: [
+                            'advlist', 'autolink', 'lists', 'link', 'image', 'media', 'table', 'code',
+                            'help', 'wordcount', 'searchreplace', 'visualblocks', 'preview',
+                            'insertdatetime', 'nonbreaking', 'save', 'directionality', 'fullscreen',
+                            'charmap', 'anchor', 'autoresize', 'importcss', 'quickbars'
+                        ],
+                        toolbar: fieldConfig && fieldConfig.toolbarKeys === 'simple' ? defaultToolbar : fullToolbar,
+                        content_style: 'body { font-family:Helvetica,Arial,sans-serif; font-size:14px }',
+                        paste_data_images: true,
+                        images_upload_handler: async function(blobInfo) {
+                            // 使用现有的上传逻辑
+                            const file = new File([blobInfo.blob()], blobInfo.filename(), {
+                                type: blobInfo.blob().type
+                            });
+
+                            console.log('[TinyMCE] 上传图片:', file.name);
+
+                            // 调用统一的上传方法
+                            if (!self || !self.uploadFile) {
+                                throw new Error('上传服务未初始化');
+                            }
+
+                            // 等待上传完成并返回 URL
+                            const url = await self.uploadFile(file);
+                            console.log('[TinyMCE] 上传成功，URL:', url);
+                            return url;
+                        },
+                        setup: function (editor) {
+                            // 编辑器初始化完成后的回调
+                            editor.on('init', function () {
+                                console.log('[TinyMCE] 初始化完成，ID:', textareaId);
+                            });
+                            // 内容变化时同步到 textarea
+                            editor.on('change keyup', function () {
+                                editor.save();
+                            });
+
+                            // 添加自定义视频上传按钮
+                            editor.ui.registry.addButton('customvideo', {
+                                icon: 'upload',
+                                tooltip: '上传视频',
+                                onAction: function () {
+                                    // 创建文件输入
+                                    const input = document.createElement('input');
+                                    input.type = 'file';
+                                    input.accept = 'video/*';
+                                    input.onchange = async function () {
+                                        const file = input.files[0];
+                                        if (!file) return;
+
+                                        try {
+                                            console.log('[TinyMCE] 上传视频:', file.name);
+                                            const url = await self.uploadFile(file);
+                                            console.log('[TinyMCE] 视频上传成功，URL:', url);
+
+                                            // 插入视频 HTML
+                                            const videoHtml = `<video controls src="${url}" style="max-width: 100%;"></video>`;
+                                            editor.insertContent(videoHtml);
+                                        } catch (error) {
+                                            console.error('[TinyMCE] 视频上传失败:', error);
+                                            alert('视频上传失败: ' + (error.message || '未知错误'));
+                                        }
+                                    };
+                                    input.click();
+                                }
+                            });
+                        },
+                        // 文件上传配置（可选）
+                        images_upload_url: '',
+                        automatic_uploads: true,
+                    };
+
+                    // 初始化 TinyMCE
+                    window.tinymce.init(editorConfig).then(editors => {
+                        if (editors && editors.length > 0) {
+                            const editor = editors[0];
+                            wrapper._tinymceInstance = editor;
+                            
+                            // 保存同步函数
+                            wrapper._syncTinymceValue = function () {
+                                editor.save();
+                            };
+                            
+                            console.log('[TinyMCE] 初始化成功，ID:', textareaId);
+                        }
+                    }).catch(err => {
+                        console.error('[TinyMCE] 初始化失败:', err);
+                    });
+                } catch (error) {
+                    console.error('[TinyMCE] 初始化异常:', error);
+                }
+            });
+        }
+
+        syncTinymceFields() {
+            const wrappers = this.form.querySelectorAll('[data-tinymce-field]');
+            wrappers.forEach((wrapper) => {
+                if (typeof wrapper._syncTinymceValue === 'function') {
+                    wrapper._syncTinymceValue();
+                }
+            });
+        }
+
         initializeDateInputs() {
             if (typeof window.flatpickr !== 'function') {
                 console.warn('[UniversalFormRenderer] Flatpickr 未加载，跳过日期选择器初始化');
@@ -3346,7 +3704,8 @@
                 return field.col;
             }
 
-            const fieldType = (field.type || '').toLowerCase();
+            // 优先使用 ui_type，否则使用 type
+            const fieldType = (field.ui_type || field.type || '').toLowerCase();
 
             // 图片类型（单图和多图）默认使用 col-12 col-md-6（每行2个字段）
             if (fieldType === 'image' || fieldType === 'images') {
@@ -3354,7 +3713,7 @@
             }
 
             // 全宽字段类型
-            const fullWidthTypes = ['textarea', 'rich_text', 'number_range', 'permission_tree', 'site_select'];
+            const fullWidthTypes = ['textarea', 'rich_text', 'tinymce', 'number_range', 'permission_tree', 'site_select'];
             if (fullWidthTypes.includes(fieldType)) {
                 return 'col-12';
             }
@@ -3448,8 +3807,8 @@
         }
 
         isMultiple(field) {
-            // 关联多选类型始终为多选
-            if (field.type === 'relation_multi') {
+            // 关联多选类型始终为多选（优先检查 ui_type）
+            if (field.ui_type === 'relation_multi' || field.type === 'relation_multi') {
                 return true;
             }
 

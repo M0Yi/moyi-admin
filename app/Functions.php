@@ -358,3 +358,155 @@ if (! function_exists('addons_config')) {
         }
     }
 }
+
+if (! function_exists('e')) {
+    /**
+     * HTML 实体转义
+     * 替代 Laravel 的 e() 辅助函数
+     *
+     * @param mixed $value 待转义的值
+     * @return string
+     */
+    function e(mixed $value): string
+    {
+        if ($value === null || $value === false) {
+            return '';
+        }
+        return htmlspecialchars((string) $value, ENT_QUOTES, 'UTF-8');
+    }
+}
+
+if (! function_exists('h')) {
+    /**
+     * HTML 实体转义（e() 函数的别名）
+     * 提供更直观的中文命名
+     *
+     * @param mixed $value 待转义的值
+     * @return string
+     */
+    function h(mixed $value): string
+    {
+        return e($value);
+    }
+}
+
+if (! function_exists('get_current_path')) {
+    /**
+     * 获取当前请求路径
+     * 纯 PHP 实现，避免 Laravel 的 request() 辅助函数
+     *
+     * @return string
+     */
+    function get_current_path(): string
+    {
+        try {
+            $request = make(\Hyperf\HttpServer\Contract\RequestInterface::class);
+            return '/' . ltrim($request->getPathInfo(), '/');
+        } catch (\Throwable $e) {
+            return '/';
+        }
+    }
+}
+
+if (! function_exists('render_nav_item')) {
+    /**
+     * 渲染导航菜单项（支持多级）
+     *
+     * @param array $menu 菜单数据
+     * @param array $allMenus 全部菜单数据
+     * @param string $position 菜单位置（header/footer）
+     * @return string
+     */
+    function render_nav_item(array $menu, array $allMenus = [], string $position = 'header'): string
+    {
+        $hasChildren = isset($menu['children']) && !empty($menu['children']);
+        $url = $menu['url'] ?? '#';
+        $name = $menu['name'] ?? '菜单项';
+        $target = isset($menu['target']) && $menu['target'] === '_blank' ? 'target="_blank"' : '';
+        $activeClass = '';
+
+        // 检查是否当前激活
+        $currentPath = get_current_path();
+        if ($currentPath === rtrim($url, '/') || ($url !== '#' && str_starts_with($currentPath, $url))) {
+            $activeClass = 'active';
+        }
+
+        $html = '<li class="nav-item' . ($hasChildren ? ' has-dropdown' : '') . '">';
+        $html .= '<a href="' . e($url) . '" class="nav-link ' . e($activeClass) . '" ' . $target . '>';
+
+        // 如果有图标，显示图标
+        if (!empty($menu['icon'])) {
+            $html .= '<i class="' . e($menu['icon']) . '" style="margin-right: 6px;"></i>';
+        }
+
+        $html .= e($name);
+
+        if ($hasChildren) {
+            $html .= '<svg class="dropdown-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">';
+            $html .= '<polyline points="6 9 12 15 18 9"></polyline>';
+            $html .= '</svg>';
+        }
+
+        $html .= '</a>';
+
+        // 渲染子菜单
+        if ($hasChildren) {
+            $html .= '<ul class="dropdown-menu">';
+            foreach ($menu['children'] as $child) {
+                $html .= render_nav_item($child, $allMenus, $position);
+            }
+            $html .= '</ul>';
+        }
+
+        $html .= '</li>';
+        return $html;
+    }
+}
+
+if (! function_exists('render_mobile_nav_item')) {
+    /**
+     * 渲染移动端导航菜单项（支持多级）
+     *
+     * @param array $menu 菜单数据
+     * @param array $allMenus 全部菜单数据
+     * @return string
+     */
+    function render_mobile_nav_item(array $menu, array $allMenus = []): string
+    {
+        $hasChildren = isset($menu['children']) && !empty($menu['children']);
+        $url = $menu['url'] ?? '#';
+        $name = $menu['name'] ?? '菜单项';
+        $target = isset($menu['target']) && $menu['target'] === '_blank' ? 'target="_blank"' : '';
+
+        $html = '<li class="mobile-nav-item' . ($hasChildren ? ' has-children' : '') . '">';
+        $html .= '<a href="' . e($url) . '" class="mobile-nav-link" ' . $target . '>';
+
+        // 如果有图标，显示图标
+        if (!empty($menu['icon'])) {
+            $html .= '<i class="' . e($menu['icon']) . '" style="margin-right: 8px;"></i>';
+        }
+
+        $html .= e($name);
+
+        // 如果有子菜单，显示展开图标
+        if ($hasChildren) {
+            $html .= '<svg class="dropdown-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">';
+            $html .= '<polyline points="6 9 12 15 18 9"></polyline>';
+            $html .= '</svg>';
+        }
+
+        $html .= '</a>';
+
+        // 渲染子菜单
+        if ($hasChildren) {
+            $html .= '<ul class="dropdown-menu">';
+            foreach ($menu['children'] as $child) {
+                $html .= render_mobile_nav_item($child, $allMenus);
+            }
+            $html .= '</ul>';
+        }
+
+        $html .= '</li>';
+        return $html;
+    }
+}

@@ -204,56 +204,170 @@
     </div>
     </div>
 
+@push('admin_sidebar_scripts')
+<script>
+(function() {
+    'use strict';
+
+    // 调试日志函数
+    const log = {
+        info: (...args) => console.log('[Sidebar-Mobile]', new Date().toISOString(), ...args),
+        warn: (...args) => console.warn('[Sidebar-Mobile]', new Date().toISOString(), ...args),
+        error: (...args) => console.error('[Sidebar-Mobile]', new Date().toISOString(), ...args)
+    };
+
+    log.info('移动端侧边栏脚本初始化');
+
+    const sidebar = document.getElementById('sidebar');
+    const sidebarBackdrop = document.getElementById('sidebarBackdrop');
+    const sidebarToggleMobile = document.getElementById('sidebarToggleMobile');
+
+    log.info('DOM 元素检查:', {
+        sidebar: !!sidebar,
+        sidebarBackdrop: !!sidebarBackdrop,
+        sidebarToggleMobile: !!sidebarToggleMobile
+    });
+
+    // 移动端侧边栏切换按钮点击事件
+    if (sidebarToggleMobile) {
+        log.info('移动端侧边栏切换按钮已找到');
+        sidebarToggleMobile.addEventListener('click', function(e) {
+            log.info('移动端侧边栏切换点击');
+            if (sidebar) {
+                sidebar.classList.add('show');
+            }
+            if (sidebarBackdrop) {
+                sidebarBackdrop.classList.add('show');
+            }
+            log.info('移动端侧边栏已显示');
+        });
+    } else {
+        log.warn('移动端侧边栏切换按钮未找到');
+        // 尝试查找其他可能的元素
+        const fallbackBtn = document.querySelector('.sidebar-toggle-mobile');
+        log.info('备选查找 .sidebar-toggle-mobile:', !!fallbackBtn);
+        if (fallbackBtn) {
+            fallbackBtn.addEventListener('click', function(e) {
+                log.info('备选按钮点击');
+                if (sidebar) {
+                    sidebar.classList.add('show');
+                }
+                if (sidebarBackdrop) {
+                    sidebarBackdrop.classList.add('show');
+                }
+            });
+        }
+    }
+
+    // 遮罩层点击事件
+    if (sidebarBackdrop) {
+        sidebarBackdrop.addEventListener('click', function() {
+            log.info('遮罩层点击，关闭侧边栏');
+            if (sidebar) {
+                sidebar.classList.remove('show');
+            }
+            sidebarBackdrop.classList.remove('show');
+        });
+    }
+
+    // 窗口大小变化事件
+    window.addEventListener('resize', function() {
+        const width = window.innerWidth;
+        log.info('窗口尺寸变化:', width);
+        if (width > 768) {
+            // 进入桌面端：隐藏移动端侧边栏
+            if (sidebar) {
+                sidebar.classList.remove('show');
+            }
+            if (sidebarBackdrop) {
+                sidebarBackdrop.classList.remove('show');
+            }
+            log.info('窗口大于 768px，隐藏移动端侧边栏');
+        } else {
+            // 进入移动端：移除 .collapsed 类
+            if (sidebar && sidebar.classList.contains('collapsed')) {
+                sidebar.classList.remove('collapsed');
+                log.info('进入移动端，移除 .collapsed 类');
+            }
+        }
+    });
+
+    // 移动端：点击菜单项后关闭侧边栏
+    if (sidebar && window.innerWidth <= 768) {
+        const navLinks = sidebar.querySelectorAll('.nav-link');
+        log.info('移动端菜单项数量:', navLinks.length);
+        navLinks.forEach(link => {
+            link.addEventListener('click', function(e) {
+                const hasChildren = link.classList.contains('has-children');
+                const title = link.getAttribute('data-tab-title') || link.textContent?.trim() || '未知';
+                log.info('菜单项点击:', title, 'hasChildren:', hasChildren);
+
+                // 对于有子菜单的父级链接，只展开子菜单，不关闭侧边栏
+                if (hasChildren) {
+                    log.info('父级菜单，只展开子菜单');
+                    return;
+                }
+                // 延迟关闭，让导航先发生
+                setTimeout(() => {
+                    if (sidebar) {
+                        sidebar.classList.remove('show');
+                    }
+                    if (sidebarBackdrop) {
+                        sidebarBackdrop.classList.remove('show');
+                    }
+                    log.info('移动端侧边栏已关闭');
+                }, 150);
+            });
+        });
+    }
+
+    log.info('移动端侧边栏脚本初始化完成');
+})();
+</script>
+@endpush
+
 @push('admin_shell_scripts')
 <script>
 (function() {
     'use strict';
 
+    // 调试日志函数
+    const log = {
+        info: (...args) => console.log('[Sidebar]', new Date().toISOString(), ...args),
+        warn: (...args) => console.warn('[Sidebar]', new Date().toISOString(), ...args),
+        error: (...args) => console.error('[Sidebar]', new Date().toISOString(), ...args)
+    };
+
+    log.info('侧边栏脚本初始化（桌面端）');
+
     const sidebar = document.getElementById('sidebar');
     const sidebarBackdrop = document.getElementById('sidebarBackdrop');
     const sidebarToggle = document.getElementById('sidebarToggle');
-    const sidebarToggleMobile = document.getElementById('sidebarToggleMobile');
 
+    log.info('DOM 元素检查:', {
+        sidebar: !!sidebar,
+        sidebarBackdrop: !!sidebarBackdrop,
+        sidebarToggle: !!sidebarToggle
+    });
+
+    // 桌面端侧边栏切换按钮
     if (sidebarToggle) {
+        log.info('桌面端侧边栏切换按钮已找到');
         sidebarToggle.addEventListener('click', function() {
+            log.info('桌面端侧边栏切换点击');
             sidebar.classList.toggle('collapsed');
             const isCollapsed = sidebar.classList.contains('collapsed');
             localStorage.setItem('sidebarCollapsed', isCollapsed ? '1' : '0');
+            log.info('侧边栏状态:', isCollapsed ? '收起' : '展开');
         });
         const savedState = localStorage.getItem('sidebarCollapsed');
-        if (savedState === '1') sidebar.classList.add('collapsed');
-    }
-
-    if (sidebarToggleMobile) {
-        sidebarToggleMobile.addEventListener('click', function() {
-            sidebar.classList.add('show');
-            sidebarBackdrop.classList.add('show');
-        });
-    }
-
-    if (sidebarBackdrop) {
-        sidebarBackdrop.addEventListener('click', function() {
-            sidebar.classList.remove('show');
-            sidebarBackdrop.classList.remove('show');
-        });
-    }
-
-    if (window.innerWidth <= 768) {
-        const navLinks = sidebar.querySelectorAll('.nav-link:not(.has-children)');
-        navLinks.forEach(link => {
-            link.addEventListener('click', function() {
-                sidebar.classList.remove('show');
-                sidebarBackdrop.classList.remove('show');
-            });
-        });
-    }
-
-    window.addEventListener('resize', function() {
-        if (window.innerWidth > 768) {
-            sidebar.classList.remove('show');
-            sidebarBackdrop.classList.remove('show');
+        if (savedState === '1') {
+            sidebar.classList.add('collapsed');
+            log.info('恢复侧边栏收起状态');
         }
-    });
+    } else {
+        log.warn('桌面端侧边栏切换按钮未找到');
+    }
 
     const getSubmenuFromLink = (link) => {
         let targetSelector = link.getAttribute('data-target');
@@ -313,6 +427,7 @@
 
     // 分组展开/折叠功能
     const groupHeaders = sidebar.querySelectorAll('[data-group-toggle]');
+    log.info('分组标题数量:', groupHeaders.length);
     groupHeaders.forEach(header => {
         const groupId = header.getAttribute('data-target');
         if (!groupId) return;
@@ -339,10 +454,13 @@
 
             const groupContent = sidebar.querySelector(groupId);
             if (!groupContent) {
+                log.warn('未找到分组内容:', groupId);
                 return;
             }
 
             const isExpanded = groupContent.classList.contains('show');
+            const groupTitle = header.querySelector('.sidebar-group-title')?.textContent || '未知分组';
+            log.info('分组点击:', groupTitle, '当前状态:', isExpanded ? '展开' : '收起');
             const arrow = header.querySelector('.sidebar-group-arrow');
             
             if (isExpanded) {
@@ -351,7 +469,6 @@
                 if (arrow) {
                     arrow.style.transform = 'rotate(-90deg)';
                 }
-                // 保存状态到 localStorage
                 localStorage.setItem(`sidebarGroup_${groupId.replace('#', '')}`, 'collapsed');
             } else {
                 groupContent.classList.add('show');
@@ -359,14 +476,14 @@
                 if (arrow) {
                     arrow.style.transform = 'rotate(0deg)';
                 }
-                // 保存状态到 localStorage
                 localStorage.removeItem(`sidebarGroup_${groupId.replace('#', '')}`);
             }
         });
     });
 
-    // 子菜单展开/折叠功能，支持多级菜单
+    // 子菜单展开/折叠功能
     const submenuLinks = sidebar.querySelectorAll('.nav-link.has-children');
+    log.info('子菜单父级链接数量:', submenuLinks.length);
     submenuLinks.forEach(link => {
         link.addEventListener('click', function(e) {
             e.preventDefault();
@@ -374,10 +491,14 @@
 
             const submenu = getSubmenuFromLink(link);
             if (!submenu) {
+                log.warn('未找到子菜单');
                 return;
             }
 
             const isExpanded = submenu.classList.contains('show');
+            const menuTitle = link.getAttribute('data-tab-title') || link.textContent?.trim() || '未知';
+            log.info('子菜单点击:', menuTitle, '当前状态:', isExpanded ? '展开' : '收起');
+
             if (isExpanded) {
                 closeSubmenu(link);
             } else {
@@ -390,19 +511,27 @@
 
     // 高亮当前活动菜单项（仅在非 iframe 模式下）
     if (window.self === window.top) {
+        log.info('非 iframe 模式，设置活动菜单高亮');
         if (window.Admin && window.Admin.utils && typeof window.Admin.utils.setSidebarActiveByUrl === 'function') {
             window.Admin.utils.setSidebarActiveByUrl(window.location.pathname);
         }
+    } else {
+        log.info('iframe 模式，跳过高亮设置');
     }
+
+    log.info('侧边栏脚本初始化完成');
 })();
 </script>
 @endpush
 
-@push('admin_sidebar_nav_actions')
-<button class="btn btn-link text-secondary sidebar-toggle-mobile me-2" type="button" id="sidebarToggleMobile">
-    <i class="bi bi-list fs-4"></i>
-</button>
+@push('admin_sidebar_nav_actions_desktop')
 <button class="btn btn-link text-secondary sidebar-toggle-desktop" type="button" id="sidebarToggle">
     <i class="bi bi-layout-sidebar-inset fs-5"></i>
+</button>
+@endpush
+
+@push('admin_sidebar_nav_actions_mobile')
+<button class="btn btn-link text-secondary sidebar-toggle-mobile me-2" type="button" id="sidebarToggleMobile">
+    <i class="bi bi-list fs-4"></i>
 </button>
 @endpush

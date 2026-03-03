@@ -96,9 +96,9 @@
     const enableSearch = {{ !empty($config['search_fields']) && ($features['search'] ?? true) ? 'true' : 'false' }};
     console.log('[UniversalCrud] 搜索功能检查', {
         enableSearch: enableSearch,
-        hasSearchFields: {{ !empty($config['search_fields']) ? 'true' : 'false' }},
-        searchFieldsCount: {{ count($config['search_fields'] ?? []) }},
-        searchFeatureEnabled: {{ ($features['search'] ?? true) ? 'true' : 'false' }},
+        hasSearchFields: enableSearch,
+        searchFieldsCount: enableSearch ? {{ count($config['search_fields'] ?? []) }} : 0,
+        searchFeatureEnabled: enableSearch,
         hasSearchFormRenderer: typeof window.SearchFormRenderer !== 'undefined'
     });
     
@@ -181,8 +181,8 @@
 <div class="container-fluid py-4">
     <!-- 页面标题 -->
     <div class="mb-3">
-        <h6 class="mb-1 fw-bold">{{ $config['title'] ?? '数据' }}列表</h6>
-        <small class="text-muted">{{ $config['description'] ?? '管理' . ($config['title'] ?? '数据') . '信息' }}</small>
+        <h6 class="mb-1 fw-bold">{{ $config['title'] ?? '数据列表' }}</h6>
+        <small class="text-muted">{{ $config['description'] ?? ('管理' . ($config['title'] ?? '数据') . '信息') }}</small>
     </div>
 
     <!-- 数据列表卡片 -->

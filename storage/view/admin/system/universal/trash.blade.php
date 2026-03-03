@@ -92,9 +92,9 @@
     const enableSearch = {{ !empty($config['search_fields']) && ($features['search'] ?? true) ? 'true' : 'false' }};
     console.log('[UniversalCrudTrash] 搜索功能检查', {
         enableSearch: enableSearch,
-        hasSearchFields: {{ !empty($config['search_fields']) ? 'true' : 'false' }},
-        searchFieldsCount: {{ count($config['search_fields'] ?? []) }},
-        searchFeatureEnabled: {{ ($features['search'] ?? true) ? 'true' : 'false' }},
+        hasSearchFields: enableSearch,
+        searchFieldsCount: enableSearch ? {{ count($config['search_fields'] ?? []) }} : 0,
+        searchFeatureEnabled: enableSearch,
         hasSearchFormRenderer: typeof window.SearchFormRenderer !== 'undefined'
     });
     
@@ -339,7 +339,7 @@
     <!-- 页面标题 -->
     <div class="mb-3">
         <h6 class="mb-1 fw-bold">
-            <i class="bi bi-trash me-2"></i>{{ $config['title'] ?? '数据' }}回收站
+            <i class="bi bi-trash me-2"></i>{{ $config['title'] ?? '数据回收站' }}
         </h6>
         <small class="text-muted">管理已删除的{{ $config['title'] ?? '数据' }}，可以恢复或永久删除</small>
     </div>

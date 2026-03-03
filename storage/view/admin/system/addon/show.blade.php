@@ -21,9 +21,6 @@
                 <small class="text-muted">查看插件详细信息</small>
             </div>
             <div>
-                <a href="{{ admin_route('system/addons') }}" class="btn btn-outline-secondary btn-sm">
-                    <i class="bi-arrow-left me-1"></i>返回列表
-                </a>
             </div>
         </div>
     </div>
@@ -157,19 +154,26 @@
                         <div class="col-md-6">
                             <h6>目录结构</h6>
                             <ul class="list-unstyled">
-                                <li><i class="bi bi-folder{{ $addon['has_controller'] ? '-fill text-success' : ' text-muted' }}"></i> Controller/</li>
-                                <li><i class="bi bi-folder{{ $addon['has_views'] ? '-fill text-success' : ' text-muted' }}"></i> View/</li>
-                                <li><i class="bi bi-folder{{ $addon['has_public'] ? '-fill text-success' : ' text-muted' }}"></i> Public/</li>
-                                <li><i class="bi bi-folder{{ $addon['has_manager'] ? '-fill text-success' : ' text-muted' }}"></i> Manager/</li>
+                                @php $folderClass = ($addon['has_controller'] ?? false) ? 'bi-folder-fill text-success' : 'bi-folder text-muted'; @endphp
+                                <li><i class="bi {{ $folderClass }}"></i> Controller/</li>
+                                @php $folderClass = ($addon['has_views'] ?? false) ? 'bi-folder-fill text-success' : 'bi-folder text-muted'; @endphp
+                                <li><i class="bi {{ $folderClass }}"></i> View/</li>
+                                @php $folderClass = ($addon['has_public'] ?? false) ? 'bi-folder-fill text-success' : 'bi-folder text-muted'; @endphp
+                                <li><i class="bi {{ $folderClass }}"></i> Public/</li>
+                                @php $folderClass = ($addon['has_manager'] ?? false) ? 'bi-folder-fill text-success' : 'bi-folder text-muted'; @endphp
+                                <li><i class="bi {{ $folderClass }}"></i> Manager/</li>
                             </ul>
                         </div>
                         <div class="col-md-6">
                             <h6>配置文件</h6>
                             <ul class="list-unstyled">
                                 <li><i class="bi bi-file-earmark-check-fill text-success"></i> info.php</li>
-                                <li><i class="bi bi-file-earmark-code{{ $addon['has_routes'] ? '-fill text-success' : ' text-muted' }}"></i> routes.php</li>
-                                <li><i class="bi bi-file-earmark-richtext{{ $addon['has_config'] ? '-fill text-success' : ' text-muted' }}"></i> config.php</li>
-                                <li><i class="bi bi-file-earmark-spreadsheet{{ isset($addon['menus_permissions']) ? '-fill text-success' : ' text-muted' }}"></i> menus_permissions.json</li>
+                                @php $fileClass = ($addon['has_routes'] ?? false) ? 'bi-file-earmark-code-fill text-success' : 'bi-file-earmark-code text-muted'; @endphp
+                                <li><i class="bi {{ $fileClass }}"></i> routes.php</li>
+                                @php $fileClass = ($addon['has_config'] ?? false) ? 'bi-file-earmark-richtext-fill text-success' : 'bi-file-earmark-richtext text-muted'; @endphp
+                                <li><i class="bi {{ $fileClass }}"></i> config.php</li>
+                                @php $fileClass = isset($addon['menus_permissions']) ? 'bi-file-earmark-spreadsheet-fill text-success' : 'bi-file-earmark-spreadsheet text-muted'; @endphp
+                                <li><i class="bi {{ $fileClass }}"></i> menus_permissions.json</li>
                             </ul>
                         </div>
                     </div>
@@ -181,12 +185,12 @@
                             <div class="col-md-6">
                                 <strong>菜单数量：</strong>
                                 <span class="badge bg-primary">{{ isset($addon['menus_permissions']['menus']) ? count($addon['menus_permissions']['menus']) : 0 }}</span>
-                </div>
+                            </div>
                             <div class="col-md-6">
                                 <strong>权限数量：</strong>
                                 <span class="badge bg-info">{{ isset($addon['menus_permissions']['permissions']) ? count($addon['menus_permissions']['permissions']) : 0 }}</span>
-            </div>
-        </div>
+                            </div>
+                        </div>
                     </div>
                     @endif
                 </div>
@@ -206,7 +210,8 @@
                                 @foreach($addon['menus_permissions']['menus'] as $menu)
                                 <div class="card card-body p-3 mb-2">
                                     <div class="d-flex align-items-center">
-                                        <i class="bi {{ $menu['icon'] ?? 'bi-circle' }} me-2"></i>
+                                        @php $menuIcon = $menu['icon'] ?? 'bi-circle'; @endphp
+                                        <i class="bi {{ $menuIcon }} me-2"></i>
                                         <div class="flex-grow-1">
                                             <strong>{{ $menu['title'] ?? '未命名菜单' }}</strong>
                                             @if(isset($menu['parent_slug']) && $menu['parent_slug'])

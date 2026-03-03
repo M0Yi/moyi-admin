@@ -6,6 +6,7 @@
 
 ```
 components/plugin/
+├── alpinejs.blade.php        # Alpine.js (版本: 3.13.3)
 ├── bootstrap-css.blade.php      # Bootstrap CSS (版本: 5.3.2)
 ├── bootstrap-js.blade.php       # Bootstrap JavaScript (版本: 5.3.2)
 ├── bootstrap-icons.blade.php    # Bootstrap Icons (版本: 1.11.3)
@@ -24,6 +25,9 @@ components/plugin/
 在布局文件或页面中，按需引入需要的组件：
 
 ```blade
+{{-- 引入 Alpine.js --}}
+@include('components.plugin.alpinejs')
+
 {{-- 引入 Bootstrap CSS --}}
 @include('components.plugin.bootstrap-css')
 
@@ -73,6 +77,10 @@ components/plugin/
 3. 如果本地文件不存在，自动回退到 CDN
 
 ## 组件说明
+
+### Alpine.js
+
+- **JS**: `alpinejs.blade.php` - Alpine.js 3.13.3 轻量级 JavaScript 框架
 
 ### Bootstrap
 

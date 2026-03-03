@@ -156,8 +156,8 @@ class MenuController extends BaseModelCrudController
                 'site_id' => site_id() ?? 0,
             ];
 
-            // 获取扁平化列表数据
-            $list = $this->menuService->getList($params);
+            // 使用 getFlatList 获取扁平化列表数据（返回纯数组）
+            $list = $this->menuService->getFlatList($params);
 
             // 分页处理
             $page = (int) $request->input('page', 1);
@@ -222,7 +222,7 @@ class MenuController extends BaseModelCrudController
      */
     protected function renderEditPage(RequestInterface $request, \App\Model\Model $model): ResponseInterface
     {
-        $menu = $this->menuService->getById($model->id);
+        $menu = $this->menuService->find($model->id);
         
         // 获取表单字段配置（传入菜单对象以填充默认值）
         $fields = $this->menuService->getFormFields('edit', $menu);

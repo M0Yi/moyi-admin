@@ -273,6 +273,9 @@ class SiteController extends AbstractController
         $site->fill($data);
         $site->save();
 
+        // 清除站点缓存，确保下次访问时加载最新数据
+        $this->siteService->clearSiteCache($site);
+
         return $this->success(null, '保存成功');
     }
 

@@ -179,7 +179,7 @@ class DatabaseConnectionController extends BaseModelCrudController
      */
     public function edit(RequestInterface $request, int $id): ResponseInterface
     {
-        $connection = $this->service->getById($id);
+        $connection = $this->service->find($id);
         $fields = $this->service->getFormFields('update', $connection);
         $formSchema = [
             'title' => '编辑数据库连接',

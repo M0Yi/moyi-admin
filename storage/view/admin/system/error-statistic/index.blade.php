@@ -278,7 +278,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
         const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
 
-        fetch(`{{ admin_route("system/error-statistics") }}/${id}/resolve`, {
+        fetch(`{{ admin_route("system/error-statistics"))/${id}/resolve`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -311,7 +311,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
         const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
 
-        fetch(`{{ admin_route("system/error-statistics") }}/${id}`, {
+        fetch(`{{ admin_route("system/error-statistics"))/${id}`, {
             method: 'DELETE',
             headers: {
                 'Content-Type': 'application/json',
@@ -354,7 +354,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
         const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
 
-        fetch(`{{ admin_route("system/error-statistics") }}/batch-resolve`, {
+        fetch(`{{ admin_route("system/error-statistics"))/batch-resolve`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',

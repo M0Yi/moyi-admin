@@ -11,129 +11,127 @@ use App\Model\Admin\AdminSite;
 use App\Model\Admin\AdminUser;
 use Hyperf\DbConnection\Db;
 
-class UserService
+/**
+ * 用户服务
+ *
+ * 继承 BaseService，提供用户相关的业务逻辑
+ *
+ * @package App\Service\Admin
+ */
+class UserService extends BaseService
 {
     /**
-     * 获取用户列表
-     *
-     * @param array $params 查询参数
-     * @return array
+     * 获取模型类名
      */
-    public function getList(array $params = []): array
+    protected function getModelClass(): string
     {
-        $query = AdminUser::query()
-            ->with(['roles', 'site']) // 预加载角色与站点
-            ->orderBy('id', 'desc');
+        return AdminUser::class;
+    }
 
-        // 站点过滤：普通管理员固定当前站点，超级管理员可根据筛选选择站点
-        $requestedSiteId = isset($params['site_id']) ? (int) $params['site_id'] : 0;
-        $currentSiteId = (int) (site_id() ?? 0);
-        if (is_super_admin()) {
-            if ($requestedSiteId > 0) {
-                $query->where('site_id', $requestedSiteId);
-            }
-        } elseif ($currentSiteId > 0) {
-            $query->where('site_id', $currentSiteId);
-        }
+    /**
+     * 获取可搜索字段
+     */
+    protected function getSearchableFields(): array
+    {
+        return ['username', 'email', 'real_name', 'mobile'];
+    }
 
-        // 关键词搜索
-        if (!empty($params['keyword'])) {
-            $keyword = trim((string) $params['keyword']);
-            $query->where(function ($q) use ($keyword) {
-                $q->where('username', 'like', "%{$keyword}%")
-                    ->orWhere('email', 'like', "%{$keyword}%")
-                    ->orWhere('real_name', 'like', "%{$keyword}%")
-                    ->orWhere('mobile', 'like', "%{$keyword}%");
-            });
-        }
+    /**
+     * 获取可排序字段
+     */
+    protected function getSortableFields(): array
+    {
+        return ['id', 'username', 'created_at', 'updated_at', 'status'];
+    }
+
+    /**
+     * 获取列表数据（重写以支持预加载关联）
+     */
+    public function getList(array $params = [], int $pageSize = 15): array
+    {
+        $query = $this->buildQuery($params);
+
+        // 预加载角色与站点
+        $query->with(['roles', 'site']);
 
         // 精确搜索
         $searchableFields = ['username', 'real_name', 'mobile', 'email'];
         foreach ($searchableFields as $field) {
             if (!empty($params[$field])) {
                 $value = trim((string) $params[$field]);
-                $query->where($field, 'like', "%{$value}%");
+                $query->where($field, 'like', '%' . $value . '%');
             }
         }
 
-        // 状态筛选
-        if (isset($params['status']) && $params['status'] !== '') {
-            $query->where('status', $params['status']);
-        }
-
-        // 分页
-        $pageSize = $params['page_size'] ?? 15;
-        $paginator = $query->paginate((int)$pageSize);
+        $page = (int) ($params['page'] ?? 1);
+        $pageSize = (int) ($params['page_size'] ?? $pageSize);
+        $paginator = $query->paginate($pageSize, ['*'], 'page', $page);
 
         return [
             'list' => $paginator->items(),
             'total' => $paginator->total(),
             'page' => $paginator->currentPage(),
             'page_size' => $paginator->perPage(),
+            'last_page' => $paginator->lastPage(),
         ];
     }
 
     /**
-     * 获取用户详情
-     *
-     * @param int $id 用户ID
-     * @return AdminUser
-     * @throws BusinessException
+     * 获取用户详情（重写以支持预加载关联）
      */
-    public function getById(int $id): AdminUser
+    public function find(int $id): ?AdminUser
     {
-        $query = AdminUser::query()->where('id', $id);
-        
-        $siteId = site_id() ?? 0;
-        if ($siteId && !is_super_admin()) {
-            $query->where('site_id', $siteId);
+        $modelClass = $this->getModelClass();
+        $query = $modelClass::query()->where('id', $id);
+
+        // 站点过滤
+        if ($this->hasSiteId()) {
+            $siteId = site_id();
+            if ($siteId && !is_super_admin()) {
+                $query->where('site_id', $siteId);
+            }
         }
 
-        $user = $query->with(['roles'])->first();
-
-        if (!$user) {
-            throw new BusinessException(ErrorCode::NOT_FOUND, '用户不存在');
-        }
-
-        return $user;
+        return $query->with(['roles'])->first();
     }
 
     /**
      * 创建用户
-     *
-     * @param array $data
-     * @return AdminUser
      */
     public function create(array $data): AdminUser
     {
         $siteId = $this->resolveSiteIdForWrite($data);
-        
+
         // 检查用户名是否存在
-        if (AdminUser::where('username', $data['username'])->where('site_id', $siteId)->exists()) {
+        if (!$this->isUnique('username', $data['username'])) {
             throw new BusinessException(ErrorCode::VALIDATION_ERROR, '用户名已存在');
         }
 
         // 检查邮箱是否存在
-        if (!empty($data['email']) && AdminUser::where('email', $data['email'])->where('site_id', $siteId)->exists()) {
+        if (!empty($data['email']) && !$this->isUnique('email', $data['email'])) {
             throw new BusinessException(ErrorCode::VALIDATION_ERROR, '邮箱已存在');
         }
 
         $isSuperAdmin = is_super_admin();
-        if (! $isSuperAdmin && array_key_exists('role_ids', $data)) {
+        if (!$isSuperAdmin && array_key_exists('role_ids', $data)) {
             throw new BusinessException(ErrorCode::FORBIDDEN, '只有超级管理员可以分配角色');
         }
 
         $roleIds = $isSuperAdmin ? $this->extractRoleIds($data) : null;
 
-        Db::beginTransaction();
-        try {
-            $data['site_id'] = $siteId;
-            
-            // 将空字符串转换为 NULL，避免唯一约束冲突
+        return $this->transaction(function () use ($data, $siteId, $roleIds) {
+            // 自动填充站点 ID
+            if ($this->hasSiteId()) {
+                $data['site_id'] = $siteId;
+            }
+
+            // 规范化数据
             $data = $this->normalizeNullableFields($data);
-            $data = $this->filterFillableFields($data);
-            
-            // 创建用户
+
+            // 过滤可填充字段
+            $data = $this->filterFillable($data);
+
+            /** @var AdminUser $user */
             $user = AdminUser::create($data);
 
             // 关联角色
@@ -141,118 +139,102 @@ class UserService
                 $user->roles()->sync($roleIds);
             }
 
-            Db::commit();
             return $user;
-        } catch (\Throwable $e) {
-            Db::rollBack();
-            throw $e;
-        }
+        }, '创建用户失败');
     }
 
     /**
      * 更新用户
-     *
-     * @param int $id
-     * @param array $data
-     * @return AdminUser
      */
     public function update(int $id, array $data): AdminUser
     {
-        $user = $this->getById($id);
+        $user = $this->findOrFail($id);
         $siteId = $this->resolveSiteIdForUpdate($data, $user->site_id);
 
-        // 先将空字符串转换为 NULL，避免唯一约束冲突
-        // 需要在唯一性检查之前进行规范化，确保检查的是规范化后的值
+        // 规范化数据
         $data = $this->normalizeNullableFields($data);
 
         // 检查用户名唯一性
         if (isset($data['username']) && $data['username'] !== $user->username) {
-            if (AdminUser::where('username', $data['username'])->where('site_id', $siteId)->where('id', '!=', $id)->exists()) {
+            if (!$this->isUnique('username', $data['username'], $id)) {
                 throw new BusinessException(ErrorCode::VALIDATION_ERROR, '用户名已存在');
             }
         }
 
-        // 检查邮箱唯一性（NULL 值不违反唯一约束，所以不需要检查 NULL 的唯一性）
+        // 检查邮箱唯一性
         if (isset($data['email']) && $data['email'] !== null && $data['email'] !== $user->email) {
-            if (AdminUser::where('email', $data['email'])->where('site_id', $siteId)->where('id', '!=', $id)->exists()) {
+            if (!$this->isUnique('email', $data['email'], $id)) {
                 throw new BusinessException(ErrorCode::VALIDATION_ERROR, '邮箱已存在');
             }
         }
 
         $isSuperAdmin = is_super_admin();
-        if (! $isSuperAdmin && array_key_exists('role_ids', $data)) {
+        if (!$isSuperAdmin && array_key_exists('role_ids', $data)) {
             throw new BusinessException(ErrorCode::FORBIDDEN, '只有超级管理员可以分配角色');
         }
 
         $roleIds = $isSuperAdmin ? $this->extractRoleIds($data, true) : null;
 
-        Db::beginTransaction();
-        try {
+        return $this->transaction(function () use ($user, $data, $siteId, $roleIds) {
             // 如果密码为空，则不更新密码
             if (empty($data['password'])) {
                 unset($data['password']);
             }
 
-            // 过滤可更新字段，避免非法字段导致更新失败
-            $data = $this->filterFillableFields($data);
+            // 过滤可填充字段
+            $data = $this->filterFillable($data);
 
-            if (! is_super_admin()) {
+            // 不能更新站点 ID（非超级管理员）
+            if (!is_super_admin()) {
                 unset($data['site_id']);
             } else {
                 $data['site_id'] = $siteId;
             }
 
-            $user->update($data);
+            // 移除不允许更新的字段
+            unset($data['id'], $data['created_at']);
+
+            $user->fill($data);
+            $user->save();
 
             // 更新角色关联
             if ($roleIds !== null) {
                 $user->roles()->sync($roleIds);
             }
 
-            Db::commit();
             return $user->fresh(['roles']);
-        } catch (\Throwable $e) {
-            Db::rollBack();
-            throw $e;
-        }
+        }, '更新用户失败');
     }
 
     /**
      * 删除用户
-     *
-     * @param int $id
-     * @return bool
      */
     public function delete(int $id): bool
     {
-        $user = $this->getById($id);
+        $user = $this->findOrFail($id);
 
         // 不能删除超级管理员
         if ($user->is_admin) {
             throw new BusinessException(ErrorCode::FORBIDDEN, '无法删除超级管理员');
         }
 
-        // 不能删除自己
-        // 这里需要获取当前登录用户ID，由于在 Service 层，可以通过 Context 获取或者 Controller 传参
-        // 暂时不校验删除自己，由 Controller 层或前端控制
-
         return $user->delete();
     }
 
     /**
      * 批量删除用户
-     *
-     * @param array $ids
-     * @return int
      */
     public function batchDelete(array $ids): int
     {
-        $count = 0;
-        Db::beginTransaction();
-        try {
+        if (empty($ids)) {
+            return 0;
+        }
+
+        return $this->transaction(function () use ($ids) {
+            $count = 0;
             foreach ($ids as $id) {
                 try {
-                    if ($this->delete((int)$id)) {
+                    if ($this->delete((int) $id)) {
                         $count++;
                     }
                 } catch (\Exception $e) {
@@ -260,18 +242,12 @@ class UserService
                     continue;
                 }
             }
-            Db::commit();
             return $count;
-        } catch (\Throwable $e) {
-            Db::rollBack();
-            throw $e;
-        }
+        }, '批量删除用户失败');
     }
 
     /**
      * 获取角色选项
-     *
-     * @return array
      */
     public function getRoleOptions(): array
     {
@@ -293,10 +269,6 @@ class UserService
 
     /**
      * 获取表单字段配置
-     *
-     * @param string $scene
-     * @param AdminUser|null $user
-     * @return array
      */
     public function getFormFields(string $scene = 'create', ?AdminUser $user = null): array
     {
@@ -328,7 +300,7 @@ class UserService
                 'name' => 'password',
                 'label' => '密码',
                 'type' => 'password',
-                'required' => $scene === 'create', // 创建时必填，编辑时选填
+                'required' => $scene === 'create',
                 'placeholder' => $scene === 'create' ? '请输入密码' : '如果不修改密码请留空',
                 'help' => $scene === 'update' ? '留空则不修改密码' : '',
                 'col' => 'col-12 col-md-6',
@@ -428,14 +400,9 @@ class UserService
 
     /**
      * 规范化可空字段：将空字符串转换为 NULL
-     * 避免数据库唯一约束冲突（NULL 不违反唯一约束，但空字符串会）
-     *
-     * @param array $data
-     * @return array
      */
     private function normalizeNullableFields(array $data): array
     {
-        // 可空字段列表：这些字段在数据库中允许为 NULL，且有唯一约束
         $nullableFields = ['email', 'mobile'];
 
         foreach ($nullableFields as $field) {
@@ -448,28 +415,7 @@ class UserService
     }
 
     /**
-     * 过滤可批量赋值的字段，避免意外字段导致更新失败
-     */
-    private function filterFillableFields(array $data): array
-    {
-        static $fillableMap = null;
-
-        if ($fillableMap === null) {
-            $fillable = (new AdminUser())->getFillable();
-            $fillableMap = array_flip($fillable);
-        }
-
-        if (empty($fillableMap)) {
-            return $data;
-        }
-
-        return array_intersect_key($data, $fillableMap);
-    }
-
-    /**
      * 从数据中提取角色ID，并移除 role_ids 字段
-     *
-     * @return array<int>|null 返回 null 表示未提交角色信息
      */
     private function extractRoleIds(array &$data, bool $emptyWhenMissing = false): ?array
     {
@@ -485,7 +431,7 @@ class UserService
         }
 
         $roleIds = array_map(
-            static fn($id) => (int)$id,
+            static fn($id) => (int) $id,
             array_filter(
                 $roleIds,
                 static fn($id) => $id !== null && $id !== ''
@@ -504,7 +450,7 @@ class UserService
             $siteId = site_id() ?? 0;
         }
 
-        if (! is_super_admin()) {
+        if (!is_super_admin()) {
             unset($data['site_id']);
         }
 
@@ -534,7 +480,7 @@ class UserService
             ->where('status', AdminSite::STATUS_ENABLED)
             ->exists();
 
-        if (! $exists) {
+        if (!$exists) {
             throw new BusinessException(ErrorCode::NOT_FOUND, '站点不存在或已停用');
         }
     }
@@ -554,4 +500,3 @@ class UserService
             ->toArray();
     }
 }
-

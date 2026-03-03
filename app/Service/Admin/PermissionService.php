@@ -7,15 +7,54 @@ namespace App\Service\Admin;
 use App\Constants\ErrorCode;
 use App\Exception\BusinessException;
 use App\Model\Admin\AdminPermission;
-use Hyperf\DbConnection\Db;
 
-class PermissionService
+/**
+ * 权限管理服务
+ */
+class PermissionService extends BaseService
 {
     /**
+     * 获取模型类名
+     */
+    protected function getModelClass(): string
+    {
+        return AdminPermission::class;
+    }
+
+    /**
+     * 获取可搜索字段列表
+     */
+    protected function getSearchableFields(): array
+    {
+        return ['name', 'slug'];
+    }
+
+    /**
+     * 获取可排序字段列表
+     */
+    protected function getSortableFields(): array
+    {
+        return ['id', 'sort', 'created_at'];
+    }
+
+    /**
+     * 获取默认排序字段
+     */
+    protected function getDefaultSortField(): string
+    {
+        return 'sort';
+    }
+
+    /**
+     * 获取默认排序方向
+     */
+    protected function getDefaultSortOrder(): string
+    {
+        return 'asc';
+    }
+
+    /**
      * 获取权限列表（树形结构）
-     *
-     * @param array $params
-     * @return array
      */
     public function getTree(array $params = []): array
     {
@@ -31,22 +70,13 @@ class PermissionService
 
     /**
      * 获取扁平化权限列表（带层级缩进）
-     *
-     * @param array $params
-     * @return array
      */
-    public function getList(array $params = []): array
+    public function getFlatList(array $params = []): array
     {
         // 角色和权限已解耦站点，全局共享
-        $query = AdminPermission::query()
-            ->orderBy('sort', 'asc')
-            ->orderBy('id', 'asc');
+        $query = $this->buildQuery($params);
 
         if (!empty($params['keyword'])) {
-            $query->where(function ($q) use ($params) {
-                $q->where('name', 'like', "%{$params['keyword']}%")
-                    ->orWhere('slug', 'like', "%{$params['keyword']}%");
-            });
             // 如果有搜索，就不按树形展示，直接列表
             return $query->get()->toArray();
         }
@@ -57,11 +87,6 @@ class PermissionService
 
     /**
      * 构建扁平化列表
-     *
-     * @param array $permissions
-     * @param int $parentId
-     * @param int $level
-     * @return array
      */
     protected function buildFlatList(array $permissions, int $parentId, int $level): array
     {
@@ -80,64 +105,42 @@ class PermissionService
     }
 
     /**
-     * 获取权限详情
-     *
-     * @param int $id
-     * @return AdminPermission
-     * @throws BusinessException
-     */
-    public function getById(int $id): AdminPermission
-    {
-        // 角色和权限已解耦站点，全局共享
-        $permission = AdminPermission::query()->where('id', $id)->first();
-
-        if (!$permission) {
-            throw new BusinessException(ErrorCode::NOT_FOUND, '权限不存在');
-        }
-
-        return $permission;
-    }
-
-    /**
-     * 创建权限
-     *
-     * @param array $data
-     * @return AdminPermission
+     * 创建权限（覆盖 BaseService）
      */
     public function create(array $data): AdminPermission
     {
         // 角色和权限已解耦站点，全局共享
         // 检查标识是否存在（全局唯一）
-        if (AdminPermission::where('slug', $data['slug'])->exists()) {
+        if (!$this->isUnique('slug', $data['slug'])) {
             throw new BusinessException(ErrorCode::VALIDATION_ERROR, '权限标识已存在');
         }
 
         // 检查父级是否存在
         if (!empty($data['parent_id'])) {
-            if (!AdminPermission::where('id', $data['parent_id'])->exists()) {
+            $parent = AdminPermission::query()
+                ->where('id', $data['parent_id'])
+                ->exists();
+            if (!$parent) {
                 throw new BusinessException(ErrorCode::VALIDATION_ERROR, '父级权限不存在');
             }
         }
 
         $data['parent_id'] = $data['parent_id'] ?? 0;
 
-        return AdminPermission::create($data);
+        return parent::create($data);
     }
 
     /**
-     * 更新权限
-     *
-     * @param int $id
-     * @param array $data
-     * @return AdminPermission
+     * 更新权限（覆盖 BaseService）
      */
     public function update(int $id, array $data): AdminPermission
     {
-        $permission = $this->getById($id);
+        $permission = $this->findOrFail($id);
 
         // 检查标识唯一性（全局唯一）
         if (isset($data['slug']) && $data['slug'] !== $permission->slug) {
-            if (AdminPermission::where('slug', $data['slug'])->where('id', '!=', $id)->exists()) {
+            $query = AdminPermission::where('slug', $data['slug']);
+            if ($query->exists()) {
                 throw new BusinessException(ErrorCode::VALIDATION_ERROR, '权限标识已存在');
             }
         }
@@ -147,32 +150,31 @@ class PermissionService
             if ($data['parent_id'] == $id) {
                 throw new BusinessException(ErrorCode::VALIDATION_ERROR, '不能将自己设为父级');
             }
-            
+
             if ($data['parent_id'] != 0) {
                 $descendantIds = $this->getDescendantIds($id);
                 if (in_array($data['parent_id'], $descendantIds)) {
                     throw new BusinessException(ErrorCode::VALIDATION_ERROR, '不能将子级设为父级');
                 }
 
-                if (!AdminPermission::where('id', $data['parent_id'])->exists()) {
+                $parent = AdminPermission::query()
+                    ->where('id', $data['parent_id'])
+                    ->exists();
+                if (!$parent) {
                     throw new BusinessException(ErrorCode::VALIDATION_ERROR, '父级权限不存在');
                 }
             }
         }
 
-        $permission->update($data);
-        return $permission;
+        return parent::update($id, $data);
     }
 
     /**
-     * 删除权限
-     *
-     * @param int $id
-     * @return bool
+     * 删除权限（覆盖 BaseService）
      */
     public function delete(int $id): bool
     {
-        $permission = $this->getById($id);
+        $permission = $this->findOrFail($id);
 
         // 检查是否有子权限
         if ($permission->children()->exists()) {
@@ -184,59 +186,49 @@ class PermissionService
             throw new BusinessException(ErrorCode::VALIDATION_ERROR, '该权限已被角色使用，无法删除');
         }
 
-        return $permission->delete();
+        return parent::delete($id);
     }
 
     /**
      * 批量删除权限
-     *
-     * @param array $ids
-     * @return int
      */
     public function batchDelete(array $ids): int
     {
         $count = 0;
-        Db::beginTransaction();
-        try {
+
+        return $this->transaction(function () use ($ids, &$count) {
             foreach ($ids as $id) {
                 try {
-                    if ($this->delete((int)$id)) {
+                    if ($this->delete((int) $id)) {
                         $count++;
                     }
                 } catch (\Exception $e) {
+                    // 单个删除失败，继续处理其他
                     continue;
                 }
             }
-            Db::commit();
             return $count;
-        } catch (\Throwable $e) {
-            Db::rollBack();
-            throw $e;
-        }
+        }, '批量删除权限失败');
     }
 
     /**
      * 获取后代ID列表
-     *
-     * @param int $permissionId
-     * @return array
      */
     protected function getDescendantIds(int $permissionId): array
     {
         $ids = [];
         $children = AdminPermission::where('parent_id', $permissionId)->get();
+
         foreach ($children as $child) {
             $ids[] = $child->id;
             $ids = array_merge($ids, $this->getDescendantIds($child->id));
         }
+
         return $ids;
     }
 
     /**
      * 获取父级选项
-     *
-     * @param int|null $excludeId 排除的ID（编辑时排除自己）
-     * @return array
      */
     public function getParentOptions(?int $excludeId = null): array
     {
@@ -252,20 +244,15 @@ class PermissionService
         }
 
         $permissions = $query->get()->toArray();
-        
+
         $options = [['value' => 0, 'label' => '顶级权限']];
         $treeOptions = $this->buildOptions($permissions, 0, 0);
-        
+
         return array_merge($options, $treeOptions);
     }
 
     /**
      * 构建选项
-     *
-     * @param array $permissions
-     * @param int $parentId
-     * @param int $level
-     * @return array
      */
     protected function buildOptions(array $permissions, int $parentId, int $level): array
     {
@@ -287,10 +274,6 @@ class PermissionService
 
     /**
      * 获取表单字段配置
-     *
-     * @param string $scene
-     * @param AdminPermission|null $permission
-     * @return array
      */
     public function getFormFields(string $scene = 'create', ?AdminPermission $permission = null): array
     {
@@ -395,4 +378,3 @@ class PermissionService
         return $fields;
     }
 }
-

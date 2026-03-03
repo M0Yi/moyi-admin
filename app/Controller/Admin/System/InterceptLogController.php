@@ -141,7 +141,7 @@ class InterceptLogController extends BaseModelCrudController
      */
     public function show(RequestInterface $request, int $id): ResponseInterface
     {
-        $log = $this->interceptLogService->getById($id);
+        $log = $this->interceptLogService->find($id);
 
         return $this->renderAdmin('admin.system.intercept-log.show', [
             'log' => $log,

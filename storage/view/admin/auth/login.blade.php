@@ -1,28 +1,21 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     @php
         $site = site();
         $siteName = $site?->name ?? '管理系统';
-        $siteTitle = $site?->title ?? $siteName;
+        // 处理 title 为空字符串的情况，使用 name 作为回退
+        $siteTitle = !empty($site?->title) ? $site?->title : $siteName;
         $siteSlogan = $site?->slogan ?? '欢迎登录';
         $siteLogo = $site?->logo;
-        $theme = $site?->getThemeConfig() ?? [];
-        $primaryColor = $theme['primary_color'] ?? '#6366f1';
-        $primaryHover = $theme['primary_hover'] ?? '#575bf0';
+        // 计算站点首字母
         $initialSource = $siteName !== '' ? $siteName : 'A';
-        if (function_exists('mb_substr')) {
-            $initialSource = mb_substr($initialSource, 0, 1);
-        } else {
-            $initialSource = substr($initialSource, 0, 1);
-        }
-        $siteInitial = function_exists('mb_strtoupper')
-            ? mb_strtoupper($initialSource)
-            : strtoupper($initialSource);
+        $initialSource = function_exists('mb_substr') ? mb_substr($initialSource, 0, 1) : substr($initialSource, 0, 1);
+        $siteInitial = function_exists('mb_strtoupper') ? mb_strtoupper($initialSource) : strtoupper($initialSource);
     @endphp
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="theme-color" content="{{ $primaryColor }}">
+    <meta name="theme-color" content="{{ $site?->getThemeConfig()['primary_color'] ?? '#6366f1' }}">
     <title>{{ $siteTitle }} - 登录</title>
     <style>
         * {
@@ -32,10 +25,10 @@
         }
 
         :root {
-            --primary: {{ $primaryColor }};
-            --primary-hover: {{ $primaryHover }};
+            --primary: {{ $site?->getThemeConfig()['primary_color'] ?? '#6366f1' }};
+            --primary-hover: {{ $site?->getThemeConfig()['primary_hover'] ?? '#575bf0' }};
             --card-bg: #ffffff;
-            --card-border: #e5e7eb;
+            --card-border:rgb(79, 79, 79);
             --text: #0f172a;
             --muted: #64748b;
             --input-bg: #f8fafc;
@@ -68,7 +61,6 @@
 
         .login-card {
             background: var(--card-bg);
-            border: 1px solid var(--card-border);
             border-radius: 16px;
             box-shadow: 0 10px 30px rgba(0,0,0,0.08);
             padding: 40px;
@@ -394,7 +386,7 @@
                     @endif
                 </div>
                 <h1 class="login-title">{{ $siteTitle }}</h1>
-                <p class="login-subtitle">{{ $siteSlogan }}</p>
+                <p class="login-subtitle">{{ $site?->slogan ?? '欢迎登录' }}</p>
             </div>
 
             <div id="demoAlert" class="alert alert-success" style="display: none;">
@@ -445,6 +437,19 @@
                     >
                 </div>
 
+                <div class="form-check">
+                    <input
+                        type="checkbox"
+                        id="remember_me"
+                        name="remember_me"
+                        class="form-check-input"
+                        value="1"
+                    >
+                    <label class="form-check-label" for="remember_me">
+                        保持登录（24小时内无需重新登录）
+                    </label>
+                </div>
+
                 {{-- 使用验证码组件 --}}
                 @include('components.captcha', [
                     'name' => 'captcha',
@@ -468,82 +473,61 @@
     </div>
 
     <script>
-        // 页面加载时
-        document.addEventListener('DOMContentLoaded', () => {
+        (() => {
             const demoAlert = document.getElementById('demoAlert');
-            if (demoAlert && window.location.pathname === '/admin/demo/login') {
+            if (demoAlert && location.pathname === '/admin/demo/login') {
                 demoAlert.style.display = 'block';
             }
-        });
+        })();
 
         function showAlert(message, type = 'danger') {
             const alertDiv = document.getElementById('alert');
             alertDiv.className = `alert alert-${type}`;
             alertDiv.textContent = message;
             alertDiv.style.display = 'block';
-
-            // 3秒后自动隐藏
-            setTimeout(() => {
-                alertDiv.style.display = 'none';
-            }, 3000);
+            setTimeout(() => alertDiv.style.display = 'none', 3000);
         }
 
         async function handleLogin(event) {
             event.preventDefault();
 
             const btn = document.getElementById('loginBtn');
-            const form = document.getElementById('loginForm');
-            const formData = new FormData(form);
+            const formData = new FormData(event.target);
             const captchaGroup = document.getElementById('captchaGroup');
 
-            // 禁用按钮并显示加载状态
             btn.disabled = true;
             btn.innerHTML = '<span class="loading"></span>登录中...';
 
             try {
-                // 构建请求数据
                 const requestData = {
                     username: formData.get('username'),
                     password: formData.get('password'),
+                    remember_me: formData.get('remember_me') === '1',
                 };
 
-                // 如果有免验证码令牌，带上令牌（使用组件提供的函数）
-                const freeToken = window.getFreeToken_captcha ? window.getFreeToken_captcha() : null;
-                if (freeToken) {
-                    requestData.free_token = freeToken;
-                }
-
-                // 只有在显示验证码输入框时才发送验证码
-                if (captchaGroup && captchaGroup.style.display !== 'none') {
+                const freeToken = window.getFreeToken_captcha?.();
+                if (freeToken) requestData.free_token = freeToken;
+                if (captchaGroup?.style.display !== 'none') {
                     requestData.captcha = formData.get('captcha') || '';
                 }
 
-                const response = await fetch(window.location.pathname, {
+                const res = await fetch(location.pathname, {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(requestData),
                 });
 
-                const data = await response.json();
+                const data = await res.json();
 
                 if (data.code === 200) {
-                    window.location.replace(data.data.redirect);
+                    location.replace(data.data.redirect);
                     return;
-                } else {
-                    // 登录失败
-                    const errorMsg = data.msg || data.message || '登录失败';
-                    showAlert(errorMsg);
-                    btn.disabled = false;
-                    btn.innerHTML = '登录';
-                    
-                    // 登录失败后，刷新验证码（刷新时会自动从接口获取最新的 free_token 状态）
-                    // 如果之前不需要验证码（有 free_token），失败后 free_token 会被清除，需要验证码
-                    if (window.refreshCaptcha_captcha) {
-                        await window.refreshCaptcha_captcha();
-                    }
                 }
+
+                showAlert(data.msg || data.message || '登录失败');
+                btn.disabled = false;
+                btn.innerHTML = '登录';
+                window.refreshCaptcha_captcha?.();
             } catch (error) {
                 console.error('登录错误:', error);
                 showAlert('网络错误，请稍后重试');

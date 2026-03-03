@@ -225,7 +225,7 @@
                                 'variant' => 'success',
                                 'title' => '启用插件',
                                 // 使用 visible 字段控制显示：已安装且未启用时显示
-                                'visible' => 'function(value, row, column) { return row.installed === true && !row.enabled; }'
+                                'visible' => 'function(value, row, column) { return row.installed == true && !row.enabled; }'
                             ],
                             [
                                 'type' => 'button',
@@ -234,7 +234,7 @@
                                 'variant' => 'warning',
                                 'title' => '禁用插件',
                                 // 使用 visible 字段控制显示：已安装且已启用时显示
-                                'visible' => 'function(value, row, column) { return row.installed === true && row.enabled === true; }'
+                                'visible' => 'function(value, row, column) { return row.installed == true && row.enabled == true; }'
                             ],
                             [
                                 'type' => 'button',
@@ -243,7 +243,7 @@
                                 'variant' => 'primary',
                                 'title' => '配置插件参数',
                                 // 使用 visible 字段控制显示：已安装且已启用时显示
-                                'visible' => 'function(value, row, column) { return row.installed === true && row.enabled === true; }'
+                                'visible' => 'function(value, row, column) { return row.installed == true && row.enabled == true; }'
                             ],
                             [
                                 'type' => 'button',
@@ -252,7 +252,7 @@
                                 'variant' => 'primary',
                                 'title' => '导出插件为zip文件',
                                 // 使用 visible 字段控制显示：已安装且未启用时显示（只能在禁用状态下导出）
-                                'visible' => 'function(value, row, column) { return row.installed === true && row.enabled === false; }'
+                                'visible' => 'function(value, row, column) { return row.installed == true && row.enabled == false; }'
                             ],
                             [
                                 'type' => 'button',
@@ -261,7 +261,7 @@
                                 'variant' => 'danger',
                                 'title' => '删除插件',
                                 // 使用 visible 字段控制显示：已安装且未启用时显示（只能在禁用状态下删除）
-                                'visible' => 'function(value, row, column) { return row.installed === true && row.enabled === false; }'
+                                'visible' => 'function(value, row, column) { return row.installed == true && row.enabled == false; }'
                             ]
                         ],
                         'visible' => true,

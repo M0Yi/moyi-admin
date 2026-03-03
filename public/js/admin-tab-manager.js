@@ -791,8 +791,10 @@
             console.log(logMessage);
 
             // 显示消息提示（如果 payload 中包含 message）
-            // 注意：success action 的提示会在 handleSuccessMessage 中处理，这里处理其他 action
-            if (data.action !== 'success' && data.payload && typeof data.payload === 'object' && data.payload.message) {
+            // 注意：success action 的提示会在 handleSuccessMessage 中处理
+            // 注意：refresh-main action 的提示会在 handleRefreshMainMessage 中处理
+            // 这里只处理 notify 和其他自定义 action，避免重复显示
+            if (data.action !== 'success' && data.action !== 'refresh-main' && data.payload && typeof data.payload === 'object' && data.payload.message) {
                 this.showMessageToast(data.action, data.payload.message, data.payload.toastType);
             }
 
@@ -851,7 +853,7 @@
         }
 
         /**
-         * 显示消息提示
+         * 显示消息提示（带去重机制）
          * @param {string} action - 消息 action
          * @param {string} message - 提示消息
          * @param {string} toastType - 提示类型 (success, danger, warning, info)
@@ -859,6 +861,41 @@
         showMessageToast(action, message, toastType) {
             if (!message || typeof message !== 'string') {
                 return;
+            }
+
+            // 消息去重：生成消息唯一标识
+            const messageId = `${action}:${message}`;
+            const now = Date.now();
+
+            // 初始化去重追踪器（如果不存在）
+            if (!this._messageDedupe) {
+                this._messageDedupe = {
+                    messages: new Map(),
+                    timeWindow: 1000  // 1秒内相同消息不重复显示
+                };
+            }
+
+            // 清理过期消息
+            const expiryTime = now - this._messageDedupe.timeWindow;
+            for (const [id, timestamp] of this._messageDedupe.messages.entries()) {
+                if (timestamp < expiryTime) {
+                    this._messageDedupe.messages.delete(id);
+                }
+            }
+
+            // 检查消息是否已存在
+            if (this._messageDedupe.messages.has(messageId)) {
+                console.log(`[TabManager] 消息去重：跳过重复消息 - "${message}" (action: ${action})`);
+                return;
+            }
+
+            // 记录消息
+            this._messageDedupe.messages.set(messageId, now);
+
+            // 限制 Map 大小，防止内存泄漏
+            if (this._messageDedupe.messages.size > 100) {
+                const firstKey = this._messageDedupe.messages.keys().next().value;
+                this._messageDedupe.messages.delete(firstKey);
             }
 
             // 根据 action 确定默认的提示类型

@@ -25,7 +25,6 @@
                         <span>配置表单加载中，请稍候...</span>
                     </div>
                     <form id="addonConfigForm" class="d-none">
-                        <input type="hidden" name="_token" value="{{ csrf_token() }}">
                         <div class="row" id="addonConfigFields">
                             <!-- 表单字段将在这里动态生成 -->
                         </div>
@@ -136,7 +135,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 <li>configJson 变量存在: {{ isset($configJson) ? '是' : '否' }}</li>
                 <li>formSchemaJson 变量存在: {{ isset($formSchemaJson) ? '是' : '否' }}</li>
                 <li>configJson 长度: {{ isset($configJson) ? strlen($configJson) : 'N/A' }}</li>
-                <li>formSchemaJson 长度: {{ isset($formSchemaJson) ? strlen($formSchemaJson) : 'N/A' }}</li>
+                <li>formSchemaJson 长度: {{ isset($formSchemaJson) ? strlen($formSchemaJson) : 'N/A</li>
                 @if(isset($formSchemaJson) && strlen($formSchemaJson) > 0)
                 <li>formSchemaJson 前200字符: {{ substr($formSchemaJson, 0, 200) . (strlen($formSchemaJson) > 200 ? '...' : '') }}</li>
                 @endif

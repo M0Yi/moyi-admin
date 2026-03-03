@@ -1,0 +1,1207 @@
+<?php
+
+declare(strict_types=1);
+/**
+ * This file is part of Hyperf.
+ *
+ * @link     https://www.hyperf.io
+ * @document https://hyperf.wiki
+ * @contact  group@hyperf.io
+ * @license  https://github.com/hyperf/hyperf/blob/master/LICENSE
+ */
+
+namespace App\Service\Admin;
+
+use App\Service\Admin\Addons\AddonsAssetsService;
+use App\Service\Admin\Addons\AddonsMenuService;
+use App\Service\Admin\Addons\AddonsMysqlService;
+use GuzzleHttp\Exception\ConnectException;
+use GuzzleHttp\Exception\RequestException;
+use Hyperf\Di\Annotation\Inject;
+use Hyperf\Guzzle\ClientFactory;
+use Psr\SimpleCache\CacheInterface;
+use Psr\SimpleCache\InvalidArgumentException;
+use RuntimeException;
+use Throwable;
+
+use function Hyperf\Config\config;
+use function Hyperf\Support\now;
+
+/**
+ * 插件管理服务
+ *
+ * 负责扫描和管理addons目录下的插件
+ */
+class AddonService
+{
+    #[Inject]
+    protected CacheInterface $cache;
+
+    #[Inject]
+    protected ClientFactory $clientFactory;
+
+    #[Inject]
+    protected AddonsMysqlService $mysqlService;
+
+    #[Inject]
+    protected AddonsAssetsService $assetsService;
+
+    #[Inject]
+    protected AddonsMenuService $menuService;
+
+    /**
+     * 插件目录路径.
+     */
+    private string $addonPath;
+
+    public function __construct()
+    {
+        $this->addonPath = BASE_PATH . '/addons';
+    }
+
+    /**
+     * 扫描所有插件.
+     *
+     * @return array 插件列表
+     */
+    public function scanAddons(): array
+    {
+        $addons = [];
+
+        if (! is_dir($this->addonPath)) {
+            return $addons;
+        }
+
+        $dirs = scandir($this->addonPath);
+        if (! $dirs) {
+            return $addons;
+        }
+
+        foreach ($dirs as $dir) {
+            // 跳过特殊目录
+            if ($dir === '.' || $dir === '..' || ! is_dir($this->addonPath . '/' . $dir)) {
+                continue;
+            }
+
+            $addonInfo = $this->getAddonInfo($dir);
+            if ($addonInfo) {
+                $addons[] = $addonInfo;
+            }
+        }
+
+        // 按插件名称排序
+        usort($addons, function ($a, $b) {
+            return strcmp($a['name'], $b['name']);
+        });
+
+        return $addons;
+    }
+
+    /**
+     * 获取插件商店插件列表.
+     *
+     * @param bool $forceRefresh 是否强制刷新（不使用缓存）
+     * @return array 商店插件列表
+     */
+    public function getStoreAddons(bool $forceRefresh = false): array
+    {
+        try {
+            logger()->info('[插件商店] 开始获取商店插件列表', ['forceRefresh' => $forceRefresh]);
+
+            // 从缓存获取（除非强制刷新）
+            $cacheKey = 'addon_store_list';
+            if (! $forceRefresh) {
+                $cached = $this->cache->get($cacheKey);
+                if ($cached) {
+                    logger()->info('[插件商店] 使用缓存数据', ['count' => count($cached)]);
+                    return $cached;
+                }
+            }
+
+            // 获取配置
+            $apiUrl = config('addons_store.api_url');
+            $apiToken = config('addons_store.api_token');
+
+            logger()->info('[插件商店] API配置', [
+                'apiUrl' => $apiUrl,
+                'hasToken' => ! empty($apiToken),
+            ]);
+
+            if (! $apiUrl) {
+                logger()->warning('[插件商店] API地址未配置');
+                return [];
+            }
+
+            // 构建请求
+            $client = $this->clientFactory->create();
+            $headers = [
+                'Accept' => 'application/json',
+                'Content-Type' => 'application/json',
+            ];
+
+            if ($apiToken) {
+                $headers['Authorization'] = 'Bearer ' . $apiToken;
+            }
+
+            // 发送请求
+            logger()->info('[插件商店] 发送API请求', [
+                'url' => $apiUrl,
+                'headers' => array_keys($headers),
+                'timeout' => 30,
+            ]);
+
+            try {
+                $response = $client->get($apiUrl, [
+                    'headers' => $headers,
+                    'timeout' => 30,
+                ]);
+
+                $statusCode = $response->getStatusCode();
+                $responseBody = $response->getBody()->getContents();
+
+                logger()->info('[插件商店] API响应成功', [
+                    'statusCode' => $statusCode,
+                    'responseLength' => strlen($responseBody),
+                    'responsePreview' => substr($responseBody, 0, 200),
+                    'contentType' => $response->getHeaderLine('content-type'),
+                ]);
+            } catch (ConnectException $e) {
+                logger()->error('[插件商店] 网络连接失败 - 无法连接到服务器', [
+                    'error' => $e->getMessage(),
+                    'url' => $apiUrl,
+                    'handler_context' => method_exists($e, 'getHandlerContext') ? $e->getHandlerContext() : 'N/A',
+                ]);
+                throw new RuntimeException('无法连接到插件商店服务器: ' . $apiUrl . ' - ' . $e->getMessage());
+            } catch (RequestException $e) {
+                $statusCode = $e->getResponse() ? $e->getResponse()->getStatusCode() : 'unknown';
+                $responseBody = $e->getResponse() ? substr($e->getResponse()->getBody()->getContents(), 0, 500) : null;
+
+                logger()->error('[插件商店] HTTP请求异常', [
+                    'error' => $e->getMessage(),
+                    'url' => $apiUrl,
+                    'statusCode' => $statusCode,
+                    'responsePreview' => $responseBody,
+                ]);
+                throw new RuntimeException('插件商店API请求失败 (HTTP ' . $statusCode . '): ' . $e->getMessage());
+            } catch (Throwable $e) {
+                logger()->error('[插件商店] 请求过程中发生未知异常', [
+                    'error' => $e->getMessage(),
+                    'errorClass' => get_class($e),
+                    'url' => $apiUrl,
+                ]);
+                throw new RuntimeException('插件商店请求异常: ' . $e->getMessage());
+            }
+
+            if ($statusCode !== 200) {
+                logger()->error('[插件商店] API请求失败', [
+                    'status_code' => $statusCode,
+                    'response' => $responseBody,
+                ]);
+                return [];
+            }
+
+            $data = json_decode($responseBody, true);
+            logger()->info('[插件商店] 解析响应数据', [
+                'dataType' => gettype($data),
+                'isArray' => is_array($data),
+                'hasData' => is_array($data) && isset($data['data']),
+                'dataStructure' => is_array($data) && isset($data['data']) ? gettype($data['data']) : null,
+                'response' => $data,
+            ]);
+
+            // 处理API返回的数据格式
+            // 预期格式: {"data": {"data": [...], "total": X, "page": X, ...}}
+            if (! $data || ! isset($data['data'])) {
+                logger()->error('[插件商店] API返回数据格式错误 - 缺少data字段', ['response' => $data]);
+                return [];
+            }
+
+            // 如果data字段是数组且包含分页信息，说明是分页数据
+            if (is_array($data['data']) && isset($data['data']['data'])) {
+                $paginationData = $data['data'];
+                $storeAddons = $paginationData['data'] ?? [];
+                logger()->info('[插件商店] 检测到分页数据格式', [
+                    'total' => $paginationData['total'] ?? 0,
+                    'page' => $paginationData['page'] ?? 1,
+                    'per_page' => $paginationData['per_page'] ?? 20,
+                    'addonsCount' => count($storeAddons),
+                ]);
+            } else {
+                // 兼容旧格式或其他格式
+                $storeAddons = is_array($data['data']) ? $data['data'] : [];
+                logger()->info('[插件商店] 使用兼容数据格式', [
+                    'addonsCount' => count($storeAddons),
+                ]);
+            }
+            logger()->info('[插件商店] 原始插件数据', [
+                'storeAddonsCount' => count($storeAddons),
+                'firstAddon' => count($storeAddons) > 0 ? array_keys($storeAddons[0]) : null,
+            ]);
+
+            // 获取本地插件列表，用于检查安装状态
+            $localAddons = $this->scanAddons();
+            $localAddonMap = [];
+            foreach ($localAddons as $localAddon) {
+                $identifier = $localAddon['id'] ?? '';
+                if (! empty($identifier)) {
+                    $localAddonMap[$identifier] = $localAddon;
+                }
+            }
+
+            logger()->info('[插件商店] 本地插件映射', [
+                'localCount' => count($localAddonMap),
+                'localAddonIds' => array_keys($localAddonMap),
+            ]);
+
+            $processedAddons = [];
+
+            foreach ($storeAddons as $addon) {
+                // 从latest_version中获取下载信息
+                $latestVersion = $addon['latest_version'] ?? [];
+                $storeIdentifier = $addon['identifier'] ?? $addon['id'] ?? '';
+                $storeVersion = $addon['version'] ?? '0.0.0';
+
+                // 检查本地安装状态
+                $isInstalled = false;
+                $canUpgrade = false;
+                $currentVersion = '';
+                $localAddonInfo = null;
+
+                if (! empty($storeIdentifier) && isset($localAddonMap[$storeIdentifier])) {
+                    $isInstalled = true;
+                    $localAddonInfo = $localAddonMap[$storeIdentifier];
+                    $currentVersion = $localAddonInfo['version'] ?? '0.0.0';
+
+                    // 比较版本号，判断是否可以升级
+                    $canUpgrade = $this->compareVersions($storeVersion, $currentVersion) > 0;
+
+                    logger()->debug('[插件商店] 版本比较', [
+                        'addonId' => $storeIdentifier,
+                        'storeVersion' => $storeVersion,
+                        'localVersion' => $currentVersion,
+                        'canUpgrade' => $canUpgrade,
+                    ]);
+                }
+
+                $processedAddon = [
+                    'id' => $storeIdentifier, // 使用identifier作为插件ID
+                    'name' => $addon['name'] ?? '',
+                    'version' => $storeVersion,
+                    'description' => $addon['description'] ?? '',
+                    'author' => $addon['author'] ?? '',
+                    'icon' => $addon['icon'] ?? '',
+                    'category' => $addon['category'] ?? '未分类',
+                    'source' => 'store', // 标记为商店插件
+                    'enabled' => false, // 商店插件默认未启用
+                    'installed' => $isInstalled, // 是否已安装
+                    'can_upgrade' => $canUpgrade, // 是否可以升级
+                    'current_version' => $currentVersion, // 当前本地版本
+                    'status' => $addon['status'] == 1 ? 'available' : 'unavailable', // 商店插件状态
+                    'price' => $addon['is_free'] ? 0 : ($addon['price'] ?? 0), // 根据is_free判断价格
+                    'download_url' => ! empty($latestVersion) ? $this->buildDownloadUrl($latestVersion) : '',
+                    'demo_url' => $addon['homepage'] ?? '',
+                    'documentation_url' => $addon['repository'] ?? '',
+                    'tags' => ! empty($addon['tags']) ? explode(',', $addon['tags']) : [],
+                    'screenshots' => $addon['screenshots'] ?? [],
+                    'compatibility' => ! empty($latestVersion['compatibility']) ? explode(',', $latestVersion['compatibility']) : [],
+                    'downloads' => $addon['downloads'] ?? 0,
+                    'rating' => $addon['rating'] ?? 0.0,
+                    'reviews_count' => $addon['reviews_count'] ?? 0,
+                    'is_official' => ! empty($addon['is_official']),
+                    'is_featured' => ! empty($addon['is_featured']),
+                    'is_free' => ! empty($addon['is_free']),
+                    'package_path' => $addon['package_path'] ?? '',
+                    'latest_version' => $latestVersion,
+                    'local_addon_info' => $localAddonInfo, // 本地插件信息（用于调试）
+                    'created_at' => $addon['created_at'] ?? '',
+                    'updated_at' => $addon['updated_at'] ?? '',
+                ];
+                $processedAddons[] = $processedAddon;
+            }
+
+            logger()->info('[插件商店] 处理后的插件数据', [
+                'processedCount' => count($processedAddons),
+                'sampleAddon' => count($processedAddons) > 0 ? $processedAddons[0] : null,
+            ]);
+
+            // 缓存1小时
+            $this->cache->set($cacheKey, $processedAddons, 3600);
+
+            return $processedAddons;
+        } catch (Throwable $e) {
+            logger()->error('获取插件商店数据失败', [
+                'error' => $e->getMessage(),
+                'error_class' => get_class($e),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+                'trace' => substr($e->getTraceAsString(), 0, 1000), // 只记录前1000个字符
+            ]);
+            return [];
+        }
+    }
+
+    /**
+     * 获取所有插件（本地 + 商店，去重交集）.
+     *
+     * @return array 合并后的插件列表（以商店为准，只保留单个插件条目）
+     */
+    public function getAllAddons(): array
+    {
+        logger()->info('[插件服务] 开始获取所有插件（交集模式）');
+
+        $localAddons = $this->scanAddons();
+        logger()->info('[插件服务] 本地插件扫描完成', [
+            'local_count' => count($localAddons),
+            'sample_local' => count($localAddons) > 0 ? $localAddons[0]['id'] ?? 'unknown' : null,
+        ]);
+
+        // 获取商店插件（已包含安装状态检查）
+        $storeAddons = $this->getStoreAddons();
+        logger()->info('[插件服务] 商店插件获取完成', [
+            'store_count' => count($storeAddons),
+            'sample_store' => count($storeAddons) > 0 ? $storeAddons[0]['id'] ?? 'unknown' : null,
+        ]);
+
+        // 创建本地插件映射（用于查找）
+        $localAddonMap = [];
+        foreach ($localAddons as $localAddon) {
+            $identifier = $localAddon['id'] ?? '';
+            if (! empty($identifier)) {
+                $localAddonMap[$identifier] = $localAddon;
+            }
+        }
+
+        // 合并插件列表（以商店为准，进行交集）
+        $allAddons = [];
+        $processedIds = []; // 已处理的插件ID，避免重复
+
+        // 首先处理商店插件（优先级高，包含完整信息）
+        foreach ($storeAddons as $storeAddon) {
+            $addonId = $storeAddon['id'] ?? '';
+            if (! empty($addonId)) {
+                // 检查本地是否也有安装，如果有则使用本地的启用状态
+                if (isset($localAddonMap[$addonId])) {
+                    $localAddon = $localAddonMap[$addonId];
+                    // 使用本地插件的实际启用状态覆盖商店数据
+                    $storeAddon['enabled'] = $localAddon['enabled'] ?? false;
+                    $storeAddon['installed'] = true; // 如果本地有安装，则标记为已安装
+                    $storeAddon['current_version'] = $localAddon['version'] ?? $storeAddon['version'] ?? '';
+
+                    logger()->debug('[插件服务] 商店插件与本地插件交集，使用本地启用状态', [
+                        'id' => $addonId,
+                        'store_name' => $storeAddon['name'] ?? 'unknown',
+                        'local_enabled' => $localAddon['enabled'] ?? false,
+                        'installed' => true,
+                    ]);
+                }
+
+                $allAddons[] = $storeAddon;
+                $processedIds[$addonId] = true;
+                logger()->debug('[插件服务] 添加商店插件到结果集', [
+                    'id' => $addonId,
+                    'name' => $storeAddon['name'] ?? 'unknown',
+                    'installed' => $storeAddon['installed'] ?? false,
+                    'enabled' => $storeAddon['enabled'] ?? false,
+                ]);
+            }
+        }
+
+        // 然后处理本地独有插件（不在商店中的）
+        foreach ($localAddons as $localAddon) {
+            $addonId = $localAddon['id'] ?? '';
+            if (! empty($addonId) && ! isset($processedIds[$addonId])) {
+                // 为本地插件添加source字段和其他必要字段
+                $localAddon['source'] = 'local';
+                $localAddon['installed'] = true; // 本地插件默认已安装
+                $localAddon['can_upgrade'] = false; // 本地独有插件无法升级
+                $localAddon['current_version'] = $localAddon['version'] ?? '';
+                $localAddon['is_free'] = true; // 本地插件默认免费
+
+                $allAddons[] = $localAddon;
+                logger()->debug('[插件服务] 添加本地独有插件到结果集', [
+                    'id' => $addonId,
+                    'name' => $localAddon['name'] ?? 'unknown',
+                ]);
+            }
+        }
+
+        logger()->info('[插件服务] 插件列表交集合并完成', [
+            'store_count' => count($storeAddons),
+            'local_only_count' => count($localAddons) - count(array_intersect_key($localAddonMap, array_flip(array_column($storeAddons, 'id')))),
+            'total_unique_count' => count($allAddons),
+        ]);
+
+        // 统计source分布
+        $sourceStats = [];
+        $installStats = ['installed' => 0, 'not_installed' => 0, 'can_upgrade' => 0];
+        foreach ($allAddons as $addon) {
+            $source = $addon['source'] ?? 'unknown';
+            $sourceStats[$source] = ($sourceStats[$source] ?? 0) + 1;
+
+            if (! empty($addon['installed'])) {
+                ++$installStats['installed'];
+                if (! empty($addon['can_upgrade'])) {
+                    ++$installStats['can_upgrade'];
+                }
+            } else {
+                ++$installStats['not_installed'];
+            }
+        }
+        logger()->info('[插件服务] 最终统计', [
+            'source_stats' => $sourceStats,
+            'install_stats' => $installStats,
+            'total_addons' => count($allAddons),
+        ]);
+
+        // 按插件名称排序
+        usort($allAddons, function ($a, $b) {
+            return strcmp($a['name'], $b['name']);
+        });
+
+        logger()->info('[插件服务] 插件排序完成，按名称排序');
+
+        return $allAddons;
+    }
+
+    /**
+     * 获取HTTP客户端工厂
+     */
+    public function getClientFactory(): ClientFactory
+    {
+        return $this->clientFactory;
+    }
+
+    /**
+     * 清除商店插件缓存.
+     */
+    public function clearStoreAddonsCache(): void
+    {
+        try {
+            $this->cache->delete('addon_store_list');
+        } catch (InvalidArgumentException $e) {
+            logger()->error('[插件服务] 删除商店插件缓存失败', [
+                'message' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * 根据插件ID获取插件目录名
+     * 插件ID使用下划线命名法，目录名使用驼峰命名法.
+     *
+     * @param string $addonId 插件ID（如：addons_store）
+     * @return string 插件目录名（如：AddonsStore）
+     */
+    public function getAddonDirById(string $addonId): string
+    {
+        // 将下划线命名法转换为驼峰命名法
+        $dirName = $this->convertIdToDirName($addonId);
+
+        logger()->debug('[插件映射] ID转换为目录名', [
+            'addonId' => $addonId,
+            'dirName' => $dirName,
+        ]);
+
+        return $dirName;
+    }
+
+    /**
+     * 根据插件ID获取插件信息.
+     *
+     * @param string $addonId 插件ID
+     * @return null|array 插件信息
+     */
+    public function getAddonInfoById(string $addonId): ?array
+    {
+        $dirName = $this->getAddonDirById($addonId);
+        return $this->getAddonInfo($dirName);
+    }
+
+    /**
+     * 根据插件ID启用插件.
+     *
+     * @param string $addonId 插件ID
+     */
+    public function enableAddonById(string $addonId): bool
+    {
+        $dirName = $this->getAddonDirById($addonId);
+        return $this->enableAddon($dirName);
+    }
+
+    /**
+     * 根据插件ID禁用插件.
+     *
+     * @param string $addonId 插件ID
+     */
+    public function disableAddonById(string $addonId): bool
+    {
+        $dirName = $this->getAddonDirById($addonId);
+        return $this->disableAddon($dirName);
+    }
+
+    /**
+     * 根据插件ID安装插件.
+     *
+     * @param string $addonId 插件ID
+     */
+    public function installAddonById(string $addonId): bool
+    {
+        $dirName = $this->getAddonDirById($addonId);
+        return $this->installAddon($dirName);
+    }
+
+    /**
+     * 根据插件ID卸载插件.
+     *
+     * @param string $addonId 插件ID
+     */
+    public function uninstallAddonById(string $addonId): bool
+    {
+        $dirName = $this->getAddonDirById($addonId);
+        return $this->uninstallAddon($dirName);
+    }
+
+    /**
+     * 获取插件信息.
+     *
+     * @param string $addonName 插件目录名
+     * @return null|array 插件信息
+     */
+    public function getAddonInfo(string $addonName): ?array
+    {
+        logger()->info('[插件信息] 开始获取插件信息', ['addonName' => $addonName]);
+
+        $addonDir = $this->addonPath . '/' . $addonName;
+        $infoFile = $addonDir . '/info.php';
+
+        logger()->info('[插件信息] 检查info.php文件', [
+            'addonName' => $addonName,
+            'addonDir' => $addonDir,
+            'infoFile' => $infoFile,
+            'infoFile_exists' => file_exists($infoFile),
+        ]);
+
+        if (! file_exists($infoFile)) {
+            logger()->error('[插件信息] info.php文件不存在', ['addonName' => $addonName, 'infoFile' => $infoFile]);
+            return null;
+        }
+
+        try {
+            $info = include $infoFile;
+
+            logger()->info('[插件信息] 读取info.php内容', [
+                'addonName' => $addonName,
+                'info_type' => gettype($info),
+                'info_is_array' => is_array($info),
+                'info_keys' => is_array($info) ? array_keys($info) : null,
+            ]);
+
+            if (! is_array($info)) {
+                logger()->error('[插件信息] info.php返回的不是数组', ['addonName' => $addonName, 'info' => $info]);
+                return null;
+            }
+
+            // 验证必要字段
+            if (! isset($info['id'], $info['name'], $info['version'])) {
+                logger()->error('[插件信息] 缺少必要字段', [
+                    'addonName' => $addonName,
+                    'has_id' => isset($info['id']),
+                    'has_name' => isset($info['name']),
+                    'has_version' => isset($info['version']),
+                ]);
+                return null;
+            }
+
+            // 添加额外信息
+            $info['directory'] = $addonName;
+            $info['path'] = $addonDir;
+            $info['installed'] = $this->isAddonInstalled($addonName);
+            $info['enabled'] = $this->isAddonEnabled($addonName);
+            $info['has_controller'] = is_dir($addonDir . '/Controller');
+            $info['has_routes'] = file_exists($addonDir . '/routes.php');
+            $info['has_views'] = is_dir($addonDir . '/View');
+            $info['has_public'] = is_dir($addonDir . '/Public');
+            $info['has_manager'] = is_dir($addonDir . '/Manager');
+            $info['has_config'] = file_exists($addonDir . '/config.php');
+
+            // 读取插件配置
+            $configData = $this->getAddonConfig($addonName);
+            $info['config'] = $configData;
+
+            logger()->info('[插件信息] 插件配置读取', [
+                'addonName' => $addonName,
+                'config_type' => gettype($configData),
+                'config_is_array' => is_array($configData),
+                'config_keys' => is_array($configData) ? array_keys($configData) : null,
+                'has_configs' => is_array($configData) && isset($configData['configs']),
+                'configs_count' => is_array($configData) && isset($configData['configs']) && is_array($configData['configs']) ? count($configData['configs']) : 0,
+            ]);
+
+            // 读取插件菜单和权限配置
+            $info['menus_permissions'] = $this->menuService->getAddonMenusAndPermissions($addonName);
+
+            logger()->info('[插件信息] 插件信息获取完成', [
+                'addonName' => $addonName,
+                'final_info_keys' => array_keys($info),
+                'enabled' => $info['enabled'],
+                'has_configs_in_final' => isset($info['config']['configs']) && is_array($info['config']['configs']),
+            ]);
+
+            return $info;
+        } catch (Throwable $e) {
+            logger()->error('[插件信息] 获取插件信息异常', [
+                'addonName' => $addonName,
+                'exception' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+            return null;
+        }
+    }
+
+    /**
+     * 检查插件是否已安装.
+     *
+     * @param string $addonName 插件目录名
+     */
+    public function isAddonInstalled(string $addonName): bool
+    {
+        // 这里可以实现安装状态检查逻辑
+        // 目前简单返回true，实际项目中可以检查数据库或配置文件
+        return true;
+    }
+
+    /**
+     * 检查插件是否已启用.
+     *
+     * @param string $addonName 插件目录名
+     */
+    public function isAddonEnabled(string $addonName): bool
+    {
+        // 只检查插件自己的配置文件中的 enabled 状态
+        $pluginConfig = $this->getAddonConfig($addonName);
+        return isset($pluginConfig['enabled']) && $pluginConfig['enabled'];
+    }
+
+    /**
+     * 获取首页替换插件.
+     *
+     * 查找所有启用的插件中配置了 replace_homepage 的插件，
+     * 返回优先级最高的插件信息
+     *
+     * @return null|array 返回插件信息，包含：
+     *                    - addon_name: 插件目录名
+     *                    - controller: 控制器类名
+     *                    - action: 方法名
+     *                    - middleware: 额外中间件
+     *                    - priority: 优先级
+     */
+    public function getHomepageReplacementAddon(): ?array
+    {
+        $addons = $this->scanAddons();
+        $homepageReplacers = [];
+
+        foreach ($addons as $addon) {
+            $addonName = $addon['name'];
+
+            // 只检查启用的插件
+            if (! $this->isAddonEnabled($addonName)) {
+                continue;
+            }
+
+            $config = $this->getAddonConfig($addonName);
+
+            // 检查是否有首页替换配置
+            if (! isset($config['replace_homepage'])
+                || ! is_array($config['replace_homepage'])
+                || ! isset($config['replace_homepage']['enabled'])
+                || ! $config['replace_homepage']['enabled']) {
+                continue;
+            }
+
+            $replacementConfig = $config['replace_homepage'];
+
+            // 验证必需字段
+            if (! isset($replacementConfig['controller']) || ! isset($replacementConfig['action'])) {
+                logger()->warning("[首页替换] 插件 {$addonName} 首页替换配置不完整，缺少必需字段", [
+                    'config' => $replacementConfig,
+                ]);
+                continue;
+            }
+
+            $homepageReplacers[] = [
+                'addon_name' => $addonName,
+                'controller' => $replacementConfig['controller'],
+                'action' => $replacementConfig['action'],
+                'middleware' => $replacementConfig['middleware'] ?? [],
+                'priority' => $replacementConfig['priority'] ?? 10,
+            ];
+        }
+
+        // 按优先级排序（优先级高的在前）
+        usort($homepageReplacers, function ($a, $b) {
+            return $b['priority'] <=> $a['priority'];
+        });
+
+        // 返回优先级最高的插件
+        return $homepageReplacers[0] ?? null;
+    }
+
+    /**
+     * 启用插件.
+     *
+     * 启用插件时会自动执行安装操作（部署资源文件）
+     *
+     * @param string $addonName 插件目录名
+     */
+    public function enableAddon(string $addonName): bool
+    {
+        logger()->info("[插件管理] 开始启用插件: {$addonName}");
+
+        try {
+            // 首先执行插件安装（启用即视为安装）
+            logger()->info("[插件管理] 执行插件安装: {$addonName}");
+            $installResult = $this->installAddon($addonName);
+            if (! $installResult) {
+                logger()->error("[插件管理] 插件 {$addonName} 安装失败，终止启用流程");
+                return false;
+            }
+
+            // 更新插件自己的配置文件中的enabled状态
+            $this->updateAddonConfigValue($addonName, 'enabled', true);
+            logger()->info("[插件管理] 更新插件配置: {$addonName} -> enabled");
+
+            // 部署插件资源文件
+            logger()->info("[插件管理] 部署插件资源文件: {$addonName}");
+            $this->assetsService->deployAddonAssets($addonName);
+
+            // 安装菜单和权限
+            logger()->info("[插件管理] 安装菜单和权限: {$addonName}");
+            $this->menuService->installAddonMenusAndPermissions($addonName);
+
+            // 执行插件启用钩子
+            $this->executeAddonHook($addonName, 'enable');
+
+            logger()->info("[插件管理] 插件 {$addonName} 启用成功");
+            return true;
+        } catch (Throwable $e) {
+            logger()->error("[插件管理] 插件 {$addonName} 启用失败: " . $e->getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * 禁用插件.
+     *
+     * 禁用插件时会自动清理相关的文件和目录，但保留数据表
+     *
+     * @param string $addonName 插件目录名
+     */
+    public function disableAddon(string $addonName): bool
+    {
+        logger()->info("[插件管理] 开始禁用插件: {$addonName}");
+
+        try {
+            // 禁用菜单和权限
+            logger()->info("[插件管理] 禁用菜单和权限: {$addonName}");
+            $this->menuService->disableAddonMenusAndPermissions($addonName);
+
+            // 执行插件资源清理（清理文件和目录，保留数据表）
+            logger()->info("[插件管理] 执行插件资源清理: {$addonName}");
+            $uninstallResult = $this->assetsService->uninstallAddonAssets($addonName);
+            if (! $uninstallResult) {
+                logger()->warning("[插件管理] 插件 {$addonName} 文件清理失败，但继续禁用流程");
+            }
+
+            // 更新插件自己的配置文件中的enabled状态
+            $this->updateAddonConfigValue($addonName, 'enabled', false);
+            logger()->info("[插件管理] 更新插件配置: {$addonName} -> disabled");
+
+            // 执行插件禁用钩子
+            $this->executeAddonHook($addonName, 'disable');
+
+            logger()->info("[插件管理] 插件 {$addonName} 禁用成功");
+            return true;
+        } catch (Throwable $e) {
+            logger()->error("[插件管理] 插件 {$addonName} 禁用失败: " . $e->getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * 更新插件配置中的单个值
+     *
+     * @param string $addonName 插件名称
+     * @param string $key 配置键（支持点号分隔的嵌套键，如 'test.debug_mode'）
+     * @param mixed $value 配置值
+     */
+    public function updateAddonConfigValue(string $addonName, string $key, $value): bool
+    {
+        try {
+            $configFile = $this->addonPath . '/' . $addonName . '/config.php';
+
+            if (! file_exists($configFile)) {
+                return false;
+            }
+
+            $content = file_get_contents($configFile);
+
+            // 处理嵌套键
+            $keys = explode('.', $key);
+            $configKey = array_shift($keys);
+
+            if (empty($keys)) {
+                // 单层键值更新
+                return $this->updateSimpleConfigValue($content, $configKey, $value, $configFile);
+            }
+            // 嵌套键值更新（暂时不支持，未来可以扩展）
+            return false;
+        } catch (Throwable $e) {
+            return false;
+        }
+    }
+
+    /**
+     * 保存插件配置.
+     *
+     * @param string $addonId 插件ID
+     * @param array $configData 配置数据
+     */
+    public function saveAddonConfig(string $addonId, array $configData): bool
+    {
+        logger()->info('[插件配置] 开始处理配置保存', [
+            'addonId' => $addonId,
+            'configData_keys' => array_keys($configData),
+            'configData_count' => count($configData),
+        ]);
+
+        // 获取正确的插件目录名（将ID转换为目录名）
+        $addonDirName = $this->getAddonDirById($addonId);
+        $addonDir = $this->addonPath . '/' . $addonDirName;
+        $configFile = $addonDir . '/config.php';
+
+        if (! file_exists($configFile)) {
+            logger()->error('[插件配置] 配置文件不存在', [
+                'addonId' => $addonId,
+                'addonDirName' => $addonDirName,
+                'configFile' => $configFile,
+            ]);
+            return false;
+        }
+
+        try {
+            // 采用更优雅的配置保存方案：重新生成配置文件
+            logger()->info('[插件配置] 采用重新生成方案保存配置', ['addonId' => $addonId, 'addonDirName' => $addonDirName]);
+
+            // 读取并解析原始配置文件
+            $originalConfig = $this->parseConfigFile($configFile);
+            if (! is_array($originalConfig)) {
+                logger()->warning('[插件配置] 原始配置解析失败，使用默认配置', [
+                    'addonId' => $addonId,
+                    'addonDirName' => $addonDirName,
+                    'originalConfig_type' => gettype($originalConfig),
+                ]);
+                $originalConfig = ['enabled' => true, 'configs' => []];
+            }
+
+            // 更新配置项的值
+            $updatedConfig = $this->updateConfigValues($originalConfig, $configData, $addonId);
+
+            // 重新生成配置文件
+            $newContent = $this->generateConfigFile($configFile, $updatedConfig);
+
+            // 备份原文件（可选）
+            $backupFile = $configFile . '.backup.' . date('YmdHis');
+            if (copy($configFile, $backupFile)) {
+                logger()->info('[插件配置] 原配置文件已备份', [
+                    'addonId' => $addonId,
+                    'addonDirName' => $addonDirName,
+                    'backupFile' => $backupFile,
+                ]);
+            }
+
+            // 写入新配置
+            $writeResult = file_put_contents($configFile, $newContent);
+            if ($writeResult === false) {
+                logger()->error('[插件配置] 配置文件写入失败', [
+                    'addonId' => $addonId,
+                    'addonDirName' => $addonDirName,
+                    'configFile' => $configFile,
+                ]);
+                return false;
+            }
+
+            logger()->info('[插件配置] 配置保存成功', [
+                'addonId' => $addonId,
+                'addonDirName' => $addonDirName,
+                'configFile' => $configFile,
+                'written_bytes' => $writeResult,
+            ]);
+
+            return true;
+        } catch (Throwable $e) {
+            logger()->error('[插件配置] 保存配置异常', [
+                'addonId' => $addonId,
+                'addonDirName' => $addonDirName,
+                'exception' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+            return false;
+        }
+    }
+
+    /**
+     * 安装插件资源文件.
+     *
+     * @param string $addonName 插件目录名
+     */
+    public function installAddon(string $addonName): bool
+    {
+        $addonDir = $this->addonPath . '/' . $addonName;
+        $assetsFile = $addonDir . '/Manager/assets.json';
+        $databaseFile = $addonDir . '/Manager/database.json';
+
+        logger()->info("[插件安装] 开始安装插件: {$addonName}");
+
+        // 执行插件安装钩子
+        $this->executeAddonHook($addonName, 'install');
+
+        // 执行数据库表管理
+        logger()->info("[插件安装] 检查数据库配置文件: {$addonName}");
+        if (file_exists($databaseFile)) {
+            logger()->info('[插件安装] 发现数据库配置文件，开始执行数据库表管理');
+            $dbResult = $this->mysqlService->manageDatabaseTables($addonName, $databaseFile);
+            if (! $dbResult) {
+                logger()->error("[插件安装] 插件 {$addonName} 数据库表管理失败");
+                return false;
+            }
+        } else {
+            logger()->info("[插件安装] 插件 {$addonName} 没有数据库配置文件，跳过数据库表管理");
+        }
+
+        // 插件安装只处理数据库，不处理资源文件、菜单和权限
+        logger()->info("[插件安装] 插件 {$addonName} 安装完成（只处理数据库）");
+        return true;
+    }
+
+    /**
+     * 卸载插件.
+     *
+     * @param string $addonName 插件目录名
+     */
+
+    /**
+     * 执行插件钩子.
+     *
+     * @param string $addonName 插件名称
+     * @param string $hook 钩子名称 (install, enable, disable, uninstall)
+     */
+    public function executeAddonHook(string $addonName, string $hook): bool
+    {
+        try {
+            $addonDir = $this->addonPath . '/' . $addonName;
+            $setupFile = $addonDir . '/Manager/Setup.php';
+
+            if (! file_exists($setupFile)) {
+                logger()->info("[插件钩子] 插件 {$addonName} 没有 Setup.php 文件，跳过 {$hook} 钩子");
+                return true;
+            }
+
+            // 构建类名
+            $className = "Addons\\{$addonName}\\Manager\\Setup";
+
+            if (! class_exists($className)) {
+                logger()->warning("[插件钩子] 插件 {$addonName} 的 Setup 类不存在: {$className}");
+                return false;
+            }
+
+            logger()->info("[插件钩子] 开始执行插件 {$addonName} 的 {$hook} 钩子");
+
+            // 实例化 Setup 类
+            $setupInstance = new $className();
+
+            // 检查方法是否存在
+            if (! method_exists($setupInstance, $hook)) {
+                logger()->warning("[插件钩子] 插件 {$addonName} 的 Setup 类没有 {$hook} 方法");
+                return false;
+            }
+
+            // 调用钩子方法
+            $result = $setupInstance->{$hook}();
+
+            if ($result) {
+                logger()->info("[插件钩子] 插件 {$addonName} 的 {$hook} 钩子执行成功");
+                return true;
+            }
+            logger()->error("[插件钩子] 插件 {$addonName} 的 {$hook} 钩子执行失败");
+            return false;
+        } catch (Throwable $e) {
+            logger()->error("[插件钩子] 执行插件 {$addonName} 的 {$hook} 钩子异常: " . $e->getMessage());
+            return false;
+        }
+    }
+
+    public function uninstallAddon(string $addonName): bool
+    {
+        logger()->info("[插件卸载] 开始卸载插件: {$addonName}");
+
+        try {
+            // 执行插件卸载钩子
+            $this->executeAddonHook($addonName, 'uninstall');
+
+            // 执行插件资源卸载
+            $result = $this->assetsService->uninstallAddonAssets($addonName);
+
+            if ($result) {
+                logger()->info("[插件卸载] 插件 {$addonName} 卸载完成");
+            } else {
+                logger()->warning("[插件卸载] 插件 {$addonName} 部分卸载失败");
+            }
+
+            return $result;
+        } catch (Throwable $e) {
+            logger()->error("[插件卸载] 插件 {$addonName} 卸载失败: " . $e->getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * 获取插件配置.
+     *
+     * @param string $addonName 插件名称
+     */
+    public function getAddonConfig(string $addonName): array
+    {
+        $configFile = $this->addonPath . '/' . $addonName . '/config.php';
+
+        if (! file_exists($configFile)) {
+            return [];
+        }
+
+        try {
+            $config = include $configFile;
+            return is_array($config) ? $config : [];
+        } catch (Throwable $e) {
+            return [];
+        }
+    }
+
+    /**
+     * 设置插件配置.
+     *
+     * @param string $addonName 插件名称
+     * @param array $config 配置数据
+     * @param bool $preserveFormat 是否保持原有格式
+     */
+    public function setAddonConfig(string $addonName, array $config, bool $preserveFormat = true): bool
+    {
+        logger()->info('[插件配置] 开始设置插件配置', [
+            'addonName' => $addonName,
+            'config_keys' => array_keys($config),
+            'preserveFormat' => $preserveFormat,
+        ]);
+
+        try {
+            $configFile = $this->addonPath . '/' . $addonName . '/config.php';
+            $configDir = dirname($configFile);
+
+            if (! is_dir($configDir)) {
+                logger()->error('[插件配置] 配置目录不存在', [
+                    'addonName' => $addonName,
+                    'configDir' => $configDir,
+                ]);
+                return false;
+            }
+
+            // 始终使用重新生成模式，因为我们现在有更好的生成逻辑
+            logger()->info('[插件配置] 使用重新生成模式', [
+                'addonName' => $addonName,
+                'configFile' => $configFile,
+                'configFile_exists' => file_exists($configFile),
+            ]);
+
+            if (file_exists($configFile)) {
+                // 如果原文件存在，使用我们新的生成逻辑
+                $content = $this->generateConfigFile($configFile, $config);
+            } else {
+                // 如果是新文件，直接生成
+                $content = "<?php\n\nreturn " . $this->arrayToPhpCode($config) . ";\n";
+            }
+
+            logger()->info('[插件配置] 写入配置文件', [
+                'addonName' => $addonName,
+                'configFile' => $configFile,
+                'content_length' => strlen($content),
+            ]);
+
+            $writeResult = file_put_contents($configFile, $content);
+            logger()->info('[插件配置] 配置文件写入结果', [
+                'addonName' => $addonName,
+                'writeResult' => $writeResult,
+                'writeSuccess' => $writeResult !== false,
+            ]);
+
+            return $writeResult !== false;
+        } catch (Throwable $e) {
+            logger()->error('[插件配置] 设置配置异常', [
+                'addonName' => $addonName,
+                'exception' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+            return false;
+        }
+    }
+
+    /**
+     * 构建插件下载URL.
+     */
+    private function buildDownloadUrl(array $version): string
+    {
+        if (empty($version['id'])) {
+            return '';
+        }
+
+        // 构建下载URL，指向API的下载端点
+        $baseUrl = config('addons_store.api_url');
+        $baseUrl = rtrim($baseUrl, '/');
+
+        return $baseUrl . '/versions/' . $version['id'] . '/download';
+    }
+
+    /**
+     * 比较版本号
+     * 返回值: 1表示version1 > version2, -1表示version1 < version2, 0表示相等.
+     */
+    private function compareVersions(string $version1, string $version2): int
+    {
+        // 使用PHP的version_compare函数进行版本比较
+        // version_compare 返回: -1, 0, 1
+        return version_compare($version1, $version2);
+    }
+
+    /**
+     * 将插件ID转换为目录名
+     * 下划线命名法 -> 驼峰命名法.
+     *
+     * @param string $addonId 插件ID
+     * @return string 目录名
+     */
+    private function convertIdToDirName(string $addonId): string
+    {
+        // 将下划线分隔的字符串转换为驼峰命名
+        $parts = explode('_', $addonId);
+        $dirName = '';
+
+        foreach ($parts as $part) {
+            $dirName .= ucfirst($part);
+        }
+
+        return $dirName;
+    }
+
+            logger()->error("[插件操作] 菜单删除异常: {$name} - " . $e->getMessage());
+        }
+    }

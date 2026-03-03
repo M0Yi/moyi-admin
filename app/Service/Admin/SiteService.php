@@ -5,12 +5,202 @@ declare(strict_types=1);
 namespace App\Service\Admin;
 
 use App\Model\Admin\AdminSite;
+use Hyperf\Di\Annotation\Inject;
+use Hyperf\Redis\RedisFactory;
+use Hyperf\Redis\RedisProxy;
 
 /**
  * 站点管理服务
  */
 class SiteService
 {
+    /**
+     * Redis 缓存过期时间（秒）
+     */
+    private const CACHE_TTL = 3600;
+
+    /**
+     * Redis Key 前缀
+     */
+    private const CACHE_KEY_PREFIX = 'site:domain:';
+
+    #[Inject]
+    protected RedisFactory $redisFactory;
+
+    /**
+     * 获取 Redis 实例
+     */
+    private function getRedis(): RedisProxy
+    {
+        return $this->redisFactory->get('default');
+    }
+
+    /**
+     * 生成缓存 Key
+     */
+    private function getCacheKey(string $domain): string
+    {
+        return self::CACHE_KEY_PREFIX . $domain;
+    }
+
+    /**
+     * 清除站点缓存
+     *
+     * @param AdminSite $site 站点对象
+     */
+    public function clearSiteCache(AdminSite $site): void
+    {
+        try {
+            $redis = $this->getRedis();
+
+            // 清除域名对应的缓存
+            $redis->del($this->getCacheKey($site->domain));
+
+            // 如果有 admin_entry_path，也清除对应的缓存
+            if (!empty($site->admin_entry_path)) {
+                $redis->del($this->getCacheKey($site->admin_entry_path));
+            }
+        } catch (\Throwable $e) {
+            // 缓存清除失败不影响业务逻辑，只记录日志
+            logger()->error('[SiteService] 清除站点缓存失败: ' . $e->getMessage(), [
+                'site_id' => $site->id,
+                'domain' => $site->domain,
+            ]);
+        }
+    }
+
+    /**
+     * 根据域名获取站点信息（优先缓存）
+     *
+     * 流程：
+     * 1. 先从 Redis 缓存获取
+     * 2. 缓存未命中则从数据库查询
+     * 3. 查询到后写入缓存
+     *
+     * @param string $domain 域名
+     * @return AdminSite|null
+     */
+    public function getSiteByDomain(string $domain): ?AdminSite
+    {
+        // 优先从 Redis 缓存获取
+        $site = $this->getSiteFromCache($domain);
+
+        if ($site) {
+            return $site;
+        }
+
+        // 缓存未命中，从数据库查询
+        $site = $this->findSiteByDomain($domain);
+
+        if ($site) {
+            // 写入 Redis 缓存
+            $this->setSiteToCache($domain, $site);
+        }
+
+        return $site;
+    }
+
+    /**
+     * 从 Redis 缓存获取站点信息
+     *
+     * @param string $domain 域名
+     * @return AdminSite|null
+     */
+    private function getSiteFromCache(string $domain): ?AdminSite
+    {
+        try {
+            $redis = $this->getRedis();
+            $cacheKey = $this->getCacheKey($domain);
+            $cached = $redis->get($cacheKey);
+
+            if ($cached !== false && $cached !== null) {
+                $data = json_decode($cached, true);
+                if (is_array($data) && isset($data['id'])) {
+                    logger()->debug('[SiteService] 缓存命中, 域名: ' . $domain . ', 站点ID: ' . $data['id']);
+                    return $this->hydrateSiteFromArray($data);
+                }
+            }
+        } catch (\Throwable $e) {
+            // 记录错误日志，但不影响正常流程
+            logger()->error('[SiteService] Redis 缓存读取失败: ' . $e->getMessage(), [
+                'domain' => $domain,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        return null;
+    }
+
+    /**
+     * 将站点信息写入 Redis 缓存
+     *
+     * @param string $domain 域名
+     * @param AdminSite $site 站点模型
+     */
+    private function setSiteToCache(string $domain, AdminSite $site): void
+    {
+        try {
+            $redis = $this->getRedis();
+            $cacheKey = $this->getCacheKey($domain);
+
+            // 将站点模型转换为数组
+            $data = $site->toArray();
+
+            // 序列化并写入缓存
+            $redis->setex($cacheKey, self::CACHE_TTL, json_encode($data, JSON_UNESCAPED_UNICODE));
+
+            logger()->debug('[SiteService] 已写入缓存, 域名: ' . $domain . ', 站点ID: ' . $site->id);
+        } catch (\Throwable $e) {
+            // 记录错误日志，但不影响正常流程
+            logger()->error('[SiteService] Redis 缓存写入失败: ' . $e->getMessage(), [
+                'domain' => $domain,
+                'site_id' => $site->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * 从数组数据创建站点模型（用于缓存数据）
+     *
+     * @param array $data 站点数据数组
+     * @return AdminSite
+     */
+    private function hydrateSiteFromArray(array $data): AdminSite
+    {
+        $site = new AdminSite();
+        foreach ($data as $key => $value) {
+            $site->setAttribute($key, $value);
+        }
+        // 标记为已存在，避免 save() 时执行 INSERT 操作
+        $site->exists = true;
+        return $site;
+    }
+
+    /**
+     * 根据域名查找站点（数据库查询）
+     *
+     * @param string $domain 域名
+     * @return AdminSite|null
+     */
+    private function findSiteByDomain(string $domain): ?AdminSite
+    {
+        try {
+            return AdminSite::query()
+                ->byDomain($domain)
+                ->active()
+                ->first();
+        } catch (\Throwable $e) {
+            // 记录错误日志
+            logger()->error('[SiteService] 数据库查询站点失败: ' . $e->getMessage(), [
+                'domain' => $domain,
+                'error' => $e->getMessage(),
+            ]);
+
+            return null;
+        }
+    }
+
     /**
      * 获取表单字段配置
      *

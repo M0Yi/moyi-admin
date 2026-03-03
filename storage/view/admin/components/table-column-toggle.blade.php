@@ -1,23 +1,23 @@
 {{--
-表格列显示控制组件（基于 Bootstrap 5 Dropdown）
-
-使用方法：
-@include('admin.components.table-column-toggle', [
-    'tableId' => 'myTable',           // 必填：表格的 ID
-    'storageKey' => 'myTableColumns', // 必填：localStorage 存储的 key
-    'columns' => [                     // 必填：列配置数组
-        ['index' => 0, 'label' => 'ID', 'visible' => true],
-        ['index' => 1, 'label' => '名称', 'visible' => true],
-        ['index' => 2, 'label' => '状态', 'visible' => false],
-    ]
-])
-
-注意事项：
-1. 表格的 <table> 标签必须有 id 属性
-2. 表格的 <th> 和 <td> 必须有 data-column 属性，值为列索引
-3. 例如：<th data-column="0">ID</th>
-4. 例如：<td data-column="0">{{ $item->id }}</td>
---}}
+|表格列显示控制组件（基于 Bootstrap 5 Dropdown）
+|
+|使用方法：
+|@include('admin.components.table-column-toggle', [
+|    'tableId' => 'myTable',           // 必填：表格的 ID
+|    'storageKey' => 'myTableColumns', // 必填：localStorage 存储的 key
+|    'columns' => [                     // 必填：列配置数组
+|        ['index' => 0, 'label' => 'ID', 'visible' => true],
+|        ['index' => 1, 'label' => '名称', 'visible' => true],
+|        ['index' => 2, 'label' => '状态', 'visible' => false],
+|    ]
+|])
+|
+|注意事项：
+|1. 表格的 <table> 标签必须有 id 属性
+|2. 表格的 <th> 和 <td> 必须有 data-column 属性，值为列索引
+|3. 例如：<th data-column="0">ID</th>
+|4. 例如：<td data-column="0">{{ $item->id }}</td>
+|--}}
 
 <!-- Bootstrap 5 Dropdown 列显示控制 -->
 <div class="btn-group">
@@ -195,7 +195,11 @@
     const tableId = '{{ $tableId }}';
     const storageKey = '{{ $storageKey }}';
     // 只获取默认显示的列索引（visible === true）
-    const defaultVisible = @json(array_column(array_filter($columns, fn($col) => $col['visible'] ?? false), 'index'));
+    @php
+        $defaultVisibleColumns = array_filter($columns, fn($col) => ($col['visible'] ?? false));
+        $defaultVisibleIndices = array_column($defaultVisibleColumns, 'index');
+    @endphp
+    const defaultVisible = @json($defaultVisibleIndices);
 
     document.addEventListener('DOMContentLoaded', init);
 
@@ -207,7 +211,7 @@
         loadPreferences();
 
         // 监听 Bootstrap Dropdown 事件切换图标
-        btn.addEventListener('show.bs.dropdown', () => {
+        btn.addEventListener('show.bs.dropdown', function() {
             const icon = document.getElementById('columnToggleIcon_' + tableId);
             if (icon) icon.className = 'bi bi-eye-fill';
             const arrow = document.getElementById('columnToggleArrow_' + tableId);
@@ -217,7 +221,7 @@
             }
         });
 
-        btn.addEventListener('hide.bs.dropdown', () => {
+        btn.addEventListener('hide.bs.dropdown', function() {
             const icon = document.getElementById('columnToggleIcon_' + tableId);
             if (icon) icon.className = 'bi bi-eye';
             const arrow = document.getElementById('columnToggleArrow_' + tableId);
@@ -229,7 +233,7 @@
 
         // 复选框切换
         document.querySelectorAll(`#columnToggleBtn_${tableId} ~ .dropdown-menu .column-toggle-checkbox`).forEach(cb => {
-            cb.onchange = () => {
+            cb.onchange = function() {
                 toggleColumn(+cb.dataset.column, cb.checked);
                 savePreferences();
             };
@@ -238,7 +242,7 @@
         // 重置按钮
         const resetBtn = document.getElementById('resetColumnsBtn_' + tableId);
         if (resetBtn) {
-            resetBtn.onclick = () => {
+            resetBtn.onclick = function() {
                 document.querySelectorAll(`#columnToggleBtn_${tableId} ~ .dropdown-menu .column-toggle-checkbox`).forEach(cb => {
                     const isDefault = defaultVisible.includes(+cb.dataset.column);
                     cb.checked = isDefault;
@@ -286,4 +290,3 @@
     }
 })();
 </script>
-

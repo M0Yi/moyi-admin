@@ -244,7 +244,7 @@ function doTestConnection() {
     resultDiv.classList.remove('d-none');
     resultDiv.innerHTML = '<div class="d-flex align-items-center gap-2"><div class="spinner-border spinner-border-sm" role="status"></div><span>测试中...</span></div>';
 
-    fetch(`{{ admin_route('system/database-connections') }}/${currentTestConnectionId}/test-connection`, {
+    fetch(`{{ admin_route('system/database-connections'))/${currentTestConnectionId}/test-connection`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
@@ -287,7 +287,7 @@ document.addEventListener('DOMContentLoaded', function () {
             return;
         }
 
-        fetch(`{{ admin_route('system/database-connections') }}/${id}`, {
+        fetch(`{{ admin_route('system/database-connections'))/${id}`, {
             method: 'DELETE',
             headers: {
                 'Content-Type': 'application/json',

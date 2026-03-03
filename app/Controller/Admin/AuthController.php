@@ -36,9 +36,13 @@ class AuthController extends AbstractController
      */
     public function doLogin(RequestInterface $request): ResponseInterface
     {
+        $requestId = uniqid('login_', true);
+        $startTime = microtime(true);
+
         $data = $request->all();
         $username = trim((string) ($data['username'] ?? ''));
         $password = (string) ($data['password'] ?? '');
+        $rememberMe = (bool) ($data['remember_me'] ?? false);
 
         // 获取一些请求信息
         $serverParams = $request->getServerParams();
@@ -78,13 +82,43 @@ class AuthController extends AbstractController
             }
         }
 
+        // ===== 登录开始日志 =====
         try {
-            // 查找用户
+            logger()->info('AuthController.doLogin START', [
+                'request_id' => $requestId,
+                'username' => $username,
+                'ip' => $ip,
+                'ip_list' => $ipList,
+                'user_agent' => $userAgent,
+                'admin_entry_path' => $adminEntryPath,
+                'remember_me' => $rememberMe,
+                'site_id' => $siteId,
+            ]);
+        } catch (\Throwable $_) {}
+
+        try {
+            // ===== 开始查找用户 =====
+            try {
+                logger()->info('AuthController.doLogin finding user', [
+                    'request_id' => $requestId,
+                    'username' => $username,
+                ]);
+            } catch (\Throwable $_) {}
+
             $user = AdminUser::query()
                 ->where('username', $username)
                 ->first();
 
+            // ===== 用户不存在 =====
             if (! $user) {
+                try {
+                    logger()->warning('AuthController.doLogin user not found', [
+                        'request_id' => $requestId,
+                        'username' => $username,
+                        'ip' => $ip,
+                    ]);
+                } catch (\Throwable $_) {}
+
                 // 未找到用户 -> 记录失败日志
                 AdminLoginLog::create([
                     'site_id' => $siteId,
@@ -101,8 +135,28 @@ class AuthController extends AbstractController
                 return $this->error('用户名或密码错误', null, 401);
             }
 
+            // ===== 用户存在，检查状态 =====
+            try {
+                logger()->info('AuthController.doLogin user found', [
+                    'request_id' => $requestId,
+                    'user_id' => $user->id,
+                    'username' => $user->username,
+                    'user_status' => $user->status,
+                    'is_admin' => $user->is_admin,
+                ]);
+            } catch (\Throwable $_) {}
+
             // 检查用户状态
             if ($user->status != 1) {
+                try {
+                    logger()->warning('AuthController.doLogin user disabled', [
+                        'request_id' => $requestId,
+                        'user_id' => $user->id,
+                        'username' => $username,
+                        'user_status' => $user->status,
+                    ]);
+                } catch (\Throwable $_) {}
+
                 AdminLoginLog::create([
                     'site_id' => $siteId,
                     'user_id' => $user->id,
@@ -118,8 +172,24 @@ class AuthController extends AbstractController
                 return $this->error('账号已被禁用', null, 403);
             }
 
-            // 验证密码
+            // ===== 验证密码 =====
+            try {
+                logger()->info('AuthController.doLogin verifying password', [
+                    'request_id' => $requestId,
+                    'user_id' => $user->id,
+                ]);
+            } catch (\Throwable $_) {}
+
             if (! $user->verifyPassword($password)) {
+                try {
+                    logger()->warning('AuthController.doLogin password mismatch', [
+                        'request_id' => $requestId,
+                        'user_id' => $user->id,
+                        'username' => $username,
+                        'ip' => $ip,
+                    ]);
+                } catch (\Throwable $_) {}
+
                 AdminLoginLog::create([
                     'site_id' => $siteId,
                     'user_id' => $user->id,
@@ -135,10 +205,29 @@ class AuthController extends AbstractController
                 return $this->error('用户名或密码错误', null, 401);
             }
 
+            // ===== 密码验证成功，开始登录 =====
+            try {
+                logger()->info('AuthController.doLogin password verified, starting login', [
+                    'request_id' => $requestId,
+                    'user_id' => $user->id,
+                    'username' => $username,
+                ]);
+            } catch (\Throwable $_) {}
+
             // 登录成功：设置 Session（页面登录）
             $this->session->set('admin_user_id', $user->id);
             $this->session->set('admin_site_id', $user->site_id ?? $siteId);
             $this->session->set('admin_user', $user->toArray());
+            $this->session->set('admin_remember_me', $rememberMe);
+
+            // ===== Session 设置完成 =====
+            try {
+                logger()->info('AuthController.doLogin session set', [
+                    'request_id' => $requestId,
+                    'user_id' => $user->id,
+                    'session_id' => method_exists($this->session, 'getId') ? $this->session->getId() : 'unknown',
+                ]);
+            } catch (\Throwable $_) {}
 
             // 使用 guard 的登录方法（更标准），若不可用则回退到 setUser
             try {
@@ -192,6 +281,18 @@ class AuthController extends AbstractController
                 'last_login_at' => date('Y-m-d H:i:s'),
             ]);
 
+            // ===== 登录成功 =====
+            try {
+                $duration = round((microtime(true) - $startTime) * 1000, 2);
+                logger()->info('AuthController.doLogin SUCCESS', [
+                    'request_id' => $requestId,
+                    'user_id' => $user->id,
+                    'username' => $username,
+                    'ip' => $ip,
+                    'duration_ms' => $duration,
+                ]);
+            } catch (\Throwable $_) {}
+
             // 记录成功日志
             AdminLoginLog::create([
                 'site_id' => $siteId,
@@ -208,6 +309,19 @@ class AuthController extends AbstractController
             // 返回重定向到后台首页
             return $this->success(['redirect' => admin_route('dashboard')], '登录成功', 200);
         } catch (\Throwable $e) {
+            // ===== 登录异常 =====
+            $duration = round((microtime(true) - $startTime) * 1000, 2);
+            try {
+                logger()->error('AuthController.doLogin EXCEPTION', [
+                    'request_id' => $requestId,
+                    'username' => $username,
+                    'ip' => $ip,
+                    'error' => $e->getMessage(),
+                    'trace' => $e->getTraceAsString(),
+                    'duration_ms' => $duration,
+                ]);
+            } catch (\Throwable $_) {}
+
             // 记录失败日志（异常）
             try {
                 AdminLoginLog::create([
@@ -223,39 +337,6 @@ class AuthController extends AbstractController
                 ]);
             } catch (\Throwable $_) {
                 // 忽略二次失败
-            }
-
-            // 详细调试输出，包含 print_r 风格的 payload 信息
-            try {
-                $debug = [
-                    'error' => $e->getMessage(),
-                    'trace' => $e->getTraceAsString(),
-                    'username' => $username,
-                    'server_params' => $request->getServerParams(),
-                    'request_headers' => $request->getHeaders(),
-                    'session_info' => null,
-                ];
-
-                try {
-                    if (method_exists($this->session, 'all')) {
-                        $debug['session_info'] = $this->session->all();
-                    } else {
-                        $debug['session_info'] = [
-                            'admin_user_id' => $this->session->get('admin_user_id'),
-                            'admin_user' => $this->session->get('admin_user'),
-                        ];
-                    }
-                } catch (\Throwable $_) {
-                    $debug['session_info'] = 'session read failed';
-                }
-
-                // 打印到 stdout style（便于快速查看），同时写入日志 context
-                print_r($debug);
-                logger()->error('登录处理异常', [
-                    'debug_print' => print_r($debug, true),
-                ]);
-            } catch (\Throwable $_) {
-                // 忽略调试日志错误
             }
 
             return $this->error('登录失败，请稍后重试', null, 500);
@@ -290,6 +371,7 @@ class AuthController extends AbstractController
                     $this->session->set('admin_user_id', null);
                     $this->session->set('admin_site_id', null);
                     $this->session->set('admin_user', null);
+                    $this->session->set('admin_remember_me', null);
                 }
                 if (method_exists($this->session, 'destroy')) {
                     $this->session->destroy();

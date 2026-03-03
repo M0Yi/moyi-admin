@@ -9,23 +9,84 @@ use App\Exception\BusinessException;
 use App\Model\Admin\AdminOperationLog;
 use App\Model\Admin\AdminUser;
 
-class OperationLogService
+/**
+ * 操作日志服务
+ */
+class OperationLogService extends BaseService
 {
     /**
-     * 获取操作日志列表
-     *
-     * @param array $params 查询参数
-     * @return array
+     * 获取模型类名
      */
-    public function getList(array $params = []): array
+    protected function getModelClass(): string
     {
-        $query = AdminOperationLog::query()
-            ->with(['user', 'site'])
-            ->orderBy('created_at', 'desc');
+        return AdminOperationLog::class;
+    }
+
+    /**
+     * 获取可搜索字段列表
+     */
+    protected function getSearchableFields(): array
+    {
+        return ['username', 'path', 'ip'];
+    }
+
+    /**
+     * 获取可排序字段列表
+     */
+    protected function getSortableFields(): array
+    {
+        return ['id', 'created_at', 'duration'];
+    }
+
+    /**
+     * 获取默认排序字段
+     */
+    protected function getDefaultSortField(): string
+    {
+        return 'created_at';
+    }
+
+    /**
+     * 获取默认排序方向
+     */
+    protected function getDefaultSortOrder(): string
+    {
+        return 'desc';
+    }
+
+    /**
+     * 重写 getQuery 添加站点过滤
+     */
+    protected function getQuery(): \Hyperf\Database\Model\Builder
+    {
+        $query = parent::getQuery();
+
+        // 站点过滤：普通管理员固定当前站点，超级管理员可根据筛选选择站点
+        $requestedSiteId = 0; // 不在基础查询中过滤
+        $currentSiteId = (int) (site_id() ?? 0);
+
+        if (is_super_admin()) {
+            // 超级管理员可以看到所有站点的数据
+            // 具体过滤由 listData 中的参数决定
+        } elseif ($currentSiteId > 0) {
+            // 普通管理员只能看到当前站点的数据
+            $query->where('site_id', $currentSiteId);
+        }
+
+        return $query;
+    }
+
+    /**
+     * 获取列表数据（覆盖 BaseService）
+     */
+    public function getList(array $params = [], int $pageSize = 15): array
+    {
+        $query = $this->buildQuery($params);
 
         // 站点过滤：普通管理员固定当前站点，超级管理员可根据筛选选择站点
         $requestedSiteId = isset($params['site_id']) ? (int) $params['site_id'] : 0;
         $currentSiteId = (int) (site_id() ?? 0);
+
         if (is_super_admin()) {
             if ($requestedSiteId > 0) {
                 $query->where('site_id', $requestedSiteId);
@@ -39,7 +100,7 @@ class OperationLogService
             $query->where('user_id', (int) $params['user_id']);
         }
 
-        // 用户名筛选
+        // 用户名筛选（覆盖默认搜索）
         if (!empty($params['username'])) {
             $query->where('username', 'like', '%' . trim((string) $params['username']) . '%');
         }
@@ -72,47 +133,52 @@ class OperationLogService
             $query->where('created_at', '<=', $params['end_date'] . ' 23:59:59');
         }
 
+        // 排序
+        $sortField = $params['sort_field'] ?? $this->getDefaultSortField();
+        $sortOrder = $params['sort_order'] ?? $this->getDefaultSortOrder();
+        $sortableFields = $this->getSortableFields();
+
+        if (in_array($sortField, $sortableFields, true)) {
+            $query->orderBy($sortField, $sortOrder);
+        } else {
+            $query->orderBy($this->getDefaultSortField(), $this->getDefaultSortOrder());
+        }
+
         // 分页
-        $pageSize = $params['page_size'] ?? 15;
-        $paginator = $query->paginate((int)$pageSize);
+        $page = (int) ($params['page'] ?? 1);
+        $pageSize = (int) ($params['page_size'] ?? $pageSize);
+        $paginator = $query->paginate($pageSize, ['*'], 'page', $page);
 
         return [
             'list' => $paginator->items(),
             'total' => $paginator->total(),
             'page' => $paginator->currentPage(),
             'page_size' => $paginator->perPage(),
+            'last_page' => $paginator->lastPage(),
         ];
     }
 
     /**
-     * 获取操作日志详情
-     *
-     * @param int $id 日志ID
-     * @return AdminOperationLog
-     * @throws \App\Exception\BusinessException
+     * 获取操作日志详情（覆盖 BaseService）
      */
-    public function getById(int $id): AdminOperationLog
+    public function find(int $id): ?\App\Model\Model
     {
-        $query = AdminOperationLog::query()->where('id', $id);
-        
+        $query = $this->getQuery();
+        $query->with(['user', 'site']);
+
         $siteId = site_id() ?? 0;
         if ($siteId && !is_super_admin()) {
             $query->where('site_id', $siteId);
         }
 
-        $log = $query->with(['user', 'site'])->first();
-
-        if (!$log) {
-            throw new BusinessException(ErrorCode::NOT_FOUND, '操作日志不存在');
-        }
+        /** @var AdminOperationLog|null $log */
+        $log = $query->where('id', $id)->first();
 
         return $log;
     }
 
     /**
      * 获取站点筛选选项（仅超级管理员）
-     *
-     * @return array
      */
     public function getSiteFilterOptions(): array
     {
@@ -138,8 +204,6 @@ class OperationLogService
 
     /**
      * 获取用户筛选选项
-     *
-     * @return array
      */
     public function getUserFilterOptions(): array
     {
@@ -166,34 +230,38 @@ class OperationLogService
     }
 
     /**
-     * 删除操作日志
-     *
-     * @param int $id 日志ID
-     * @return bool
-     * @throws \App\Exception\BusinessException
+     * 删除操作日志（覆盖 BaseService）
      */
     public function delete(int $id): bool
     {
-        $log = $this->getById($id);
+        $log = $this->find($id);
+
+        if (!$log) {
+            throw new BusinessException(ErrorCode::NOT_FOUND, '操作日志不存在');
+        }
+
         return $log->delete();
     }
 
     /**
      * 批量删除操作日志
-     *
-     * @param array $ids 日志ID数组
-     * @return int 删除的记录数
      */
     public function batchDelete(array $ids): int
     {
-        $query = AdminOperationLog::query()->whereIn('id', $ids);
-        
-        $siteId = site_id() ?? 0;
-        if ($siteId && !is_super_admin()) {
-            $query->where('site_id', $siteId);
+        if (empty($ids)) {
+            return 0;
         }
+
+        $query = $this->getQuery()->whereIn('id', $ids);
 
         return $query->delete();
     }
-}
 
+    /**
+     * 获取所有数据（不分页）
+     */
+    public function getAll(array $params = []): array
+    {
+        return $this->getList($params, 0)['list'] ?? [];
+    }
+}

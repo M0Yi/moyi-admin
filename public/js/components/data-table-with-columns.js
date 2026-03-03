@@ -348,6 +348,14 @@
 
             // 构建完整的 URL
             const fullUrl = baseUrl + '?' + params.toString();
+            
+            // 调试日志
+            console.log(`[DataTable ${tableId}] AJAX 请求信息:`, {
+                ajaxUrl: ajaxUrl,
+                baseUrl: baseUrl,
+                params: params.toString(),
+                fullUrl: fullUrl
+            });
 
             fetch(fullUrl, {
                 signal: currentRequestController.signal
@@ -648,7 +656,9 @@
         // 智能匹配徽章颜色（前端版本，与后端逻辑保持一致）
         function getBadgeVariantForValue(key, label, fieldName) {
             const valueStr = String(key);
-            const labelLower = (label || '').toLowerCase();
+            // 确保 label 是字符串类型，避免数字/布尔值调用 toLowerCase 报错
+            const labelStr = String(label ?? '');
+            const labelLower = labelStr.toLowerCase();
             const fieldNameLower = (fieldName || '').toLowerCase();
             
             // 成功/启用状态
@@ -656,7 +666,7 @@
                 /^(启用|激活|是|开启|正常|在线|公开|显示|已启用|已激活|已开启|已发布|已完成|已通过|已审核|已确认|有效|可用|正常|成功|通过|同意|允许|是|yes|true|enabled|active|on|open|published|completed|approved|confirmed|valid|available|normal|success|pass|agree|allow)$/i
             ];
             for (const pattern of successPatterns) {
-                if (pattern.test(label)) {
+                if (pattern.test(labelStr)) {
                     return 'success';
                 }
             }
@@ -666,7 +676,7 @@
                 /^(禁用|停用|否|关闭|异常|离线|隐藏|删除|已禁用|已停用|已关闭|已删除|无效|不可用|否|no|false|disabled|inactive|off|closed|deleted|invalid|unavailable|none|null)$/i
             ];
             for (const pattern of secondaryPatterns) {
-                if (pattern.test(label)) {
+                if (pattern.test(labelStr)) {
                     return 'secondary';
                 }
             }
@@ -676,7 +686,7 @@
                 /^(警告|待审核|待处理|待发布|草稿|待确认|待支付|待发货|待收货|待评价|进行中|处理中|审核中|pending|draft|reviewing|processing|in_progress|in-progress|waiting|warn|warning)$/i
             ];
             for (const pattern of warningPatterns) {
-                if (pattern.test(label)) {
+                if (pattern.test(labelStr)) {
                     return 'warning';
                 }
             }
@@ -686,7 +696,7 @@
                 /^(错误|拒绝|失败|已删除|已禁用|已拒绝|已失败|已取消|已过期|已锁定|已封禁|异常|错误|error|failed|rejected|cancelled|expired|locked|banned|exception|fail|deny|refuse)$/i
             ];
             for (const pattern of dangerPatterns) {
-                if (pattern.test(label)) {
+                if (pattern.test(labelStr)) {
                     return 'danger';
                 }
             }
@@ -696,7 +706,7 @@
                 /^(信息|默认|其他|普通|一般|info|information|default|other|normal|general|common)$/i
             ];
             for (const pattern of infoPatterns) {
-                if (pattern.test(label)) {
+                if (pattern.test(labelStr)) {
                     return 'info';
                 }
             }
@@ -917,77 +927,9 @@
         
         // 所有列类型渲染都在前端 JavaScript 中完成
         function renderCell(value, column, row) {
-            // 检查列的 visible 字段（支持函数、布尔值、字符串表达式）
-            let columnVisible = true;
-            if (column.visible !== undefined) {
-                // 创建 evaluateCondition 函数的本地版本
-                const evaluateCondition = (conditionValue) => {
-                    // 如果是函数，直接调用
-                    if (typeof conditionValue === 'function') {
-                        return conditionValue(value, row, column);
-                    }
-
-                    // 如果是布尔值，直接返回
-                    if (typeof conditionValue === 'boolean') {
-                        return conditionValue;
-                    }
-
-                    // 如果是字符串，进行解析
-                    if (typeof conditionValue === 'string') {
-                        try {
-                            // 检查是否是函数字符串定义
-                            if (conditionValue.trim().startsWith('function(')) {
-                                // 函数字符串：直接构造并调用
-                                const functionBody = conditionValue.trim();
-                                const func = new Function('value', 'row', 'column', `return (${functionBody})(value, row, column);`);
-                                return func(value, row, column);
-                            } else {
-                                // 普通字符串表达式：处理占位符并计算
-                                let condition = conditionValue;
-                                const fieldMatches = condition.match(/{(\w+)}/g);
-                                if (fieldMatches) {
-                                    fieldMatches.forEach(match => {
-                                        const fieldName = match.slice(1, -1); // 移除 {}
-                                        let fieldValue = row[fieldName];
-
-                                        // 处理布尔值转换
-                                        if (typeof fieldValue === 'boolean') {
-                                            fieldValue = fieldValue ? 'true' : 'false';
-                                        } else if (fieldValue === null || fieldValue === undefined) {
-                                            fieldValue = 'false';
-                                        }
-
-                                        condition = condition.replace(new RegExp(match.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), fieldValue);
-                                    });
-                                }
-
-                                // 安全计算条件表达式
-                                const conditionFn = new Function('value', 'row', 'column', `return ${condition};`);
-                                return conditionFn(value, row, column);
-                            }
-                        } catch (error) {
-                            console.error('[Column Condition Error]', {
-                                condition: conditionValue,
-                                error: error.message,
-                                row: row,
-                                value: value,
-                                column: column
-                            });
-                            return true; // 出错时默认显示
-                        }
-                    }
-
-                    // 其他类型默认为 true
-                    return true;
-                };
-
-                columnVisible = evaluateCondition(column.visible);
-            }
-
-            // 如果列不可见，返回空内容
-            if (!columnVisible) {
-                return '';
-            }
+            // 注意：不再根据 visible 字段来控制单元格内容的渲染
+            // visible 字段应该只控制列的显示/隐藏（通过 CSS display 属性）
+            // 这样用户手动开启隐藏列时，单元格内容才能正确显示
 
             const columnType = column.type || 'text';
             
@@ -996,7 +938,7 @@
                     return value || '0';
                 
                 case 'date':
-                    return value ? formatDate(value) : '';
+                    return value ? formatDate(value, column.format || 'Y-m-d H:i:s') : '';
                 
                 case 'icon':
                     if (value) {
@@ -1339,6 +1281,20 @@
 
                             return result;
                         };
+
+                        // 安全转义函数：用于 onclick 等属性中的值
+                        // 注意：在 HTML 属性中使用双引号包围，所以只需要转义双引号
+                        const escapeForJsAttr = (str) => {
+                            if (!str) return '';
+                            return str
+                                .replace(/\\/g, '\\\\')      // 转义反斜杠
+                                .replace(/"/g, '\\"')       // 转义双引号（在 HTML 属性中需要）
+                                .replace(/\n/g, '\\n')      // 替换换行符
+                                .replace(/\r/g, '\\r')      // 替换回车符
+                                .replace(/\t/g, '\\t')      // 替换制表符
+                                .replace(/</g, '\\x3c')     // 转义 < 防止 XSS
+                                .replace(/>/g, '\\x3e');    // 转义 > 防止 XSS
+                        };
                         
                         if (action.type === 'link') {
                             // 链接类型按钮
@@ -1355,7 +1311,9 @@
                                 if (action.attributes && typeof action.attributes === 'object') {
                                     for (const [key, value] of Object.entries(action.attributes)) {
                                         const attrValue = replacePlaceholders(value);
-                                        attributesHtml += ` ${key}="${attrValue}"`;
+                                        // 对属性值进行转义，防止特殊字符导致 HTML 解析错误
+                                        const escapedAttrValue = escapeForJsAttr(attrValue);
+                                        attributesHtml += ` ${key}="${escapedAttrValue}"`;
                                     }
                                 }
                                 
@@ -1369,7 +1327,9 @@
                             }
                         } else if (action.type === 'button') {
                             // 按钮类型
-                            const onclick = replacePlaceholders(action.onclick);
+                            const rawOnclick = replacePlaceholders(action.onclick);
+                            // 对 onclick 属性值进行安全转义，防止特殊字符导致 JS 语法错误
+                            const onclick = escapeForJsAttr(rawOnclick);
                             if (onclick) {
                                 const variant = action.variant || 'secondary';
                                 const icon = action.icon ? `<i class="bi ${action.icon}"></i>` : '';
@@ -1382,7 +1342,9 @@
                                 if (action.attributes && typeof action.attributes === 'object') {
                                     for (const [key, value] of Object.entries(action.attributes)) {
                                         const attrValue = replacePlaceholders(value);
-                                        attributesHtml += ` ${key}="${attrValue}"`;
+                                        // 对属性值进行转义，防止特殊字符导致 HTML 解析错误
+                                        const escapedAttrValue = escapeForJsAttr(attrValue);
+                                        attributesHtml += ` ${key}="${escapedAttrValue}"`;
                                     }
                                 }
                                 
@@ -2635,9 +2597,9 @@
             }
         }
         
-        // 格式化日期（全局函数，不需要 tableId 后缀）
+        // 格式化日期（全局函数，支持自定义格式）
         if (typeof window.formatDate === 'undefined') {
-            window.formatDate = function(dateStr) {
+            window.formatDate = function(dateStr, format = 'Y-m-d H:i:s') {
                 if (!dateStr) return '';
                 const date = new Date(dateStr);
                 const year = date.getFullYear();
@@ -2646,7 +2608,15 @@
                 const hours = String(date.getHours()).padStart(2, '0');
                 const minutes = String(date.getMinutes()).padStart(2, '0');
                 const seconds = String(date.getSeconds()).padStart(2, '0');
-                return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+
+                // 支持自定义格式
+                return format
+                    .replace('Y', year)
+                    .replace('m', month)
+                    .replace('d', day)
+                    .replace('H', hours)
+                    .replace('i', minutes)
+                    .replace('s', seconds);
             };
         }
 

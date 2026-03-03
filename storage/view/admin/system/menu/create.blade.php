@@ -9,6 +9,7 @@
 @push('admin_navbar')
     @include('admin.components.navbar')
 @endpush
+@endif
 
 @section('content')
 <div class="container-fluid py-4">

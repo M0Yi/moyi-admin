@@ -634,6 +634,63 @@ class CrudService
     }
 
     /**
+     * 批量更新字段值
+     *
+     * @param string|object $modelOrTable Model 类名、实例或表名
+     * @param array $ids ID数组
+     * @param string $field 字段名
+     * @param mixed $value 要设置的值
+     * @param array $options 选项配置
+     * @return int 更新的记录数
+     */
+    public function batchUpdateField(string|object $modelOrTable, array $ids, string $field, mixed $value, array $options = []): int
+    {
+        if (empty($ids)) {
+            return 0;
+        }
+
+        // 验证字段名
+        $this->validateFieldName($field, 'field');
+
+        // 验证 ID 数组
+        $maxCount = $options['max_count'] ?? 100;
+        $this->validateIds($ids, $maxCount);
+
+        // 去重
+        $ids = array_values(array_unique($ids));
+
+        $resolved = $this->resolveModelOrTable($modelOrTable);
+
+        if ($resolved['isModel']) {
+            // 使用 Model 更新
+            $modelClass = $resolved['model'];
+            $query = $modelClass::query()->whereIn('id', $ids);
+
+            // 添加站点过滤（超级管理员跳过）
+            $hasSiteId = $options['has_site_id'] ?? false;
+            $siteId = $options['site_id'] ?? site_id();
+            if ($hasSiteId && $siteId && !is_super_admin()) {
+                $query->where('site_id', $siteId);
+            }
+
+            return $query->update([$field => $value]);
+        }
+
+        // 使用 DB 更新
+        $connection = $this->getConnection($options);
+        $query = $connection->table($resolved['table'])->whereIn('id', $ids);
+
+        // 添加站点过滤（超级管理员跳过）
+        $hasSiteId = $options['has_site_id'] ?? false;
+        $siteId = $options['site_id'] ?? site_id();
+        if ($hasSiteId && $siteId && !is_super_admin()) {
+            $query->where('site_id', $siteId);
+        }
+
+        return $query->update([$field => $value]);
+    }
+
+    /**
      * 过滤字段（只保留允许的字段）
      *
      * @param array $data 原始数据
