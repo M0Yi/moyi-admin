@@ -44,53 +44,63 @@ class UniversalCrudController extends AbstractController
     protected ValidatorFactoryInterface $validatorFactory;
 
     /**
+     * 从请求中获取模型名（兼容路由参数和查询参数）
+     */
+    protected function getModelFromRequest(RequestInterface $request): ?string
+    {
+        $model = $this->getModelFromRequest($request);
+
+        // 如果模型名为空，尝试从查询参数获取
+        if (empty($model)) {
+            $model = $request->input('_model');
+        }
+
+        return $model ?: null;
+    }
+
+    /**
      * 列表页面
      */
     public function index(RequestInterface $request): PsrResponseInterface
     {
-        $model = $request->route('model');
+        $model = $this->getModelFromRequest($request);
 
-        // 获取配置
-        $config = $this->filterSiteIdColumnForNonSuperAdmin(
-            $this->service->getModelConfig($model)
-        );
-
-        // 仅保留需要在列表中展示的字段（show_in_list 或 list_default 为 true）
-        if (!empty($config['fields_config']) && is_array($config['fields_config'])) {
-            $config['fields_config'] = array_values(array_filter(
-                $config['fields_config'],
-                fn($fieldConfig) => (bool) ($fieldConfig['show_in_list'] ?? $fieldConfig['list_default'] ?? true)
-            ));
+        // 如果模型名为空，尝试从查询参数获取（兼容自定义路由场景）
+        if (empty($model)) {
+            $model = $request->input('_model');
         }
 
-        // 判断是否是 API 请求
-        if ($request->input('_ajax') === '1') {
-            return $this->listData($request, $model);
+        // 如果仍然为空，返回错误
+        if (empty($model)) {
+            return $this->error('模型名称不能为空');
         }
 
-        // 将配置转换为 JSON，供前端脚本解析
-        $configJson = '{}';
-        try {
-            $configJson = (string) json_encode(
-                $config,
-                JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
-            );
-        } catch (\JsonException $exception) {
-            logger()->error('[UniversalCrudController] 配置 JSON 序列化失败', [
-                'model' => $model,
-                'error' => $exception->getMessage(),
-            ]);
-        }
-
-        // 返回列表页面
-        return $this->renderAdmin('admin.system.universal.index', [
-            'model' => $model,
-            'config' => $config,
-            'configJson' => $configJson,
-        ]);
+        return $this->executeIndex($request, $model);
     }
 
-    public function listData(RequestInterface $request, string $model): PsrResponseInterface
+    /**
+     * 获取列表数据
+     */
+    public function listData(RequestInterface $request): PsrResponseInterface
+    {
+        $model = $this->getModelFromRequest($request);
+
+        // 如果模型名为空，尝试从查询参数获取
+        if (empty($model)) {
+            $model = $request->input('_model');
+        }
+
+        if (empty($model)) {
+            return $this->error('模型名称不能为空');
+        }
+
+        return $this->executeListData($request, $model);
+    }
+
+    /**
+     * 执行列表数据查询
+     */
+    protected function executeListData(RequestInterface $request, string $model): PsrResponseInterface
     {
         try {
             // 获取并规范化参数
@@ -206,12 +216,56 @@ class UniversalCrudController extends AbstractController
     }
 
     /**
+     * 执行列表页面逻辑（抽离出来以便复用）
+     */
+    protected function executeIndex(RequestInterface $request, string $model): PsrResponseInterface
+    {
+        $config = $this->filterSiteIdColumnForNonSuperAdmin(
+            $this->service->getModelConfig($model)
+        );
+
+        // 仅保留需要在列表中展示的字段（show_in_list 或 list_default 为 true）
+        if (!empty($config['fields_config']) && is_array($config['fields_config'])) {
+            $config['fields_config'] = array_values(array_filter(
+                $config['fields_config'],
+                fn($fieldConfig) => (bool) ($fieldConfig['show_in_list'] ?? $fieldConfig['list_default'] ?? true)
+            ));
+        }
+
+        // 判断是否是 API 请求
+        if ($request->input('_ajax') === '1') {
+            return $this->executeListData($request, $model);
+        }
+
+        // 将配置转换为 JSON，供前端脚本解析
+        $configJson = '{}';
+        try {
+            $configJson = (string) json_encode(
+                $config,
+                JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
+            );
+        } catch (\JsonException $exception) {
+            logger()->error('[UniversalCrudController] 配置 JSON 序列化失败', [
+                'model' => $model,
+                'error' => $exception->getMessage(),
+            ]);
+        }
+
+        // 返回列表页面
+        return $this->renderAdmin('admin.system.universal.index', [
+            'model' => $model,
+            'config' => $config,
+            'configJson' => $configJson,
+        ]);
+    }
+
+    /**
      * 创建页面
      */
     public function create(RequestInterface $request): PsrResponseInterface
     {
 
-        $model = $request->route('model');
+        $model = $this->getModelFromRequest($request);
 
         // 验证模型
         if (!$this->service->isAllowedModel($model)) {
@@ -513,7 +567,7 @@ class UniversalCrudController extends AbstractController
      */
     public function store(RequestInterface $request): PsrResponseInterface
     {
-        $model = $request->route('model');
+        $model = $this->getModelFromRequest($request);
 
         // 验证模型
         if (!$this->service->isAllowedModel($model)) {
@@ -548,7 +602,7 @@ class UniversalCrudController extends AbstractController
      */
     public function edit(RequestInterface $request, int $id): PsrResponseInterface
     {
-        $model = $request->route('model');
+        $model = $this->getModelFromRequest($request);
 
         // 验证模型
         if (!$this->service->isAllowedModel($model)) {
@@ -619,17 +673,18 @@ class UniversalCrudController extends AbstractController
     }
 
     /**
-     * 更新数据public function index(RequestInterface $request): PsrResponseInterface
-     * {
+     * 更新数据
      */
-    public function update(?string $model,?int $id): PsrResponseInterface
+    public function update(RequestInterface $request, int $id): PsrResponseInterface
     {
+        $model = $this->getModelFromRequest($request);
+
         // 验证模型
         if (!$this->service->isAllowedModel($model)) {
             return $this->error(msg:'不允许访问的模型', code:403);
         }
         try {
-            $data = $this->request->all();
+            $data = $request->all();
             // 数据验证
             $this->validateData($model, $data, 'update', $id);
             // 更新记录
@@ -657,7 +712,7 @@ class UniversalCrudController extends AbstractController
      */
     public function destroy(RequestInterface $request, int $id): PsrResponseInterface
     {
-        $model = $request->route('model');
+        $model = $this->getModelFromRequest($request);
 
         // 验证模型
         if (!$this->service->isAllowedModel($model)) {
@@ -672,6 +727,61 @@ class UniversalCrudController extends AbstractController
 
             // 检查记录是否存在
             $record = $this->service->find($model, $id);
+            if (!$record) {
+                return $this->error('记录不存在或已被删除', 404);
+            }
+
+            // 执行删除
+            $result = $this->service->delete($model, $id);
+
+            if (!$result) {
+                return $this->error('删除失败，请稍后重试', 500);
+            }
+
+            return $this->success([], '删除成功');
+        } catch (\Throwable $e) {
+            $this->rethrowIfDatabaseException($e);
+            return $this->error($e->getMessage());
+        }
+    }
+
+    /**
+     * 详情页面
+     */
+    public function show(RequestInterface $request, int $id): PsrResponseInterface
+    {
+        $model = $this->getModelFromRequest($request);
+
+        // 验证模型
+        if (!$this->service->isAllowedModel($model)) {
+            return $this->error('不允许访问的模型', 403);
+        }
+
+        try {
+            // 获取记录
+            $record = $this->service->find($model, $id);
+
+            if (!$record) {
+                return $this->error('记录不存在', 404);
+            }
+
+            // 获取模型配置
+            $config = $this->service->getModelConfig($model);
+
+            // 返回详情页面
+            return $this->renderAdmin('admin.system.universal.show', [
+                'model' => $model,
+                'record' => $record,
+                'config' => $config,
+            ]);
+        } catch (\Throwable $e) {
+            $this->rethrowIfDatabaseException($e);
+            return $this->error($e->getMessage());
+        }
+    }
+
+    /**
+     * 批量删除
             if (!$record) {
                 return $this->error('记录不存在或已被删除', 404);
             }
@@ -740,7 +850,7 @@ class UniversalCrudController extends AbstractController
      */
     public function batchDestroy(RequestInterface $request): PsrResponseInterface
     {
-        $model = $request->route('model');
+        $model = $this->getModelFromRequest($request);
 
         // 验证模型
         if (!$this->service->isAllowedModel($model)) {
@@ -797,7 +907,7 @@ class UniversalCrudController extends AbstractController
      */
     public function toggleStatus(RequestInterface $request, int $id): PsrResponseInterface
     {
-        $model = $request->route('model');
+        $model = $this->getModelFromRequest($request);
         $field = $request->input('field', 'status');
 
         // 验证模型
@@ -1198,7 +1308,7 @@ class UniversalCrudController extends AbstractController
      */
     public function export(RequestInterface $request): PsrResponseInterface
     {
-        $model = $request->route('model');
+        $model = $this->getModelFromRequest($request);
 
         // 验证模型
         if (!$this->service->isAllowedModel($model)) {
@@ -1377,7 +1487,7 @@ class UniversalCrudController extends AbstractController
      */
     public function searchRelationOptions(RequestInterface $request): PsrResponseInterface
     {
-        $model = $request->route('model');
+        $model = $this->getModelFromRequest($request);
         $field = $request->input('field', '');
         $search = $request->input('search', '');
         $page = (int)$request->input('page', 1);
@@ -1492,7 +1602,7 @@ class UniversalCrudController extends AbstractController
      */
     public function trash(RequestInterface $request): PsrResponseInterface
     {
-        $model = $request->route('model');
+        $model = $this->getModelFromRequest($request);
 
         // 获取配置
         $config = $this->service->getModelConfig($model);
@@ -1613,7 +1723,7 @@ class UniversalCrudController extends AbstractController
      */
     public function restore(RequestInterface $request): PsrResponseInterface
     {
-        $model = $request->route('model');
+        $model = $this->getModelFromRequest($request);
         $id = (int)$request->route('id');
 
         try {
@@ -1633,7 +1743,7 @@ class UniversalCrudController extends AbstractController
      */
     public function forceDelete(RequestInterface $request): PsrResponseInterface
     {
-        $model = $request->route('model');
+        $model = $this->getModelFromRequest($request);
         $id = (int)$request->route('id');
 
         try {
@@ -1653,7 +1763,7 @@ class UniversalCrudController extends AbstractController
      */
     public function batchRestore(RequestInterface $request): PsrResponseInterface
     {
-        $model = $request->route('model');
+        $model = $this->getModelFromRequest($request);
         $ids = $request->input('ids', []);
 
         if (empty($ids) || !is_array($ids)) {
@@ -1677,7 +1787,7 @@ class UniversalCrudController extends AbstractController
      */
     public function batchForceDelete(RequestInterface $request): PsrResponseInterface
     {
-        $model = $request->route('model');
+        $model = $this->getModelFromRequest($request);
         $ids = $request->input('ids', []);
 
         if (empty($ids) || !is_array($ids)) {
@@ -1701,7 +1811,7 @@ class UniversalCrudController extends AbstractController
      */
     public function clearTrash(RequestInterface $request): PsrResponseInterface
     {
-        $model = $request->route('model');
+        $model = $this->getModelFromRequest($request);
 
         try {
             $count = $this->service->clearTrash($model);

@@ -296,6 +296,118 @@ Router::addGroup('/admin/{adminPath:[a-zA-Z0-9\-_]+}', function () {
             Router::get('/test-addon-intersection', 'App\Controller\Admin\System\AddonController@testAddonIntersection');
             Router::get('/test-action-conditions', 'App\Controller\Admin\System\AddonController@testActionConditions');
         });
+
+        // ========================================
+        // AI Agent 管理（位于系统管理下）- 使用专用控制器处理页面，UniversalCrud 处理数据
+        // ========================================
+        Router::addGroup('/system/ai-agents', function () {
+            // 列表页面 - 使用专用控制器
+            Router::get('', 'App\Controller\Admin\AiAgent\AgentController@index');
+            // 创建页面 - 使用专用控制器
+            Router::get('/create', 'App\Controller\Admin\AiAgent\AgentController@create');
+            // 保存创建 - 使用专用控制器
+            Router::post('', 'App\Controller\Admin\AiAgent\AgentController@store');
+            // 详情页面 - 使用专用控制器
+            Router::get('/{id:\d+}', 'App\Controller\Admin\AiAgent\AgentController@show');
+            // 编辑页面 - 使用专用控制器
+            Router::get('/{id:\d+}/edit', 'App\Controller\Admin\AiAgent\AgentController@edit');
+            // 更新数据 - 使用专用控制器
+            Router::put('/{id:\d+}', 'App\Controller\Admin\AiAgent\AgentController@update');
+            // 删除数据 - 使用 UniversalCrudController（带 _model 参数）
+            Router::delete('/{id:\d+}', 'App\Controller\Admin\System\UniversalCrudController@destroy');
+            Router::post('/batch-destroy', 'App\Controller\Admin\System\UniversalCrudController@batchDestroy');
+            // 状态切换 - 使用 UniversalCrudController（带 _model 参数）
+            Router::post('/{id:\d+}/toggle-status', 'App\Controller\Admin\System\UniversalCrudController@toggleStatus');
+            // 导出 - 使用 UniversalCrudController（带 _model 参数）
+            Router::get('/export', 'App\Controller\Admin\System\UniversalCrudController@export');
+            // 回收站 - 使用 UniversalCrudController（带 _model 参数）
+            Router::get('/trash', 'App\Controller\Admin\System\UniversalCrudController@trash');
+            Router::post('/{id:\d+}/restore', 'App\Controller\Admin\System\UniversalCrudController@restore');
+            Router::delete('/{id:\d+}/force-delete', 'App\Controller\Admin\System\UniversalCrudController@forceDelete');
+            Router::post('/batch-restore', 'App\Controller\Admin\System\UniversalCrudController@batchRestore');
+            Router::post('/batch-force-delete', 'App\Controller\Admin\System\UniversalCrudController@batchForceDelete');
+            Router::post('/clear-trash', 'App\Controller\Admin\System\UniversalCrudController@clearTrash');
+            // 特殊操作：设置默认 - 使用专用控制器
+            Router::post('/{id:\d+}/set-default', 'App\Controller\Admin\AiAgent\AgentController@setDefault');
+        });
+
+        // ========================================
+        // AI Agent 日志 - 使用专用控制器（只读）
+        // ========================================
+        Router::addGroup('/system/ai-agent-logs', function () {
+            Router::get('', 'App\Controller\Admin\AiAgent\AgentLogController@index');
+            Router::get('/{id:\d+}', 'App\Controller\Admin\AiAgent\AgentLogController@show');
+            Router::get('/export', 'App\Controller\Admin\AiAgent\AgentLogController@export');
+        });
+
+        // ========================================
+        // AI Agent 会话（客服场景）- 使用专用控制器处理页面，UniversalCrud 处理数据
+        // ========================================
+        Router::addGroup('/system/ai-agent-sessions', function () {
+            // 页面路由 - 使用专用控制器
+            Router::get('', 'App\Controller\Admin\AiAgent\AgentSessionController@index');
+            Router::get('/{id:\d+}', 'App\Controller\Admin\AiAgent\AgentSessionController@show');
+            // 特殊操作：结束会话 - 使用专用控制器
+            Router::post('/{id:\d+}/end', 'App\Controller\Admin\AiAgent\AgentSessionController@end');
+            // 数据操作 - 使用 UniversalCrudController（带 _model 参数）
+            Router::delete('/{id:\d+}', 'App\Controller\Admin\System\UniversalCrudController@destroy');
+            Router::post('/batch-destroy', 'App\Controller\Admin\System\UniversalCrudController@batchDestroy');
+            Router::post('/{id:\d+}/toggle-status', 'App\Controller\Admin\System\UniversalCrudController@toggleStatus');
+            Router::get('/export', 'App\Controller\Admin\System\UniversalCrudController@export');
+            Router::get('/trash', 'App\Controller\Admin\System\UniversalCrudController@trash');
+            Router::post('/{id:\d+}/restore', 'App\Controller\Admin\System\UniversalCrudController@restore');
+            Router::delete('/{id:\d+}/force-delete', 'App\Controller\Admin\System\UniversalCrudController@forceDelete');
+        });
+
+        // ========================================
+        // AI 知识库 - 使用专用控制器处理页面，UniversalCrud 处理数据
+        // ========================================
+        Router::addGroup('/system/ai-knowledge', function () {
+            // 页面路由 - 使用专用控制器
+            Router::get('', 'App\Controller\Admin\AiAgent\AgentKnowledgeController@index');
+            Router::get('/create', 'App\Controller\Admin\AiAgent\AgentKnowledgeController@create');
+            Router::post('', 'App\Controller\Admin\AiAgent\AgentKnowledgeController@store');
+            Router::get('/{id:\d+}', 'App\Controller\Admin\AiAgent\AgentKnowledgeController@show');
+            Router::get('/{id:\d+}/edit', 'App\Controller\Admin\AiAgent\AgentKnowledgeController@edit');
+            Router::put('/{id:\d+}', 'App\Controller\Admin\AiAgent\AgentKnowledgeController@update');
+            // 数据操作 - 使用 UniversalCrudController（带 _model 参数）
+            Router::delete('/{id:\d+}', 'App\Controller\Admin\System\UniversalCrudController@destroy');
+            Router::post('/batch-destroy', 'App\Controller\Admin\System\UniversalCrudController@batchDestroy');
+            Router::post('/{id:\d+}/toggle-status', 'App\Controller\Admin\System\UniversalCrudController@toggleStatus');
+            Router::get('/export', 'App\Controller\Admin\System\UniversalCrudController@export');
+            Router::get('/trash', 'App\Controller\Admin\System\UniversalCrudController@trash');
+            Router::post('/{id:\d+}/restore', 'App\Controller\Admin\System\UniversalCrudController@restore');
+            Router::delete('/{id:\d+}/force-delete', 'App\Controller\Admin\System\UniversalCrudController@forceDelete');
+            Router::post('/batch-restore', 'App\Controller\Admin\System\UniversalCrudController@batchRestore');
+            Router::post('/batch-force-delete', 'App\Controller\Admin\System\UniversalCrudController@batchForceDelete');
+            Router::post('/clear-trash', 'App\Controller\Admin\System\UniversalCrudController@clearTrash');
+        });
+
+        // ========================================
+        // AI Provider - 使用专用控制器处理页面，UniversalCrud 处理数据
+        // ========================================
+        Router::addGroup('/system/ai-providers', function () {
+            // 页面路由 - 使用专用控制器
+            Router::get('', 'App\Controller\Admin\AiAgent\ProviderController@index');
+            Router::get('/create', 'App\Controller\Admin\AiAgent\ProviderController@create');
+            Router::post('', 'App\Controller\Admin\AiAgent\ProviderController@store');
+            Router::get('/{id:\d+}', 'App\Controller\Admin\AiAgent\ProviderController@show');
+            Router::get('/{id:\d+}/edit', 'App\Controller\Admin\AiAgent\ProviderController@edit');
+            Router::put('/{id:\d+}', 'App\Controller\Admin\AiAgent\ProviderController@update');
+            // 数据操作 - 使用 UniversalCrudController（带 _model 参数）
+            Router::delete('/{id:\d+}', 'App\Controller\Admin\System\UniversalCrudController@destroy');
+            Router::post('/batch-destroy', 'App\Controller\Admin\System\UniversalCrudController@batchDestroy');
+            Router::post('/{id:\d+}/toggle-status', 'App\Controller\Admin\System\UniversalCrudController@toggleStatus');
+            Router::get('/export', 'App\Controller\Admin\System\UniversalCrudController@export');
+            Router::get('/trash', 'App\Controller\Admin\System\UniversalCrudController@trash');
+            Router::post('/{id:\d+}/restore', 'App\Controller\Admin\System\UniversalCrudController@restore');
+            Router::delete('/{id:\d+}/force-delete', 'App\Controller\Admin\System\UniversalCrudController@forceDelete');
+            Router::post('/batch-restore', 'App\Controller\Admin\System\UniversalCrudController@batchRestore');
+            Router::post('/batch-force-delete', 'App\Controller\Admin\System\UniversalCrudController@batchForceDelete');
+            Router::post('/clear-trash', 'App\Controller\Admin\System\UniversalCrudController@clearTrash');
+            // 特殊操作：设置默认 - 使用专用控制器
+            Router::post('/{id:\d+}/set-default', 'App\Controller\Admin\AiAgent\ProviderController@setDefault');
+        });
     }, [
         'middleware' => [
             \App\Middleware\AdminAuthMiddleware::class,
