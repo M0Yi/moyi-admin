@@ -1,7 +1,7 @@
 <?php
 
 return [
-    'enabled' => true,
+    'enabled' => false,
     'store_name' => '插件市场2222',
     'enable_management' => false,
     'enable_logging' => false,
