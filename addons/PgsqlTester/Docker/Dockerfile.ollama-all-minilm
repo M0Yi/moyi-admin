@@ -1,0 +1,22 @@
+FROM ollama/ollama:latest
+
+LABEL maintainer="moyi"
+LABEL description="Ollama Embedding Service with all-MiniLM-L6-v2 model"
+LABEL version="1.0.0"
+LABEL model="all-MiniLM-L6-v2"
+LABEL dimensions="384"
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# 安装 curl
+RUN apt-get update && apt-get install -y \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# 创建启动脚本（使用 /bin/sh）
+RUN printf '#!/bin/sh\nexport OLLAMA_HOST=0.0.0.0:11434\nnohup ollama serve > /tmp/ollama.log 2>&1 &\nfor i in $(seq 1 60); do\n    if curl -s http://localhost:11434/api/tags > /dev/null 2>&1; then break; fi\n    echo "Waiting... $i/60"\n    sleep 2\ndone\nif ! curl -s http://localhost:11434/api/tags | grep -q "all-minilm"; then\n    ollama pull all-minilm:latest\nfi\ntail -f /tmp/ollama.log\n' > /start.sh && chmod +x /start.sh
+
+EXPOSE 11434
+
+# 使用 entrypoint 而不是 CMD
+ENTRYPOINT ["/bin/sh", "/start.sh"]

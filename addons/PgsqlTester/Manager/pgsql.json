@@ -1,0 +1,626 @@
+{
+  "version": "1.0.0",
+  "description": "PostgreSQL 特性展示数据表配置",
+  "extensions": [
+    "btree_gin",
+    "btree_gist",
+    "pg_trgm",
+    "uuid-ossp",
+    "hstore",
+    "postgis"
+  ],
+  "types": {
+    "user_status": "ENUM('active', 'inactive', 'suspended')",
+    "priority_level": "ENUM('low', 'medium', 'high', 'urgent')"
+  },
+  "tables": {
+    "pgsql_features_demo": {
+      "comment": "PostgreSQL 特性演示表",
+      "columns": {
+        "id": {
+          "type": "BIGSERIAL",
+          "primary": true,
+          "comment": "主键ID"
+        },
+        "uuid_field": {
+          "type": "VARCHAR(36)",
+          "comment": "UUID字段（简化版）"
+        },
+        "status": {
+          "type": "user_status",
+          "default": "'active'",
+          "comment": "用户状态枚举"
+        },
+        "priority": {
+          "type": "priority_level",
+          "comment": "优先级枚举"
+        },
+        "tags": {
+          "type": "TEXT[]",
+          "comment": "标签数组"
+        },
+        "metadata": {
+          "type": "HSTORE",
+          "comment": "键值对存储"
+        },
+        "settings": {
+          "type": "JSONB",
+          "comment": "JSON配置数据"
+        },
+        "contact_name": {
+          "type": "VARCHAR(100)",
+          "comment": "联系人姓名"
+        },
+        "contact_email": {
+          "type": "VARCHAR(255)",
+          "comment": "联系人邮箱"
+        },
+        "contact_phone": {
+          "type": "VARCHAR(20)",
+          "comment": "联系人电话"
+        },
+        "address_type": {
+          "type": "VARCHAR(20)",
+          "default": "'home'",
+          "comment": "地址类型"
+        },
+        "title": {
+          "type": "VARCHAR(200)",
+          "comment": "标题"
+        },
+        "content": {
+          "type": "TEXT",
+          "comment": "内容"
+        },
+        "content_vector": {
+          "type": "TSVECTOR",
+          "comment": "全文搜索向量"
+        },
+        "content_zh_vector": {
+          "type": "TSVECTOR",
+          "comment": "中文分词向量"
+        },
+        "search_tokens": {
+          "type": "TEXT[]",
+          "comment": "搜索关键词数组"
+        },
+        "location_lat": {
+          "type": "DECIMAL(10,8)",
+          "comment": "地理位置纬度"
+        },
+        "location_lng": {
+          "type": "DECIMAL(11,8)",
+          "comment": "地理位置经度"
+        },
+        "location": {
+          "type": "GEOMETRY(POINT, 4326)",
+          "comment": "PostGIS几何点位置"
+        },
+        "area": {
+          "type": "GEOMETRY(POLYGON, 4326)",
+          "comment": "PostGIS几何区域"
+        },
+        "ip_address": {
+          "type": "INET",
+          "comment": "IP地址"
+        },
+        "mac_address": {
+          "type": "MACADDR",
+          "comment": "MAC地址"
+        },
+        "price": {
+          "type": "MONEY",
+          "comment": "货币类型价格"
+        },
+        "bit_flags": {
+          "type": "BIT(8)",
+          "default": "B'00000000'",
+          "comment": "位图标志"
+        },
+        "byte_data": {
+          "type": "BYTEA",
+          "comment": "二进制数据"
+        },
+        "large_number": {
+          "type": "NUMERIC(26,8)",
+          "comment": "高精度数值"
+        },
+        "created_at": {
+          "type": "TIMESTAMPTZ",
+          "default": "NOW()",
+          "comment": "创建时间带时区"
+        },
+        "updated_at": {
+          "type": "TIMESTAMPTZ",
+          "default": "NOW()",
+          "comment": "更新时间带时区"
+        },
+        "expires_at": {
+          "type": "TIMESTAMP",
+          "comment": "过期时间"
+        },
+        "birth_date": {
+          "type": "DATE",
+          "comment": "出生日期"
+        },
+        "work_time": {
+          "type": "TIME",
+          "comment": "工作时间"
+        },
+        "timezone_offset": {
+          "type": "INTERVAL",
+          "comment": "时区偏移"
+        },
+        "is_active": {
+          "type": "BOOLEAN",
+          "default": "true",
+          "comment": "是否激活"
+        },
+        "score": {
+          "type": "REAL",
+          "default": 0.0,
+          "comment": "评分"
+        },
+        "view_count": {
+          "type": "INTEGER",
+          "default": 0,
+          "comment": "查看次数"
+        },
+        "data_size": {
+          "type": "BIGINT",
+          "default": 0,
+          "comment": "数据大小"
+        }
+      },
+      "constraints": [
+        {
+          "name": "chk_price_positive",
+          "type": "CHECK",
+          "condition": "price > 0::money"
+        },
+        {
+          "name": "chk_score_range",
+          "type": "CHECK",
+          "condition": "score >= 0 AND score <= 5"
+        },
+        {
+          "name": "chk_updated_after_created",
+          "type": "CHECK",
+          "condition": "updated_at >= created_at"
+        },
+        {
+          "name": "chk_expires_future",
+          "type": "CHECK",
+          "condition": "expires_at > NOW()"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_uuid",
+          "columns": ["uuid_field"],
+          "type": "btree"
+        },
+        {
+          "name": "idx_status",
+          "columns": ["status"],
+          "type": "btree"
+        },
+        {
+          "name": "idx_tags",
+          "columns": ["tags"],
+          "type": "gin"
+        },
+        {
+          "name": "idx_metadata",
+          "columns": ["metadata"],
+          "type": "gin"
+        },
+        {
+          "name": "idx_settings",
+          "columns": ["settings"],
+          "type": "gin"
+        },
+        {
+          "name": "idx_content_vector",
+          "columns": ["content_vector"],
+          "type": "gin"
+        },
+        {
+          "name": "idx_content_zh_vector",
+          "columns": ["content_zh_vector"],
+          "type": "gin"
+        },
+        {
+          "name": "idx_location",
+          "columns": ["location"],
+          "type": "gist"
+        },
+        {
+          "name": "idx_area",
+          "columns": ["area"],
+          "type": "gist"
+        },
+        {
+          "name": "idx_title_trgm",
+          "columns": ["title"],
+          "type": "gin",
+          "method": "gin_trgm_ops"
+        },
+        {
+          "name": "idx_content_trgm",
+          "columns": ["content"],
+          "type": "gin",
+          "method": "gin_trgm_ops"
+        },
+        {
+          "name": "idx_created_at",
+          "columns": ["created_at"],
+          "type": "btree"
+        },
+        {
+          "name": "idx_expires_at",
+          "columns": ["expires_at"],
+          "type": "btree"
+        },
+        {
+          "name": "idx_composite_status_created",
+          "columns": ["status", "created_at"],
+          "type": "btree"
+        },
+        {
+          "name": "idx_partial_active",
+          "columns": ["id"],
+          "type": "btree",
+          "where": "is_active = true"
+        }
+      ],
+      "triggers": [
+        
+      ]
+    },
+    "blog_posts": {
+      "comment": "博客文章表",
+      "columns": {
+        "id": {
+          "type": "BIGSERIAL",
+          "primary": true,
+          "comment": "主键ID"
+        },
+        "title": {
+          "type": "VARCHAR(200)",
+          "comment": "文章标题"
+        },
+        "description": {
+          "type": "TEXT",
+          "comment": "文章描述/摘要"
+        },
+        "slug": {
+          "type": "VARCHAR(200)",
+          "unique": true,
+          "comment": "URL友好的标识符"
+        },
+        "status": {
+          "type": "VARCHAR(20)",
+          "default": "'draft'",
+          "comment": "状态：draft=草稿，published=已发布"
+        },
+        "author_id": {
+          "type": "BIGINT",
+          "comment": "作者ID"
+        },
+        "category": {
+          "type": "VARCHAR(50)",
+          "comment": "文章分类"
+        },
+        "tags": {
+          "type": "TEXT[]",
+          "comment": "标签数组"
+        },
+        "view_count": {
+          "type": "INTEGER",
+          "default": 0,
+          "comment": "查看次数"
+        },
+        "created_at": {
+          "type": "TIMESTAMPTZ",
+          "default": "NOW()",
+          "comment": "创建时间"
+        },
+        "updated_at": {
+          "type": "TIMESTAMPTZ",
+          "default": "NOW()",
+          "comment": "更新时间"
+        }
+      },
+      "constraints": [
+        {
+          "name": "chk_title_not_empty",
+          "type": "CHECK",
+          "condition": "length(trim(title)) > 0"
+        },
+        {
+          "name": "chk_view_count_non_negative",
+          "type": "CHECK",
+          "condition": "view_count >= 0"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_blog_posts_slug",
+          "columns": ["slug"],
+          "type": "btree",
+          "unique": true
+        },
+        {
+          "name": "idx_blog_posts_author",
+          "columns": ["author_id"],
+          "type": "btree"
+        },
+        {
+          "name": "idx_blog_posts_category",
+          "columns": ["category"],
+          "type": "btree"
+        },
+        {
+          "name": "idx_blog_posts_status",
+          "columns": ["status"],
+          "type": "btree"
+        },
+        {
+          "name": "idx_blog_posts_tags",
+          "columns": ["tags"],
+          "type": "gin"
+        },
+        {
+          "name": "idx_blog_posts_title_trgm",
+          "columns": ["title"],
+          "type": "gin",
+          "method": "gin_trgm_ops"
+        },
+        {
+          "name": "idx_blog_posts_popular",
+          "columns": ["view_count"],
+          "type": "btree",
+          "where": "status = 'published'"
+        }
+      ],
+      "triggers": [
+        {
+          "name": "update_blog_updated_at",
+          "timing": "BEFORE",
+          "events": ["UPDATE"],
+          "function": "update_updated_at_column"
+        }
+      ]
+    }
+  },
+  "functions": [
+    {
+      "name": "update_updated_at_column",
+      "returns": "TRIGGER",
+      "language": "plpgsql",
+      "code": "BEGIN NEW.updated_at = NOW(); RETURN NEW; END;"
+    },
+    {
+      "name": "update_content_vector",
+      "returns": "TRIGGER",
+      "language": "plpgsql",
+      "code": "BEGIN NEW.content_vector = to_tsvector('english', COALESCE(NEW.content, '')); RETURN NEW; END;"
+    },
+    {
+      "name": "update_content_zh_vector",
+      "returns": "TRIGGER",
+      "language": "plpgsql",
+      "code": "BEGIN NEW.content_zh_vector = to_tsvector('zhparser', COALESCE(NEW.content, '')); RETURN NEW; END;"
+    },
+    {
+      "name": "update_location_geometry",
+      "returns": "TRIGGER",
+      "language": "plpgsql",
+      "code": "BEGIN NEW.location = ST_GeomFromText('POINT(' || NEW.location_lng || ' ' || NEW.location_lat || ')', 4326); RETURN NEW; END;"
+    },
+    {
+      "name": "search_content_zh",
+      "parameters": ["query_text TEXT"],
+      "returns": "TABLE(id BIGINT, title VARCHAR, content TEXT, rank REAL)",
+      "language": "plpgsql",
+      "code": "BEGIN RETURN QUERY SELECT t.id, t.title, t.content, ts_rank(t.content_zh_vector, plainto_tsquery('zhparser', query_text)) as rank FROM pgsql_features_demo t WHERE t.content_zh_vector @@ plainto_tsquery('zhparser', query_text) ORDER BY rank DESC; END;"
+    },
+    {
+      "name": "get_nearby_locations",
+      "parameters": ["center GEOMETRY", "radius_meters FLOAT"],
+      "returns": "TABLE(id BIGINT, title VARCHAR, distance FLOAT)",
+      "language": "plpgsql",
+      "code": "BEGIN RETURN QUERY SELECT t.id, t.title, ST_Distance(t.location, center) as distance FROM pgsql_features_demo t WHERE ST_DWithin(t.location, center, radius_meters) ORDER BY distance; END;"
+    }
+  ],
+  "views": [
+    {
+      "name": "active_features_view",
+      "query": "SELECT * FROM pgsql_features_demo WHERE is_active = true AND expires_at > NOW()"
+    },
+    {
+      "name": "features_stats_view",
+      "query": "SELECT status, COUNT(*) as count, AVG(score) as avg_score, MAX(view_count) as max_views FROM pgsql_features_demo GROUP BY status"
+    },
+    {
+      "name": "features_search_view",
+      "query": "SELECT id, title, content, content_zh_vector FROM pgsql_features_demo WHERE content_zh_vector IS NOT NULL"
+    }
+  ],
+  "sample_data": [
+    {
+      "table": "pgsql_features_demo",
+      "data": [
+        {
+          "id": 1,
+          "title": "PostgreSQL 全文搜索示例",
+          "content": "这是一个关于PostgreSQL全文搜索功能的演示文章。我们将展示如何使用中文分词和全文搜索功能。",
+          "status": "active",
+          "priority": "high",
+          "tags": "{postgresql,全文搜索,中文分词}",
+          "metadata": "\"category\"=>\"tech\", \"author\"=>\"admin\"",
+          "settings": "{\"searchable\": true, \"featured\": false}",
+          "contact_name": "张三",
+          "contact_email": "zhangsan@example.com",
+          "contact_phone": "13800138000",
+          "address_type": "work",
+          "price": "99.99",
+          "bit_flags": "B'10101010'",
+          "large_number": "123456789012345678.12345678",
+          "birth_date": "1990-01-01",
+          "work_time": "09:00:00",
+          "timezone_offset": "8 hours",
+          "is_active": true,
+          "score": 4.5,
+          "view_count": 100,
+          "data_size": 1024,
+          "location_lat": 39.9042,
+          "location_lng": 116.4074
+        },
+        {
+          "id": 2,
+          "title": "高级SQL查询技巧",
+          "content": "学习PostgreSQL的高级查询功能，包括窗口函数、CTE递归查询、数组操作等高级特性。",
+          "status": "active",
+          "priority": "medium",
+          "tags": "{sql,查询,高级特性}",
+          "metadata": "\"category\"=>\"tutorial\", \"level\"=>\"advanced\"",
+          "settings": "{\"examples\": true, \"code\": true}",
+          "contact_name": "李四",
+          "contact_email": "lisi@example.com",
+          "contact_phone": "13900139000",
+          "address_type": "home",
+          "price": "79.99",
+          "bit_flags": "B'01010101'",
+          "large_number": "987654321098765432.87654321",
+          "birth_date": "1985-05-15",
+          "work_time": "14:30:00",
+          "timezone_offset": "8 hours",
+          "is_active": true,
+          "score": 4.8,
+          "view_count": 250,
+          "data_size": 2048,
+          "location_lat": 31.2304,
+          "location_lng": 121.4737
+        },
+        {
+          "id": 3,
+          "title": "数据库性能优化指南",
+          "content": "深入探讨PostgreSQL数据库性能优化技术，包括索引优化、查询重写、分区表等实用技巧。",
+          "status": "active",
+          "priority": "high",
+          "tags": "{数据库,性能优化,索引}",
+          "metadata": "\"category\"=>\"tech\", \"author\"=>\"expert\"",
+          "settings": "{\"searchable\": true, \"featured\": true}",
+          "contact_name": "王五",
+          "contact_email": "wangwu@example.com",
+          "contact_phone": "13700137000",
+          "address_type": "work",
+          "price": "149.99",
+          "bit_flags": "B'11110000'",
+          "large_number": "555666777888999000.11122233",
+          "birth_date": "1988-12-25",
+          "work_time": "10:00:00",
+          "timezone_offset": "8 hours",
+          "is_active": true,
+          "score": 4.9,
+          "view_count": 500,
+          "data_size": 3072,
+          "location_lat": 22.3193,
+          "location_lng": 114.1694
+        },
+        {
+          "id": 4,
+          "title": "NoSQL vs SQL数据库对比",
+          "content": "详细对比NoSQL和传统SQL数据库的优缺点，以及在不同应用场景下的选择策略。",
+          "status": "active",
+          "priority": "medium",
+          "tags": "{数据库,nosql,架构设计}",
+          "metadata": "\"category\"=>\"comparison\", \"author\"=>\"analyst\"",
+          "settings": "{\"searchable\": true, \"featured\": false}",
+          "contact_name": "赵六",
+          "contact_email": "zhaoliu@example.com",
+          "contact_phone": "13600136000",
+          "address_type": "home",
+          "price": "89.99",
+          "bit_flags": "B'00111100'",
+          "large_number": "111222333444555666.77788899",
+          "birth_date": "1992-06-10",
+          "work_time": "16:00:00",
+          "timezone_offset": "8 hours",
+          "is_active": true,
+          "score": 4.2,
+          "view_count": 180,
+          "data_size": 1536,
+          "location_lat": 30.5728,
+          "location_lng": 104.0668
+        },
+        {
+          "id": 5,
+          "title": "分布式数据库架构",
+          "content": "探索现代分布式数据库系统的架构设计原理，包括数据分片、一致性算法、故障恢复等核心概念。",
+          "status": "inactive",
+          "priority": "urgent",
+          "tags": "{分布式,架构,高可用}",
+          "metadata": "\"category\"=>\"advanced\", \"author\"=>\"architect\"",
+          "settings": "{\"searchable\": false, \"featured\": true}",
+          "contact_name": "孙七",
+          "contact_email": "sunqi@example.com",
+          "contact_phone": "13500135000",
+          "address_type": "work",
+          "price": "199.99",
+          "bit_flags": "B'11001100'",
+          "large_number": "999888777666555444.33322211",
+          "birth_date": "1983-09-08",
+          "work_time": "11:30:00",
+          "timezone_offset": "8 hours",
+          "is_active": false,
+          "score": 4.7,
+          "view_count": 320,
+          "data_size": 4096,
+          "location_lat": 23.1291,
+          "location_lng": 113.2644
+        }
+      ]
+    },
+    {
+      "table": "blog_posts",
+      "data": [
+        {
+          "id": 1,
+          "title": "欢迎使用PostgreSQL博客系统",
+          "description": "这是一个基于PostgreSQL的现代化博客系统，具备高效的查询性能和丰富的功能特性。",
+          "slug": "welcome-to-postgresql-blog",
+          "status": "published",
+          "author_id": 1,
+          "category": "技术",
+          "tags": "{postgresql,博客,技术}",
+          "view_count": 156
+        },
+        {
+          "id": 2,
+          "title": "数据库性能优化指南",
+          "description": "深入探讨PostgreSQL数据库的性能优化策略，包括索引优化、查询重写和配置调优等实用技巧。",
+          "slug": "database-performance-optimization",
+          "status": "published",
+          "author_id": 1,
+          "category": "数据库",
+          "tags": "{postgresql,性能优化,索引}",
+          "view_count": 89
+        },
+        {
+          "id": 3,
+          "title": "现代化Web开发实践",
+          "description": "分享现代Web开发的最佳实践，包括前后端分离、API设计、性能优化和安全防护等方面的经验。",
+          "slug": "modern-web-development",
+          "status": "draft",
+          "author_id": 2,
+          "category": "Web开发",
+          "tags": "{web开发,最佳实践,前端}",
+          "view_count": 0
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,63 @@
+<?php
+
+return [
+    'enabled' => false,
+    'display_name' => '简单博客',
+    'posts_per_page' => 10,
+    'enable_preview' => false,
+    'allow_public_access' => false,
+    'semantic_search_engine' => 'http://moyi-ollama.orb.local',
+    'post_statuses' => [
+        'draft' => '草稿',
+        'published' => '已发布',
+    ],
+    'configs' => [
+        0 => [
+            'name' => 'display_name',
+            'label' => '插件显示名称',
+            'type' => 'text',
+            'value' => '简单博客',
+            'help' => '插件在界面上显示的名称',
+            'col' => 'col-md-6',
+        ],
+        1 => [
+            'name' => 'posts_per_page',
+            'label' => '每页文章数',
+            'type' => 'number',
+            'value' => 10,
+            'help' => '后台管理页面每页显示的文章数量',
+            'min' => 5,
+            'max' => 50,
+            'col' => 'col-md-6',
+        ],
+        2 => [
+            'name' => 'enable_preview',
+            'label' => '启用预览功能',
+            'type' => 'switch',
+            'value' => false,
+            'help' => '是否允许在发布前预览文章',
+            'on_value' => 1,
+            'off_value' => 0,
+            'col' => 'col-md-6',
+        ],
+        3 => [
+            'name' => 'allow_public_access',
+            'label' => '允许公开访问',
+            'type' => 'switch',
+            'value' => false,
+            'help' => '是否允许非登录用户访问博客文章',
+            'on_value' => 1,
+            'off_value' => 0,
+            'col' => 'col-md-6',
+        ],
+        4 => [
+            'name' => 'semantic_search_engine',
+            'label' => '语义搜索服务器',
+            'type' => 'text',
+            'value' => 'http://moyi-ollama.orb.local',
+            'help' => '配置语义搜索服务器的地址，设为空则不使用语义搜索功能',
+            'placeholder' => '例如: http://localhost:11434',
+            'col' => 'col-md-12',
+        ],
+    ],
+];

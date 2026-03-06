@@ -1,0 +1,199 @@
+/* PostgreSQL 测试插件样式 */
+
+.pgsql-tester .card-header {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+}
+
+.pgsql-tester .btn-test {
+    min-width: 120px;
+}
+
+.pgsql-tester .result-success {
+    border-left: 4px solid #28a745;
+}
+
+.pgsql-tester .result-error {
+    border-left: 4px solid #dc3545;
+}
+
+.pgsql-tester .result-warning {
+    border-left: 4px solid #ffc107;
+}
+
+.pgsql-tester .metric-card {
+    transition: transform 0.2s;
+}
+
+.pgsql-tester .metric-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+}
+
+.pgsql-tester .progress-circle {
+    width: 60px;
+    height: 60px;
+    border-radius: 50%;
+    display: inline-block;
+    position: relative;
+}
+
+.pgsql-tester .progress-circle::before {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    right: 2px;
+    bottom: 2px;
+    border-radius: 50%;
+    background: white;
+}
+
+.pgsql-tester .test-timeline {
+    position: relative;
+    padding-left: 30px;
+}
+
+.pgsql-tester .test-timeline::before {
+    content: '';
+    position: absolute;
+    left: 15px;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: #dee2e6;
+}
+
+.pgsql-tester .timeline-item {
+    position: relative;
+    margin-bottom: 20px;
+}
+
+.pgsql-tester .timeline-item::before {
+    content: '';
+    position: absolute;
+    left: -22px;
+    top: 6px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: #007bff;
+    border: 2px solid white;
+    box-shadow: 0 0 0 2px #dee2e6;
+}
+
+.pgsql-tester .timeline-item.success::before {
+    background: #28a745;
+}
+
+.pgsql-tester .timeline-item.error::before {
+    background: #dc3545;
+}
+
+.pgsql-tester .timeline-item.warning::before {
+    background: #ffc107;
+}
+
+.pgsql-tester .code-editor {
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+    font-size: 14px;
+    line-height: 1.4;
+}
+
+.pgsql-tester .table-responsive {
+    max-height: 600px;
+    overflow-y: auto;
+}
+
+.pgsql-tester .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1rem;
+    margin-bottom: 2rem;
+}
+
+.pgsql-tester .stat-card {
+    background: white;
+    border-radius: 8px;
+    padding: 1.5rem;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    border: 1px solid #e9ecef;
+    text-align: center;
+}
+
+.pgsql-tester .stat-value {
+    font-size: 2rem;
+    font-weight: bold;
+    color: #495057;
+    margin-bottom: 0.5rem;
+}
+
+.pgsql-tester .stat-label {
+    color: #6c757d;
+    font-size: 0.9rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.pgsql-tester .alert-test-result {
+    border-radius: 8px;
+    border: none;
+    position: relative;
+    overflow: hidden;
+}
+
+.pgsql-tester .alert-test-result::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 4px;
+}
+
+.pgsql-tester .alert-success::before {
+    background: #28a745;
+}
+
+.pgsql-tester .alert-danger::before {
+    background: #dc3545;
+}
+
+.pgsql-tester .alert-warning::before {
+    background: #ffc107;
+}
+
+.pgsql-tester .alert-info::before {
+    background: #17a2b8;
+}
+
+/* 响应式调整 */
+@media (max-width: 768px) {
+    .pgsql-tester .stats-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .pgsql-tester .metric-card {
+        margin-bottom: 1rem;
+    }
+}
+
+/* 动画效果 */
+.pgsql-tester .fade-in {
+    animation: fadeIn 0.5s ease-in;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(20px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.pgsql-tester .pulse {
+    animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.05); }
+    100% { transform: scale(1); }
+}

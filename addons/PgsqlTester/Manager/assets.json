@@ -1,0 +1,10 @@
+{
+  "directories": {
+    "View/admin/pgsql_tester": "storage/view/admin/pgsql_tester",
+    "View/addons/pgsql_tester": "storage/view/addons/pgsql_tester"
+  },
+  "files": {
+    "Public/css/pgsql_tester.css": "public/css/pgsql_tester.css",
+    "Public/js/pgsql_tester.js": "public/js/pgsql_tester.js"
+  }
+}

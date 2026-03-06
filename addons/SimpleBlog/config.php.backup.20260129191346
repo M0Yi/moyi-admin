@@ -1,0 +1,107 @@
+<?php
+
+return [
+    // ========================================
+    // 基本配置
+    // ========================================
+
+    /**
+     * 插件启用状态
+     */
+    'enabled' => true,
+
+    /**
+     * 插件显示名称
+     */
+    'display_name' => '简单博客',
+
+    // ========================================
+    // 功能配置
+    // ========================================
+
+    /**
+     * 默认每页显示文章数
+     */
+    'posts_per_page' => 10,
+
+    /**
+     * 启用文章预览功能
+     */
+    'enable_preview' => true,
+
+    /**
+     * 允许公开访问博客文章
+     */
+    'allow_public_access' => true,
+
+    /**
+     * 语义搜索服务器地址
+     * 配置为 null 或空字符串表示不使用语义搜索功能
+     * 支持的服务器类型：
+     * - Ollama: http://localhost:11434
+     * - 其他兼容 OpenAI API 的向量搜索服务
+     */
+    'semantic_search_engine' => null,
+
+    /**
+     * 文章状态选项
+     */
+    'post_statuses' => [
+        'draft' => '草稿',
+        'published' => '已发布',
+    ],
+
+    // ========================================
+    // 可配置项定义
+    // ========================================
+
+    'configs' => [
+        0 => [
+            'name' => 'display_name',
+            'label' => '插件显示名称',
+            'type' => 'text',
+            'value' => '简单博客',
+            'help' => '插件在界面上显示的名称',
+            'col' => 'col-md-6',
+        ],
+        1 => [
+            'name' => 'posts_per_page',
+            'label' => '每页文章数',
+            'type' => 'number',
+            'value' => 10,
+            'help' => '后台管理页面每页显示的文章数量',
+            'min' => 5,
+            'max' => 50,
+            'col' => 'col-md-6',
+        ],
+        2 => [
+            'name' => 'enable_preview',
+            'label' => '启用预览功能',
+            'type' => 'switch',
+            'value' => true,
+            'help' => '是否允许在发布前预览文章',
+            'on_value' => 1,
+            'off_value' => 0,
+            'col' => 'col-md-6',
+        ],
+        3 => [
+            'name' => 'allow_public_access',
+            'label' => '允许公开访问',
+            'type' => 'switch',
+            'value' => true,
+            'help' => '是否允许非登录用户访问博客文章',
+            'on_value' => 1,
+            'off_value' => 0,
+            'col' => 'col-md-6',
+        ],
+        4 => [
+            'name' => 'semantic_search_engine',
+            'label' => '语义搜索服务器',
+            'type' => 'text',
+            'value' => null,
+            'help' => '配置语义搜索服务器的地址，设为空则不使用语义搜索功能',
+            'placeholder' => '例如: http://localhost:11434',
+            'col' => 'col-md-12',
+        ],
+    ],
+];

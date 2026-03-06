@@ -1,0 +1,468 @@
+{
+  "version": "1.1.0",
+  "description": "简单博客插件 PostgreSQL 数据库配置",
+  "note": "包含表结构、索引、约束、触发器、视图、函数和示例数据。支持全文搜索（pg_trgm + zhparser）和语义搜索（pgvector）",
+  "extensions": [
+    "pg_trgm",
+    "vector",
+    "zhparser",
+    "btree_gin",
+    "btree_gist"
+  ],
+  "types": {
+    "post_status": "ENUM('draft', 'published')"
+  },
+  "tables": {
+    "simple_blog_posts": {
+      "comment": "简单博客文章表",
+      "columns": {
+        "id": {
+          "type": "BIGSERIAL",
+          "primary": true,
+          "comment": "主键ID"
+        },
+        "title": {
+          "type": "VARCHAR(255)",
+          "comment": "文章标题"
+        },
+        "content": {
+          "type": "TEXT",
+          "comment": "文章内容"
+        },
+        "content_vector": {
+          "type": "TSVECTOR",
+          "nullable": true,
+          "comment": "英文全文搜索向量"
+        },
+        "content_zh_vector": {
+          "type": "TSVECTOR",
+          "nullable": true,
+          "comment": "中文分词向量"
+        },
+        "title_embedding": {
+          "type": "VECTOR(384)",
+          "nullable": true,
+          "comment": "标题语义向量（384维，使用 all-MiniLM-L6-v2 等模型生成）"
+        },
+        "content_embedding": {
+          "type": "VECTOR(768)",
+          "nullable": true,
+          "comment": "内容语义向量（768维，使用 all-mpnet-base-v2 等模型生成）"
+        },
+        "status": {
+          "type": "post_status",
+          "default": "'draft'",
+          "comment": "状态：draft=草稿，published=已发布"
+        },
+        "category": {
+          "type": "VARCHAR(100)",
+          "nullable": true,
+          "comment": "文章分类"
+        },
+        "tags": {
+          "type": "TEXT[]",
+          "nullable": true,
+          "comment": "文章标签数组"
+        },
+        "metadata": {
+          "type": "JSONB",
+          "nullable": true,
+          "comment": "文章元数据"
+        },
+        "view_count": {
+          "type": "INTEGER",
+          "default": 0,
+          "comment": "查看次数"
+        },
+        "like_count": {
+          "type": "INTEGER",
+          "default": 0,
+          "comment": "点赞次数"
+        },
+        "comment_count": {
+          "type": "INTEGER",
+          "default": 0,
+          "comment": "评论数量"
+        },
+        "author_id": {
+          "type": "BIGINT",
+          "nullable": true,
+          "comment": "作者ID"
+        },
+        "is_featured": {
+          "type": "BOOLEAN",
+          "default": false,
+          "comment": "是否精选"
+        },
+        "is_pinned": {
+          "type": "BOOLEAN",
+          "default": false,
+          "comment": "是否置顶"
+        },
+        "published_at": {
+          "type": "TIMESTAMPTZ",
+          "nullable": true,
+          "comment": "发布时间"
+        },
+        "created_at": {
+          "type": "TIMESTAMPTZ",
+          "default": "NOW()",
+          "comment": "创建时间"
+        },
+        "updated_at": {
+          "type": "TIMESTAMPTZ",
+          "default": "NOW()",
+          "comment": "更新时间"
+        }
+      },
+      "constraints": [
+        {
+          "name": "chk_title_not_empty",
+          "type": "CHECK",
+          "condition": "length(trim(title)) > 0"
+        },
+        {
+          "name": "chk_view_count_non_negative",
+          "type": "CHECK",
+          "condition": "view_count >= 0"
+        },
+        {
+          "name": "chk_published_at_logic",
+          "type": "CHECK",
+          "condition": "(status = 'published' AND published_at IS NOT NULL) OR (status = 'draft')"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "idx_simple_blog_posts_status",
+          "columns": ["status"],
+          "type": "btree"
+        },
+        {
+          "name": "idx_simple_blog_posts_category",
+          "columns": ["category"],
+          "type": "btree"
+        },
+        {
+          "name": "idx_simple_blog_posts_author",
+          "columns": ["author_id"],
+          "type": "btree"
+        },
+        {
+          "name": "idx_simple_blog_posts_published_at",
+          "columns": ["published_at"],
+          "type": "btree"
+        },
+        {
+          "name": "idx_simple_blog_posts_created_at",
+          "columns": ["created_at"],
+          "type": "btree"
+        },
+        {
+          "name": "idx_simple_blog_posts_content_vector",
+          "columns": ["content_vector"],
+          "type": "gin"
+        },
+        {
+          "name": "idx_simple_blog_posts_content_zh_vector",
+          "columns": ["content_zh_vector"],
+          "type": "gin"
+        },
+        {
+          "name": "idx_simple_blog_posts_title_embedding",
+          "columns": ["title_embedding vector_cosine_ops"],
+          "type": "hnsw",
+          "options": {
+            "m": 16,
+            "ef_construction": 64
+          }
+        },
+        {
+          "name": "idx_simple_blog_posts_content_embedding",
+          "columns": ["content_embedding vector_cosine_ops"],
+          "type": "hnsw",
+          "options": {
+            "m": 16,
+            "ef_construction": 64
+          }
+        },
+        {
+          "name": "idx_simple_blog_posts_tags",
+          "columns": ["tags"],
+          "type": "gin"
+        },
+        {
+          "name": "idx_simple_blog_posts_metadata",
+          "columns": ["metadata"],
+          "type": "gin"
+        },
+        {
+          "name": "idx_simple_blog_posts_title_trgm",
+          "columns": ["title"],
+          "type": "gin",
+          "method": "gin_trgm_ops"
+        },
+        {
+          "name": "idx_simple_blog_posts_featured",
+          "columns": ["is_featured"],
+          "type": "btree",
+          "where": "is_featured = true"
+        },
+        {
+          "name": "idx_simple_blog_posts_pinned",
+          "columns": ["is_pinned"],
+          "type": "btree",
+          "where": "is_pinned = true"
+        },
+        {
+          "name": "idx_simple_blog_posts_popular",
+          "columns": ["view_count"],
+          "type": "btree",
+          "where": "status = 'published'"
+        }
+      ],
+      "triggers": [
+        {
+          "name": "update_simple_blog_posts_updated_at",
+          "timing": "BEFORE",
+          "events": ["UPDATE"],
+          "function": "update_updated_at_column"
+        },
+        {
+          "name": "update_simple_blog_posts_content_vector",
+          "timing": "BEFORE",
+          "events": ["INSERT", "UPDATE"],
+          "function": "update_content_vector"
+        },
+        {
+          "name": "update_simple_blog_posts_content_zh_vector",
+          "timing": "BEFORE",
+          "events": ["INSERT", "UPDATE"],
+          "function": "update_content_zh_vector"
+        },
+        {
+          "name": "update_simple_blog_posts_title_embedding",
+          "timing": "BEFORE",
+          "events": ["INSERT", "UPDATE"],
+          "function": "update_title_embedding"
+        },
+        {
+          "name": "update_simple_blog_posts_content_embedding",
+          "timing": "BEFORE",
+          "events": ["INSERT", "UPDATE"],
+          "function": "update_content_embedding"
+        },
+        {
+          "name": "set_simple_blog_posts_published_at",
+          "timing": "BEFORE",
+          "events": ["UPDATE"],
+          "function": "set_published_at_on_publish"
+        }
+      ]
+    }
+  },
+  "functions": [
+    {
+      "name": "update_updated_at_column",
+      "returns": "TRIGGER",
+      "language": "plpgsql",
+      "code": "BEGIN NEW.updated_at = NOW(); RETURN NEW; END;",
+      "description": "自动更新updated_at字段"
+    },
+    {
+      "name": "update_content_vector",
+      "returns": "TRIGGER",
+      "language": "plpgsql",
+      "code": "BEGIN NEW.content_vector = to_tsvector('english', COALESCE(NEW.content, '')); RETURN NEW; END;",
+      "description": "更新英文搜索向量"
+    },
+    {
+      "name": "update_content_zh_vector",
+      "returns": "TRIGGER",
+      "language": "plpgsql",
+      "code": "BEGIN NEW.content_zh_vector = to_tsvector('chinese', COALESCE(NEW.content, '')); RETURN NEW; END;",
+      "description": "更新中文搜索向量"
+    },
+    {
+      "name": "update_title_embedding",
+      "returns": "TRIGGER",
+      "language": "plpgsql",
+      "code": "BEGIN NEW.title_embedding = COALESCE(NEW.title_embedding, NULL); RETURN NEW; END;",
+      "description": "更新标题语义向量（实际由应用层生成向量）"
+    },
+    {
+      "name": "update_content_embedding",
+      "returns": "TRIGGER",
+      "language": "plpgsql",
+      "code": "BEGIN NEW.content_embedding = COALESCE(NEW.content_embedding, NULL); RETURN NEW; END;",
+      "description": "更新内容语义向量（实际由应用层生成向量）"
+    },
+    {
+      "name": "set_published_at_on_publish",
+      "returns": "TRIGGER",
+      "language": "plpgsql",
+      "code": "BEGIN IF NEW.status = 'published' AND OLD.status IS DISTINCT FROM 'published' THEN NEW.published_at = NOW(); END IF; RETURN NEW; END;",
+      "description": "自动设置发布时间"
+    },
+    {
+      "name": "search_blog_posts_zh",
+      "parameters": ["query_text TEXT"],
+      "returns": "TABLE(id BIGINT, title VARCHAR, content TEXT, rank REAL)",
+      "language": "plpgsql",
+      "code": "BEGIN RETURN QUERY SELECT t.id, t.title, t.content, ts_rank(t.content_zh_vector, plainto_tsquery('chinese', query_text)) as rank FROM simple_blog_posts t WHERE t.content_zh_vector @@ plainto_tsquery('chinese', query_text) AND t.status = 'published' ORDER BY rank DESC; END;",
+      "description": "中文全文搜索"
+    },
+    {
+      "name": "get_blog_posts_stats",
+      "returns": "TABLE(total_posts BIGINT, published_posts BIGINT, draft_posts BIGINT, total_views BIGINT, total_likes BIGINT)",
+      "language": "plpgsql",
+      "code": "BEGIN RETURN QUERY SELECT COUNT(*)::BIGINT as total_posts, COUNT(*) FILTER (WHERE status = 'published')::BIGINT as published_posts, COUNT(*) FILTER (WHERE status = 'draft')::BIGINT as draft_posts, COALESCE(SUM(view_count), 0)::BIGINT as total_views, COALESCE(SUM(like_count), 0)::BIGINT as total_likes FROM simple_blog_posts; END;",
+      "description": "获取博客统计"
+    },
+    {
+      "name": "search_blog_posts_semantic",
+      "parameters": ["query_vector VECTOR(768)", "limit_count INTEGER DEFAULT 10"],
+      "returns": "TABLE(id BIGINT, title VARCHAR, content TEXT, similarity REAL)",
+      "language": "plpgsql",
+      "code": "BEGIN RETURN QUERY SELECT t.id, t.title, t.content, 1 - (t.content_embedding <=> query_vector) as similarity FROM simple_blog_posts t WHERE t.content_embedding IS NOT NULL AND t.status = 'published' ORDER BY t.content_embedding <=> query_vector LIMIT limit_count; END;",
+      "description": "语义搜索（使用余弦相似度）"
+    },
+    {
+      "name": "search_blog_posts_semantic_title",
+      "parameters": ["query_vector VECTOR(384)", "limit_count INTEGER DEFAULT 10"],
+      "returns": "TABLE(id BIGINT, title VARCHAR, content TEXT, similarity REAL)",
+      "language": "plpgsql",
+      "code": "BEGIN RETURN QUERY SELECT t.id, t.title, t.content, 1 - (t.title_embedding <=> query_vector) as similarity FROM simple_blog_posts t WHERE t.title_embedding IS NOT NULL AND t.status = 'published' ORDER BY t.title_embedding <=> query_vector LIMIT limit_count; END;",
+      "description": "标题语义搜索"
+    },
+    {
+      "name": "search_blog_posts_hybrid",
+      "parameters": ["query_text TEXT", "query_vector VECTOR(768)", "limit_count INTEGER DEFAULT 10"],
+      "returns": "TABLE(id BIGINT, title VARCHAR, content TEXT, ts_rank_score REAL, similarity REAL, combined_score REAL)",
+      "language": "plpgsql",
+      "code": "BEGIN RETURN QUERY SELECT t.id, t.title, t.content, COALESCE(ts_rank(t.content_zh_vector, plainto_tsquery('chinese', query_text)), 0)::REAL as ts_rank_score, COALESCE(1 - (t.content_embedding <=> query_vector), 0)::REAL as similarity, (COALESCE(ts_rank(t.content_zh_vector, plainto_tsquery('chinese', query_text)), 0) * 0.3 + (1 - (t.content_embedding <=> query_vector)) * 0.7)::REAL as combined_score FROM simple_blog_posts t WHERE (t.content_zh_vector @@ plainto_tsquery('chinese', query_text) OR t.content_embedding IS NOT NULL) AND t.status = 'published' ORDER BY combined_score DESC LIMIT limit_count; END;",
+      "description": "混合搜索：全文搜索 + 语义搜索（权重 30% 全文 + 70% 语义）"
+    },
+    {
+      "name": "get_similar_posts",
+      "parameters": ["post_id BIGINT", "limit_count INTEGER DEFAULT 5"],
+      "returns": "TABLE(id BIGINT, title VARCHAR, content TEXT, similarity REAL)",
+      "language": "plpgsql",
+      "code": "BEGIN RETURN QUERY SELECT t.id, t.title, t.content, 1 - (t.content_embedding <=> src.content_embedding) as similarity FROM simple_blog_posts t, (SELECT content_embedding FROM simple_blog_posts WHERE id = post_id) src WHERE t.id != post_id AND t.content_embedding IS NOT NULL AND t.status = 'published' ORDER BY t.content_embedding <=> src.content_embedding LIMIT limit_count; END;",
+      "description": "获取相似文章"
+    },
+    {
+      "name": "set_title_embedding",
+      "parameters": ["post_id BIGINT", "embedding VECTOR(384)"],
+      "returns": "VOID",
+      "language": "plpgsql",
+      "code": "BEGIN UPDATE simple_blog_posts SET title_embedding = embedding WHERE id = post_id; END;",
+      "description": "设置文章标题向量"
+    },
+    {
+      "name": "set_content_embedding",
+      "parameters": ["post_id BIGINT", "embedding VECTOR(768)"],
+      "returns": "VOID",
+      "language": "plpgsql",
+      "code": "BEGIN UPDATE simple_blog_posts SET content_embedding = embedding WHERE id = post_id; END;",
+      "description": "设置文章内容向量"
+    },
+    {
+      "name": "batch_generate_embeddings",
+      "parameters": ["batch_size INTEGER DEFAULT 100"],
+      "returns": "TABLE(processed_count BIGINT, remaining_count BIGINT)",
+      "language": "plpgsql",
+      "code": "BEGIN RETURN QUERY WITH updated AS (UPDATE simple_blog_posts SET content_embedding = content_embedding WHERE content_embedding IS NULL AND status = 'published' RETURNING 1) SELECT COUNT(*)::BIGINT as processed_count, (SELECT COUNT(*) FROM simple_blog_posts WHERE content_embedding IS NULL AND status = 'published')::BIGINT as remaining_count FROM updated LIMIT batch_size; END;",
+      "description": "批量生成内容向量（用于迁移）"
+    }
+  ],
+  "views": [
+    {
+      "name": "blog_posts_published_view",
+      "query": "SELECT * FROM simple_blog_posts WHERE status = 'published' AND published_at <= NOW() ORDER BY is_pinned DESC, published_at DESC",
+      "description": "已发布文章视图"
+    },
+    {
+      "name": "blog_posts_draft_view",
+      "query": "SELECT * FROM simple_blog_posts WHERE status = 'draft' ORDER BY updated_at DESC",
+      "description": "草稿文章视图"
+    },
+    {
+      "name": "blog_posts_featured_view",
+      "query": "SELECT * FROM simple_blog_posts WHERE status = 'published' AND is_featured = true ORDER BY published_at DESC",
+      "description": "精选文章视图"
+    },
+    {
+      "name": "blog_posts_popular_view",
+      "query": "SELECT * FROM simple_blog_posts WHERE status = 'published' ORDER BY view_count DESC, published_at DESC LIMIT 10",
+      "description": "热门文章视图"
+    },
+    {
+      "name": "blog_posts_recent_view",
+      "query": "SELECT * FROM simple_blog_posts WHERE status = 'published' ORDER BY published_at DESC LIMIT 5",
+      "description": "最新文章视图"
+    },
+    {
+      "name": "blog_categories_view",
+      "query": "SELECT category, COUNT(*) as post_count, MAX(published_at) as last_post_date FROM simple_blog_posts WHERE status = 'published' AND category IS NOT NULL GROUP BY category ORDER BY post_count DESC",
+      "description": "文章分类统计"
+    },
+    {
+      "name": "blog_posts_with_embeddings_view",
+      "query": "SELECT id, title, content, status, category, tags, view_count, like_count, comment_count, published_at, created_at, updated_at, vector_dims(title_embedding) as title_embedding_dims, vector_dims(content_embedding) as content_embedding_dims, CASE WHEN title_embedding IS NOT NULL THEN true ELSE false END as has_title_embedding, CASE WHEN content_embedding IS NOT NULL THEN true ELSE false END as has_content_embedding FROM simple_blog_posts WHERE status = 'published'",
+      "description": "包含向量信息的文章视图"
+    }
+  ],
+  "sample_data": [
+    {
+      "table": "simple_blog_posts",
+      "description": "示例博客文章数据",
+      "data": [
+        {
+          "id": 1,
+          "title": "欢迎使用简单博客",
+          "content": "这是一个简单而强大的博客系统，支持全文搜索、标签分类等功能。",
+          "status": "published",
+          "category": "系统介绍",
+          "tags": ["博客", "入门"],
+          "view_count": 100,
+          "like_count": 10,
+          "comment_count": 5,
+          "is_featured": true,
+          "is_pinned": false,
+          "published_at": "2026-01-27 10:00:00"
+        },
+        {
+          "id": 2,
+          "title": "PostgreSQL 全文搜索实践",
+          "content": "本文介绍如何在PostgreSQL中实现高效的中英文全文搜索功能。",
+          "status": "published",
+          "category": "技术教程",
+          "tags": ["PostgreSQL", "全文搜索"],
+          "view_count": 250,
+          "like_count": 25,
+          "comment_count": 12,
+          "is_featured": false,
+          "is_pinned": true,
+          "published_at": "2026-01-27 10:00:00"
+
+        },
+        {
+          "id": 3,
+          "title": "我的第一篇草稿",
+          "content": "这是一篇尚未发布的草稿文章。",
+          "status": "draft",
+          "category": "随笔",
+          "tags": ["草稿", "测试"],
+          "view_count": 0,
+          "like_count": 0,
+          "comment_count": 0,
+          "is_featured": false,
+          "is_pinned": false,
+          "published_at": "2026-01-27 10:00:00"
+
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,89 @@
+{
+  "_comment": "SimpleBlog 插件菜单和权限配置文件",
+  "description": "此文件定义了 SimpleBlog 插件的菜单和权限配置，在插件安装时会自动创建这些菜单和权限",
+
+  "permissions": [
+    {
+      "name": "简单博客",
+      "slug": "simple_blog",
+      "type": "menu",
+      "path": "/simple_blog",
+      "description": "简单博客权限组",
+      "sort": 200,
+      "status": 1,
+      "children": [
+        {
+          "name": "访问简单博客",
+          "slug": "simple_blog.view",
+          "type": "menu",
+          "path": "/simple_blog*",
+          "description": "访问简单博客页面的权限",
+          "sort": 1,
+          "status": 1,
+          "children": [
+            {
+              "name": "查看文章",
+              "slug": "simple_blog.post.view",
+              "type": "button",
+              "path": "/simple_blog*",
+              "description": "查看文章的权限",
+              "sort": 1,
+              "status": 1
+            },
+            {
+              "name": "创建文章",
+              "slug": "simple_blog.post.create",
+              "type": "button",
+              "path": "/simple_blog/create*",
+              "description": "创建文章的权限",
+              "sort": 2,
+              "status": 1
+            },
+            {
+              "name": "编辑文章",
+              "slug": "simple_blog.post.edit",
+              "type": "button",
+              "path": "/simple_blog/*/edit*",
+              "description": "编辑文章的权限",
+              "sort": 3,
+              "status": 1
+            },
+            {
+              "name": "删除文章",
+              "slug": "simple_blog.post.delete",
+              "type": "button",
+              "path": "/simple_blog/*",
+              "method": "DELETE",
+              "description": "删除文章的权限",
+              "sort": 4,
+              "status": 1
+            }
+          ]
+        }
+      ]
+    }
+  ],
+
+  "menus": [
+    {
+      "name": "simple_blog",
+      "title": "简单博客",
+      "icon": "bi bi-journal-text",
+      "path": "/simple_blog",
+      "component": "simple_blog/index",
+      "redirect": null,
+      "type": "menu",
+      "target": "_self",
+      "badge": null,
+      "badge_type": null,
+      "permission": "simple_blog.view",
+      "visible": 1,
+      "status": 1,
+      "sort": 200,
+      "cache": 1,
+      "config": null,
+      "remark": "简单博客文章管理"
+    }
+  ]
+}
+

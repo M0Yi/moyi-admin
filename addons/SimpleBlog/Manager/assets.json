@@ -1,0 +1,10 @@
+{
+  "directories": {
+    "View/admin/simple_blog": "storage/view/admin/simple_blog",
+    "View/web/simple_blog": "storage/view/web/simple_blog"
+  },
+  "files": {
+    "Public/simple_blog.txt": "public/simple_blog.txt"
+  }
+}
+

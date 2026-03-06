@@ -22,7 +22,7 @@ public/uploads/
 docs/
 !docs/images
 !storage/app
-addons/
+.addons/
 ghost/
 uniapp/
 jianhuiorg/

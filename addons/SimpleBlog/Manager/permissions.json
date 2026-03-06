@@ -1,0 +1,50 @@
+[
+  {
+    "name": "简单博客管理",
+    "slug": "simple_blog.view",
+    "type": "menu",
+    "path": "/simple_blog",
+    "description": "查看简单博客管理页面",
+    "status": 1,
+    "sort": 100
+  },
+  {
+    "name": "创建文章",
+    "slug": "simple_blog.create",
+    "type": "button",
+    "path": "/simple_blog/create",
+    "method": "POST",
+    "description": "创建新文章",
+    "status": 1,
+    "sort": 101
+  },
+  {
+    "name": "编辑文章",
+    "slug": "simple_blog.edit",
+    "type": "button",
+    "path": "/simple_blog/*/edit",
+    "method": "PUT",
+    "description": "编辑文章",
+    "status": 1,
+    "sort": 102
+  },
+  {
+    "name": "删除文章",
+    "slug": "simple_blog.delete",
+    "type": "button",
+    "path": "/simple_blog/*",
+    "method": "DELETE",
+    "description": "删除文章",
+    "status": 1,
+    "sort": 103
+  },
+  {
+    "name": "查看博客",
+    "slug": "simple_blog.public.view",
+    "type": "menu",
+    "path": "/blog*",
+    "description": "查看博客前台页面",
+    "status": 1,
+    "sort": 104
+  }
+]

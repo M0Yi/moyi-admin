@@ -1,0 +1,10 @@
+FROM ghcr.io/mnixry/postgres-zhparser:16
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# 添加 PostgreSQL 官方仓库并安装 pgvector
+RUN apt-get update && apt-get install -y \
+    postgis \
+    postgresql-16-postgis-3 \
+    postgresql-16-pgvector \
+ && rm -rf /var/lib/apt/lists/*

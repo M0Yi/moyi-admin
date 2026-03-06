@@ -1,0 +1,154 @@
+{
+  "version": "1.0.0",
+  "description": "PostgreSQL 测试插件数据库配置文件",
+  "tables": {
+    "pgsql_tester_test_logs": {
+      "comment": "PostgreSQL 测试日志表",
+      "columns": {
+        "id": {
+          "type": "bigint unsigned",
+          "primary": true,
+          "auto_increment": true,
+          "comment": "主键ID"
+        },
+        "test_type": {
+          "type": "varchar(50)",
+          "comment": "测试类型：connection, query, performance",
+          "index": true
+        },
+        "database_host": {
+          "type": "varchar(255)",
+          "comment": "数据库主机",
+          "nullable": true
+        },
+        "database_name": {
+          "type": "varchar(100)",
+          "comment": "数据库名称",
+          "nullable": true
+        },
+        "query_sql": {
+          "type": "text",
+          "comment": "测试查询SQL",
+          "nullable": true
+        },
+        "execution_time": {
+          "type": "decimal(10,4)",
+          "comment": "执行时间（毫秒）",
+          "nullable": true
+        },
+        "status": {
+          "type": "varchar(20)",
+          "comment": "测试状态：success, error",
+          "default": "success",
+          "index": true
+        },
+        "error_message": {
+          "type": "text",
+          "comment": "错误信息",
+          "nullable": true
+        },
+        "result_data": {
+          "type": "json",
+          "comment": "测试结果数据",
+          "nullable": true
+        },
+        "user_id": {
+          "type": "bigint unsigned",
+          "comment": "执行用户ID",
+          "nullable": true,
+          "index": true
+        },
+        "user_ip": {
+          "type": "varchar(50)",
+          "comment": "用户IP地址"
+        },
+        "created_at": {
+          "type": "timestamp",
+          "comment": "创建时间",
+          "nullable": true
+        }
+      },
+      "indexes": [
+        {
+          "name": "idx_test_time",
+          "columns": ["created_at"]
+        },
+        {
+          "name": "idx_test_user",
+          "columns": ["user_id", "created_at"]
+        }
+      ]
+    },
+    "pgsql_tester_statistics": {
+      "comment": "PostgreSQL 测试统计表",
+      "columns": {
+        "id": {
+          "type": "bigint unsigned",
+          "primary": true,
+          "auto_increment": true,
+          "comment": "主键ID"
+        },
+        "stat_date": {
+          "type": "date",
+          "comment": "统计日期",
+          "unique": true
+        },
+        "connection_tests": {
+          "type": "int",
+          "default": 0,
+          "comment": "连接测试次数"
+        },
+        "query_tests": {
+          "type": "int",
+          "default": 0,
+          "comment": "查询测试次数"
+        },
+        "performance_tests": {
+          "type": "int",
+          "default": 0,
+          "comment": "性能测试次数"
+        },
+        "total_tests": {
+          "type": "int",
+          "default": 0,
+          "comment": "总测试次数"
+        },
+        "success_tests": {
+          "type": "int",
+          "default": 0,
+          "comment": "成功测试次数"
+        },
+        "failed_tests": {
+          "type": "int",
+          "default": 0,
+          "comment": "失败测试次数"
+        },
+        "avg_response_time": {
+          "type": "decimal(10,4)",
+          "default": 0,
+          "comment": "平均响应时间（毫秒）"
+        },
+        "max_response_time": {
+          "type": "decimal(10,4)",
+          "default": 0,
+          "comment": "最大响应时间（毫秒）"
+        },
+        "min_response_time": {
+          "type": "decimal(10,4)",
+          "default": 0,
+          "comment": "最小响应时间（毫秒）"
+        },
+        "created_at": {
+          "type": "timestamp",
+          "comment": "创建时间",
+          "nullable": true
+        },
+        "updated_at": {
+          "type": "timestamp",
+          "comment": "更新时间",
+          "nullable": true
+        }
+      }
+    }
+  }
+}

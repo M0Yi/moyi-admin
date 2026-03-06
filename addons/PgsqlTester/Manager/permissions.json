@@ -1,0 +1,79 @@
+[
+  {
+    "name": "PostgreSQL测试",
+    "slug": "pgsql_tester.view",
+    "type": "menu",
+    "path": "/admin/pgsql_tester",
+    "description": "查看PostgreSQL测试页面",
+    "status": 1,
+    "sort": 100
+  },
+  {
+    "name": "连接测试",
+    "slug": "pgsql_tester.connection.test",
+    "type": "button",
+    "path": "/admin/pgsql_tester/connection",
+    "method": "POST",
+    "description": "执行数据库连接测试",
+    "status": 1,
+    "sort": 101
+  },
+  {
+    "name": "特性测试",
+    "slug": "pgsql_tester.features.test",
+    "type": "button",
+    "path": "/admin/pgsql_tester/features",
+    "method": "POST",
+    "description": "执行PostgreSQL特性测试",
+    "status": 1,
+    "sort": 102
+  },
+  {
+    "name": "性能测试",
+    "slug": "pgsql_tester.performance.test",
+    "type": "button",
+    "path": "/admin/pgsql_tester/performance",
+    "method": "POST",
+    "description": "执行数据库性能测试",
+    "status": 1,
+    "sort": 103
+  },
+  {
+    "name": "查看日志",
+    "slug": "pgsql_tester.logs.view",
+    "type": "menu",
+    "path": "/admin/pgsql_tester/logs",
+    "description": "查看测试日志记录",
+    "status": 1,
+    "sort": 104
+  },
+  {
+    "name": "删除日志",
+    "slug": "pgsql_tester.logs.delete",
+    "type": "button",
+    "path": "/admin/pgsql_tester/logs",
+    "method": "DELETE",
+    "description": "删除测试日志记录",
+    "status": 1,
+    "sort": 105
+  },
+  {
+    "name": "导出测试报告",
+    "slug": "pgsql_tester.report.export",
+    "type": "button",
+    "path": "/admin/pgsql_tester/report/export",
+    "method": "POST",
+    "description": "导出测试报告",
+    "status": 1,
+    "sort": 106
+  },
+  {
+    "name": "配置管理",
+    "slug": "pgsql_tester.config.manage",
+    "type": "menu",
+    "path": "/admin/pgsql_tester/config",
+    "description": "管理插件配置",
+    "status": 1,
+    "sort": 107
+  }
+]
