@@ -680,9 +680,9 @@ class AddonsPgsqlService
 
         // 检查代码中是否使用了中文分词相关函数
         if (strpos($code, 'zhparser') !== false || strpos($code, 'to_tsvector') !== false) {
-            // 检查postgres-zhparser扩展是否可用
+            // 检查 zhparser 扩展是否可用
             try {
-                $this->pgsqlConnection->selectOne("SELECT 1 FROM pg_extension WHERE extname = 'postgres-zhparser'");
+                $this->pgsqlConnection->selectOne("SELECT 1 FROM pg_extension WHERE extname = 'zhparser'");
                 return false; // 扩展可用
             } catch (Throwable $e) {
                 return true; // 扩展不可用
