@@ -155,7 +155,7 @@ class CustomerServiceAgent extends BaseAgent implements AgentInterface
     /**
      * 流式执行
      */
-    public function executeStream(mixed $input, array $options = [], callable $onChunk): AgentResult
+    public function executeStream(mixed $input, callable $onChunk, array $options = []): AgentResult
     {
         $startTime = microtime(true);
 

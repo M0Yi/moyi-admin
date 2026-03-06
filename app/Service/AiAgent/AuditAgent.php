@@ -161,7 +161,7 @@ class AuditAgent extends BaseAgent implements AgentInterface
     /**
      * 流式执行（审核不支持流式）
      */
-    public function executeStream(mixed $input, array $options = [], callable $onChunk): AgentResult
+    public function executeStream(mixed $input, callable $onChunk, array $options = []): AgentResult
     {
         // 审核不支持流式，直接调用 execute
         return $this->execute($input, $options);
@@ -187,10 +187,12 @@ class AuditAgent extends BaseAgent implements AgentInterface
             'high' => '严格',
         ];
 
+        $sensitivityText = $sensitivityMap[$this->sensitivity] ?? '中等';
+
         return <<<PROMPT
 你是一个内容安全审核助手。请对用户提交的内容进行安全审核。
 
-审核标准：{$sensitivityMap[$this->sensitivity] ?? '中等'}敏感度
+审核标准：{$sensitivityText}敏感度
 
 审核项目：
 1. 政治敏感内容 -政治不正确或有害的政治言论

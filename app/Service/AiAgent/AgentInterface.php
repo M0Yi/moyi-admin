@@ -43,7 +43,7 @@ interface AgentInterface
      * @param callable $onChunk 回调函数
      * @return AgentResult
      */
-    public function executeStream(mixed $input, array $options = [], callable $onChunk): AgentResult;
+    public function executeStream(mixed $input, callable $onChunk, array $options = []): AgentResult;
 
     /**
      * 验证输入
