@@ -499,6 +499,25 @@
             justify-content: center;
             margin-top: 15px;
         }
+
+        .env-check-warning {
+            text-align: center;
+            padding: 20px;
+        }
+
+        .warning-icon {
+            font-size: 48px;
+            color: #ffc107;
+            margin-bottom: 10px;
+        }
+
+        .warning-text {
+            color: #856404;
+            font-weight: 600;
+            margin-bottom: 15px;
+        }
+
+
     </style>
 </head>
 <body>
@@ -531,26 +550,22 @@
                     <div class="env-check-result" id="envCheckResult" style="display: none;">
                         <div class="result-icon" id="envCheckIcon">✓</div>
                         <div class="result-text" id="envCheckText">环境检查通过</div>
-                        <div class="result-actions">
-                            <button type="button" class="btn btn-secondary btn-sm" onclick="showEnvironmentDetails()">
-                                查看详情
-                            </button>
-                            <button type="button" class="btn btn-link btn-sm" onclick="recheckEnvironment()">
-                                重新检查
-                            </button>
-                        </div>
                     </div>
                     <div class="env-check-error" id="envCheckError" style="display: none;">
                         <div class="error-icon">✗</div>
                         <div class="error-text" id="envCheckErrorText">环境检查失败</div>
-                        <div class="error-actions">
-                            <button type="button" class="btn btn-danger btn-sm" onclick="showEnvironmentDetails()">
-                                查看详情
-                            </button>
-                            <button type="button" class="btn btn-link btn-sm" onclick="recheckEnvironment()">
-                                重新检查
-                            </button>
-                        </div>
+                    </div>
+                    <div class="env-check-warning" id="envCheckWarning" style="display: none;">
+                        <div class="warning-icon">⚠</div>
+                        <div class="warning-text" id="envCheckWarningText">环境检查通过（有警告）</div>
+                    </div>
+                    <div class="env-check-actions" id="envCheckActions" style="display: none;">
+                        <button type="button" class="btn btn-secondary btn-sm" onclick="showEnvironmentDetails()">
+                            查看详情
+                        </button>
+                        <button type="button" class="btn btn-link btn-sm" onclick="recheckEnvironment()">
+                            重新检查
+                        </button>
                     </div>
                 </div>
 
@@ -708,12 +723,16 @@
             const loadingDiv = document.getElementById('envCheckLoading');
             const resultDiv = document.getElementById('envCheckResult');
             const errorDiv = document.getElementById('envCheckError');
+            const warningDiv = document.getElementById('envCheckWarning');
+            const actionsDiv = document.getElementById('envCheckActions');
             const progressBar = document.getElementById('envCheckProgress');
 
             // 显示加载状态
             loadingDiv.style.display = 'block';
             resultDiv.style.display = 'none';
             errorDiv.style.display = 'none';
+            warningDiv.style.display = 'none';
+            actionsDiv.style.display = 'none';
 
             // 模拟进度条动画
             progressBar.style.animation = 'progress-pulse 1.5s ease-in-out infinite';
@@ -725,34 +744,47 @@
                 if (result.code === 200) {
                     // 检查是否所有项目都通过
                     const allPassed = checkAllRequirementsPassed(result.data);
+                    
+                    // 检查是否有警告
+                    const hasWarnings = checkForWarnings(result.data);
 
                     // 存储检查结果供详情查看
                     window.envCheckData = result.data;
 
-                    if (allPassed) {
-                        // 所有检查通过，显示成功状态后自动隐藏
-                        loadingDiv.style.display = 'none';
-                        resultDiv.style.display = 'block';
-                        errorDiv.style.display = 'none';
+                    // 隐藏加载状态
+                    loadingDiv.style.display = 'none';
+                    
+                    // 始终显示操作按钮
+                    actionsDiv.style.display = 'flex';
 
-                        // 3秒后自动隐藏成功提示
-                        setTimeout(() => {
-                            const section = document.getElementById('envCheckSection');
-                            if (section) {
-                                section.style.display = 'none';
-                            }
-                        }, 1000);
-                    } else {
+                    if (!allPassed) {
                         // 有检查项未通过，显示错误状态
-                        loadingDiv.style.display = 'none';
                         resultDiv.style.display = 'none';
                         errorDiv.style.display = 'block';
+                        warningDiv.style.display = 'none';
+                    } else if (hasWarnings) {
+                        // 全部通过但有警告，显示警告状态
+                        resultDiv.style.display = 'none';
+                        errorDiv.style.display = 'none';
+                        warningDiv.style.display = 'block';
+                    } else {
+                        // 全部通过且无警告，显示成功状态
+                        resultDiv.style.display = 'block';
+                        errorDiv.style.display = 'none';
+                        warningDiv.style.display = 'none';
+                        
+                        // 1秒后自动隐藏成功提示（但保留按钮）
+                        setTimeout(() => {
+                            resultDiv.style.display = 'none';
+                        }, 1000);
                     }
                 } else {
                     // API调用失败
                     loadingDiv.style.display = 'none';
                     resultDiv.style.display = 'none';
                     errorDiv.style.display = 'block';
+                    warningDiv.style.display = 'none';
+                    actionsDiv.style.display = 'flex';
                     document.getElementById('envCheckErrorText').textContent = result.message || '环境检查失败';
                 }
             } catch (error) {
@@ -760,10 +792,11 @@
                 loadingDiv.style.display = 'none';
                 resultDiv.style.display = 'none';
                 errorDiv.style.display = 'block';
+                warningDiv.style.display = 'none';
+                actionsDiv.style.display = 'flex';
                 document.getElementById('envCheckErrorText').textContent = '网络错误：' + error.message;
             }
         }
-
         // 手动环境检查（按钮点击时执行）
         async function checkEnvironment() {
             const checkBtn = document.getElementById('checkEnvBtn');
@@ -836,6 +869,28 @@
             return true;
         }
 
+
+        // 检查是否有警告（不影响安装但需要提醒用户）
+        function checkForWarnings(data) {
+            // 检查 MySQL 版本是否为推荐版本
+            if (data.mysql_version && data.mysql_version.warning) {
+                return true;
+            }
+            
+            // 检查 PostgreSQL 是否有警告
+            if (data.postgresql && data.postgresql.warning) {
+                return true;
+            }
+            
+            // 检查 MySQL 特性是否有警告
+            if (data.mysql_features && data.mysql_features.warnings && data.mysql_features.warnings.length > 0) {
+                return true;
+            }
+            
+            return false;
+        }
+
+        
         // 重新检查环境
         function recheckEnvironment() {
             // 隐藏当前状态，重新开始自动检查
@@ -997,6 +1052,96 @@
                         <div class="alert alert-success">${db.suggest || '当前数据库为空，适合进行安装'}</div>
                     `;
                 }
+
+            // PostgreSQL 检测结果（可选功能，仅显示警告）
+            if (data.postgresql) {
+                const pg = data.postgresql;
+                html += '<div class="check-category">PostgreSQL 数据库（可选）</div>';
+                
+                // 扩展状态
+                const extStatusClass = pg.enabled ? 'passed' : 'failed';
+                const extStatusText = pg.enabled ? '✓ 已安装' : '✗ 未安装';
+                html += `
+                    <div class="check-item">
+                        <div class="check-item-name">pdo_pgsql 扩展</div>
+                        <span class="check-status ${extStatusClass}">${extStatusText}</span>
+                    </div>
+                `;
+                
+                // 如果扩展已安装，显示连接状态
+                if (pg.enabled) {
+                    if (pg.connected) {
+                        html += `
+                            <div class="check-item">
+                                <div>
+                                    <div class="check-item-name">PostgreSQL 连接</div>
+                                    <div class="check-item-value">${pg.version_full || pg.version || '未知版本'}</div>
+                                </div>
+                                <span class="check-status passed">✓ 已连接</span>
+                            </div>
+                        `;
+                        
+                        // zhparser 中文分词状态
+                        let zhparserStatusClass = pg.zhparser_installed ? 'passed' : 'failed';
+                        let zhparserStatusText = pg.zhparser_installed ? '✓ 已安装' : '✗ 未安装';
+                        let zhparserDetailText = '';
+                        
+                        if (pg.zhparser_auto_installed) {
+                            zhparserStatusText = '✓ 已自动安装';
+                            zhparserDetailText = '（安装程序已自动启用）';
+                        }
+                        
+                        html += `
+                            <div class="check-item">
+                                <div>
+                                    <div class="check-item-name">zhparser 中文分词</div>
+                                    ${zhparserDetailText ? `<div class="check-item-value">${zhparserDetailText}</div>` : ''}
+                                </div>
+                                <span class="check-status ${zhparserStatusClass}">${zhparserStatusText}</span>
+                            </div>
+                        `;
+                        
+                        // 显示消息
+                        if (pg.zhparser_auto_installed) {
+                            html += `<div class="alert alert-success">🎉 ${pg.message}</div>`;
+                        } else {
+                            html += `<div class="alert alert-success">${pg.message}</div>`;
+                        }
+                        
+                        // 显示警告（如果有）
+                        if (pg.warning) {
+                            html += `<div class="alert alert-danger">⚠️ ${pg.warning}</div>`;
+                        }
+                    } else {
+                        // 未连接
+                        html += `
+                            <div class="check-item">
+                                <div class="check-item-name">PostgreSQL 连接</div>
+                                <span class="check-status failed">✗ 未连接</span>
+                            </div>
+                        `;
+                        html += `<div class="alert alert-danger">${pg.message}</div>`;
+                        if (pg.error) {
+                            html += `<div class="check-item">
+                                <div>
+                                    <div class="check-item-name">错误信息</div>
+                                    <div class="check-item-value" style="color: #721c24;">${pg.error}</div>
+                                </div>
+                            </div>`;
+                        }
+                        if (pg.warning) {
+                            html += `<div class="alert alert-danger">⚠️ ${pg.warning}</div>`;
+                        }
+                    }
+                } else {
+                    // 扩展未安装
+                    html += `<div class="alert alert-danger">${pg.message}</div>`;
+                    if (pg.warning) {
+                        html += `<div class="alert alert-danger">⚠️ ${pg.warning}</div>`;
+                    }
+                }
+            }
+
             }
 
             resultsDiv.innerHTML = html;

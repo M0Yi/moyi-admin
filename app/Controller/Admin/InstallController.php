@@ -1756,6 +1756,11 @@ class InstallController extends AbstractController
             ];
         }
 
+
+        // 检查 PostgreSQL 连接（可选，仅警告不影响安装）
+        $checks['postgresql'] = $this->checkPostgreSQLConnection();
+
+        
         return $response->json([
             'code' => 200,
             'data' => $checks,
@@ -3183,4 +3188,104 @@ class InstallController extends AbstractController
 
         return $features;
     }
+
+    /**
+     * 检查 PostgreSQL 连接状态（可选功能）
+     * 仅显示警告，不影响安装
+     */
+    private function checkPostgreSQLConnection(): array
+    {
+        $result = [
+            'name' => 'PostgreSQL 数据库',
+            'enabled' => false,
+            'connected' => false,
+            'version' => null,
+            'zhparser_installed' => false,
+            'warning' => null,
+            'message' => '',
+        ];
+
+        // 检查 PostgreSQL 扩展是否加载
+        $result['enabled'] = extension_loaded('pdo_pgsql');
+        
+        if (!$result['enabled'])
+        {
+            $result['message'] = 'PHP pdo_pgsql 扩展未安装，PostgreSQL 功能不可用';
+            $result['warning'] = '如需使用 PostgreSQL 功能，请安装 pdo_pgsql 扩展';
+            return $result;
+        }
+
+        // 从环境变量获取 PostgreSQL 配置
+        $pgHost = env('PG_HOST', 'localhost');
+        $pgPort = env('PG_PORT', '5432');
+        $pgDatabase = env('PG_DATABASE', '');
+        $pgUsername = env('PG_USERNAME', '');
+        $pgPassword = env('PG_PASSWORD', '');
+
+        if (empty($pgDatabase) || empty($pgUsername)) {
+            $result['message'] = 'PostgreSQL 未配置（PG_DATABASE 或 PG_USERNAME 未设置）';
+            $result['warning'] = '如需使用 PostgreSQL，请在 .env 中配置 PG_* 相关变量';
+            return $result;
+        }
+
+        // 尝试连接 PostgreSQL
+        try {
+            $dsn = "pgsql:host={$pgHost};port={$pgPort};dbname={$pgDatabase}";
+            $pdo = new \PDO($dsn, $pgUsername, $pgPassword, [
+                \PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION,
+                \PDO::ATTR_TIMEOUT => 5,
+            ]);
+
+            $result['connected'] = true;
+
+            // 获取 PostgreSQL 版本
+            $stmt = $pdo->query('SELECT version()');
+            $versionInfo = $stmt->fetchColumn();
+            
+            // 解析版本号
+            if (preg_match('/PostgreSQL\\s+([\\d.]+)/i', $versionInfo, $matches)) {
+                $result['version'] = $matches[1];
+                $result['version_full'] = $versionInfo;
+            }
+
+            // 检查 zhparser 扩展是否安装
+            $stmt = $pdo->query("SELECT * FROM pg_extension WHERE extname = 'zhparser'");
+            $result['zhparser_installed'] = $stmt->fetch() !== false;
+
+            if (!$result['zhparser_installed']) {
+                // 尝试自动安装 zhparser 扩展
+                try {
+                    $pdo->exec('CREATE EXTENSION IF NOT EXISTS zhparser');
+                    
+                    // 再次检查是否安装成功
+                    $stmt = $pdo->query("SELECT * FROM pg_extension WHERE extname = 'zhparser'");
+                    $result['zhparser_installed'] = $stmt->fetch() !== false;
+                    
+                    if ($result['zhparser_installed']) {
+                        $result['zhparser_auto_installed'] = true;
+                        $result['message'] = "PostgreSQL {$result['version']} 已连接，zhparser 中文分词已自动安装";
+                    } else {
+                        $result['message'] = "PostgreSQL {$result['version']} 已连接";
+                        $result['warning'] = 'zhparser 中文分词扩展自动安装失败，全文搜索功能将不可用';
+                    }
+                } catch (\PDOException $installError) {
+                    // 自动安装失败（可能是权限不足或扩展未在系统中安装）
+                    $result['zhparser_install_error'] = $installError->getMessage();
+                    $result['message'] = "PostgreSQL {$result['version']} 已连接";
+                    $result['warning'] = 'zhparser 中文分词扩展未安装，且自动安装失败（可能需要超级用户权限或扩展未在系统中安装）';
+                }
+            } else {
+                $result['message'] = "PostgreSQL {$result['version']} 已连接，zhparser 中文分词已安装";
+            }
+
+        } catch (\PDOException $e) {
+            $result['connected'] = false;
+            $result['message'] = 'PostgreSQL 连接失败';
+            $result['error'] = $e->getMessage();
+            $result['warning'] = 'PostgreSQL 连接失败：' . $e->getMessage();
+        }
+
+        return $result;
+    }
 }
+
