@@ -17,7 +17,7 @@ use Hyperf\HttpServer\Annotation\PutMapping;
 use Hyperf\HttpServer\Contract\RequestInterface;
 use App\Controller\AbstractController;
 
-#[Controller(prefix: '/admin/ai-knowledge')]
+#[Controller(prefix: '/admin/{adminPath}/system/ai-knowledge')]
 class AgentKnowledgeController extends AbstractController
 {
     #[Inject]
