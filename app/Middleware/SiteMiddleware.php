@@ -13,6 +13,7 @@ use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Server\MiddlewareInterface;
 use Psr\Http\Server\RequestHandlerInterface;
+use function Hyperf\Support\env;
 
 /**
  * 站点识别中间件
@@ -66,23 +67,37 @@ class SiteMiddleware implements MiddlewareInterface
         $domain = $this->extractDomain($host);
         logger()->debug('[SiteMiddleware] 提取域名: ' . $domain);
 
-        // 通过 SiteService 获取站点信息（优先缓存）
-        $site = $this->siteService->getSiteByDomain($domain);
+        // 检查是否启用多站点功能
+        $enableSite = env('ENABLE_SITE', false);
+        
+        if (!$enableSite) {
+            // 多站点功能关闭，使用默认站点（ID=1）
+            logger()->debug('[SiteMiddleware] 多站点功能关闭，使用默认站点');
+            $site = $this->siteService->getDefaultSite();
+            
+            if (!$site) {
+                logger()->error('[SiteMiddleware] 未找到默认站点');
+                return $this->response->raw('Default site not found')->withStatus(500);
+            }
+        } else {
+            // 多站点功能开启，根据域名查找站点
+            $site = $this->siteService->getSiteByDomain($domain);
 
-        if (! $site) {
-            logger()->info('[SiteMiddleware] 未找到匹配的站点, 域名: ' . $domain);
-            // 未匹配任何站点，继续后续流程（site() 将返回 null）
-            return $handler->handle($request);
-        }
+            if (! $site) {
+                logger()->info('[SiteMiddleware] 未找到匹配的站点, 域名: ' . $domain);
+                // 未匹配任何站点，继续后续流程（site() 将返回 null）
+                return $handler->handle($request);
+            }
 
-        logger()->debug('[SiteMiddleware] 找到站点: ' . $site->name . ', ID: ' . $site->id);
+            logger()->debug('[SiteMiddleware] 找到站点: ' . $site->name . ', ID: ' . $site->id);
 
-        // 检查站点状态
-        if (! $site->isEnabled()) {
-            logger()->warning('[SiteMiddleware] 站点未启用: ' . $site->name . ', ID: ' . $site->id);
-            // 站点未启用
-            return $this->response->raw('Site is inactive')
-                ->withStatus(503);
+            // 检查站点状态
+            if (! $site->isEnabled()) {
+                logger()->warning('[SiteMiddleware] 站点未启用: ' . $site->name . ', ID: ' . $site->id);
+                // 站点未启用
+                return $this->response->raw('Site is inactive')
+                    ->withStatus(503);
+            }
         }
 
         // 将站点信息设置到上下文中（全局访问）

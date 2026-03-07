@@ -101,6 +101,47 @@ class SiteService
     }
 
     /**
+     * 获取默认站点（ID=1）
+     *
+     * 当多站点功能关闭时，使用默认站点
+     *
+     * @return AdminSite|null
+     */
+    public function getDefaultSite(): ?AdminSite
+    {
+        try {
+            $cacheKey = 'site:default';
+            
+            // 优先从缓存获取
+            $cached = $this->getRedis()->get($cacheKey);
+            if ($cached !== false && $cached !== null) {
+                $data = json_decode($cached, true);
+                if (is_array($data) && isset($data['id'])) {
+                    logger()->debug('[SiteService] 默认站点缓存命中');
+                    return $this->hydrateSiteFromArray($data);
+                }
+            }
+
+            // 从数据库获取默认站点
+            $site = AdminSite::query()
+                ->where('id', 1)
+                ->active()
+                ->first();
+
+            if ($site) {
+                // 写入缓存
+                $this->getRedis()->setex($cacheKey, self::CACHE_TTL, json_encode($site->toArray(), JSON_UNESCAPED_UNICODE));
+                logger()->debug('[SiteService] 已获取并缓存默认站点');
+            }
+
+            return $site;
+        } catch (\Throwable $e) {
+            logger()->error('[SiteService] 获取默认站点失败: ' . $e->getMessage());
+            return null;
+        }
+    }
+
+    /**
      * 从 Redis 缓存获取站点信息
      *
      * @param string $domain 域名
