@@ -15,7 +15,7 @@ use Hyperf\HttpServer\Annotation\PostMapping;
 use Hyperf\HttpServer\Contract\RequestInterface;
 use App\Controller\AbstractController;
 
-#[Controller(prefix: '/admin/ai-agent-sessions')]
+#[Controller(prefix: '/admin/{adminPath}/system/ai-agent-sessions')]
 class AgentSessionController extends AbstractController
 {
     #[Inject]
