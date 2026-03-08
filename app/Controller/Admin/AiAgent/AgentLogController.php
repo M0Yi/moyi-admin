@@ -30,7 +30,7 @@ class AgentLogController extends AbstractController
         $result = $this->service->getList($params);
         $statistics = $this->service->getStatistics($params);
 
-        return $this->render->render('admin.system.ai-agent.log.index', [
+        return $this->renderAdmin('admin.system.ai-agent.log.index', [
             'list' => $result['data'],
             'total' => $result['total'],
             'page' => $result['page'],
@@ -51,7 +51,7 @@ class AgentLogController extends AbstractController
             throw new BusinessException(ErrorCode::NOT_FOUND, '日志不存在');
         }
 
-        return $this->render->render('admin.system.ai-agent.log.show', [
+        return $this->renderAdmin('admin.system.ai-agent.log.show', [
             'log' => $log,
         ]);
     }

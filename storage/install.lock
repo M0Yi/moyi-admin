@@ -1,0 +1,1 @@
+<?php echo file_exists("/storage/install.lock") ? PHP_EOL : if [ -f "/Users/moyi/claude/moyi-admin/storage/install.lock ]; then echo "exists"; else echo "not exists"; fi

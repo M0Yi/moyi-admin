@@ -29,7 +29,7 @@ class AgentSessionController extends AbstractController
 
         $result = $this->service->getList($params);
 
-        return $this->render->render('admin.system.ai-agent.session.index', [
+        return $this->renderAdmin('admin.system.ai-agent.session.index', [
             'list' => $result['data'],
             'total' => $result['total'],
             'page' => $result['page'],
@@ -48,7 +48,7 @@ class AgentSessionController extends AbstractController
             throw new BusinessException(ErrorCode::NOT_FOUND, '会话不存在');
         }
 
-        return $this->render->render('admin.system.ai-agent.session.show', [
+        return $this->renderAdmin('admin.system.ai-agent.session.show', [
             'session' => $session,
         ]);
     }

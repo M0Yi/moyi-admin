@@ -31,7 +31,7 @@ class AgentKnowledgeController extends AbstractController
 
         $result = $this->service->getList($params);
 
-        return $this->render->render('admin.system.ai-agent.knowledge.index', [
+        return $this->renderAdmin('admin.system.ai-agent.knowledge.index', [
             'list' => $result['data'],
             'total' => $result['total'],
             'page' => $result['page'],
@@ -46,7 +46,7 @@ class AgentKnowledgeController extends AbstractController
     #[GetMapping(path: 'create')]
     public function create(RequestInterface $request)
     {
-        return $this->render->render('admin.system.ai-agent.knowledge.create', [
+        return $this->renderAdmin('admin.system.ai-agent.knowledge.create', [
             'agent_id' => $request->input('agent_id'),
         ]);
     }
@@ -59,7 +59,7 @@ class AgentKnowledgeController extends AbstractController
             throw new BusinessException(ErrorCode::NOT_FOUND, '文档不存在');
         }
 
-        return $this->render->render('admin.system.ai-agent.knowledge.show', [
+        return $this->renderAdmin('admin.system.ai-agent.knowledge.show', [
             'knowledge' => $knowledge,
         ]);
     }
@@ -72,7 +72,7 @@ class AgentKnowledgeController extends AbstractController
             throw new BusinessException(ErrorCode::NOT_FOUND, '文档不存在');
         }
 
-        return $this->render->render('admin.system.ai-agent.knowledge.edit', [
+        return $this->renderAdmin('admin.system.ai-agent.knowledge.edit', [
             'knowledge' => $knowledge,
         ]);
     }

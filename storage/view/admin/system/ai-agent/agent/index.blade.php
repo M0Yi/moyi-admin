@@ -2,144 +2,180 @@
 
 @section('title', 'AI Agent 管理')
 
+@if (! ($isEmbedded ?? false))
+@push('admin_sidebar')
+    @include('admin.components.sidebar')
+@endpush
+
+@push('admin_navbar')
+    @include('admin.components.navbar')
+@endpush
+@endif
+
 @section('content')
-<div class="page-header">
-    <h1>AI Agent 管理</h1>
-    <div class="actions">
-        <a href="{{ admin_route('system/ai-agents') }}/create" class="btn btn-primary">
-            <i class="bi bi-plus"></i> 新增 Agent
-        </a>
+<div class="container-fluid py-4">
+    <div class="mb-3">
+        <h6 class="mb-1 fw-bold">AI Agent 管理</h6>
+        <small class="text-muted">管理 AI Agent 配置和状态</small>
+    </div>
+
+    <div class="card border-0 shadow-sm">
+        <div class="card-body">
+            @include('admin.components.data-table-with-columns', [
+                'tableId' => 'aiAgentTable',
+                'storageKey' => 'aiAgentTableColumns',
+                'ajaxUrl' => admin_route('system/ai-agents'),
+                'showPagination' => true,
+                'columns' => [
+                    [
+                        'index' => 0,
+                        'label' => 'ID',
+                        'field' => 'id',
+                        'type' => 'text',
+                        'visible' => true,
+                        'width' => '50',
+                    ],
+                    [
+                        'index' => 1,
+                        'label' => '名称',
+                        'field' => 'name',
+                        'type' => 'text',
+                        'visible' => true,
+                    ],
+                    [
+                        'index' => 2,
+                        'label' => '标识',
+                        'field' => 'slug',
+                        'type' => 'text',
+                        'visible' => true,
+                    ],
+                    [
+                        'index' => 3,
+                        'label' => '类型',
+                        'field' => 'type',
+                        'type' => 'badge',
+                        'badgeMap' => [
+                            'audit' => ['text' => '审核', 'variant' => 'info'],
+                            'service' => ['text' => '客服', 'variant' => 'success'],
+                            'assistant' => ['text' => '助手', 'variant' => 'primary'],
+                        ],
+                        'visible' => true,
+                    ],
+                    [
+                        'index' => 4,
+                        'label' => '类名',
+                        'field' => 'class',
+                        'type' => 'text',
+                        'visible' => false,
+                    ],
+                    [
+                        'index' => 5,
+                        'label' => '状态',
+                        'field' => 'status',
+                        'type' => 'switch',
+                        'onChange' => "toggleStatus({id}, this, '" . admin_route('system/ai-agents') . "/{id}/toggle-status', 'status')",
+                        'visible' => true,
+                        'width' => '80',
+                    ],
+                    [
+                        'index' => 6,
+                        'label' => '默认',
+                        'field' => 'is_default',
+                        'type' => 'badge',
+                        'badgeMap' => [
+                            '1' => ['text' => '默认', 'variant' => 'warning'],
+                            '0' => ['text' => '普通', 'variant' => 'secondary'],
+                        ],
+                        'visible' => true,
+                        'width' => '80',
+                    ],
+                    [
+                        'index' => 7,
+                        'label' => '排序',
+                        'field' => 'sort',
+                        'type' => 'text',
+                        'visible' => true,
+                        'width' => '60',
+                    ],
+                    [
+                        'index' => 8,
+                        'label' => '创建时间',
+                        'field' => 'created_at',
+                        'type' => 'date',
+                        'format' => 'Y-m-d H:i:s',
+                        'visible' => true,
+                        'width' => '150',
+                    ],
+                    [
+                        'index' => 9,
+                        'label' => '操作',
+                        'type' => 'actions',
+                        'actions' => [
+                            [
+                                'type' => 'link',
+                                'href' => admin_route('system/ai-agents') . '/create',
+                                'icon' => 'bi-plus',
+                                'variant' => 'primary',
+                                'title' => '新增',
+                                'attributes' => [
+                                    'data-iframe-shell-trigger' => 'ai-agent-create',
+                                    'data-iframe-shell-src' => admin_route('system/ai-agents') . '/create',
+                                    'data-iframe-shell-title' => '新增 AI Agent',
+                                    'data-iframe-shell-channel' => 'ai-agent',
+                                ],
+                            ],
+                            [
+                                'type' => 'link',
+                                'href' => admin_route('system/ai-agents') . '/{id}/edit',
+                                'icon' => 'bi-pencil',
+                                'variant' => 'warning',
+                                'title' => '编辑',
+                                'attributes' => [
+                                    'data-iframe-shell-trigger' => 'ai-agent-edit-{id}',
+                                    'data-iframe-shell-src' => admin_route('system/ai-agents') . '/{id}/edit',
+                                    'data-iframe-shell-title' => '编辑 AI Agent',
+                                    'data-iframe-shell-channel' => 'ai-agent',
+                                ],
+                            ],
+                            [
+                                'type' => 'button',
+                                'onclick' => "deleteRow_aiAgentTable({id})",
+                                'icon' => 'bi-trash',
+                                'variant' => 'danger',
+                                'title' => '删除',
+                            ],
+                        ],
+                    ],
+                ],
+            ])
+        </div>
     </div>
 </div>
-
-{{-- 搜索表单 --}}
-<div class="search-box">
-    <form action="{{ admin_route('system/ai-agents') }}" method="GET">
-        <div class="row">
-            <div class="col-md-3">
-                <select name="type" class="form-control">
-                    <option value="">全部类型</option>
-                    @foreach($types as $key => $label)
-                    <option value="{{ $key }}" {{ $type == $key ? 'selected' : '' }}>{{ $label }}</option>
-                    @endforeach
-                </select>
-            </div>
-            <div class="col-md-2">
-                <select name="status" class="form-control">
-                    <option value="">全部状态</option>
-                    @foreach($statuses as $key => $label)
-                    <option value="{{ $key }}" {{ $status == (string)$key ? 'selected' : '' }}>{{ $label }}</option>
-                    @endforeach
-                </select>
-            </div>
-            <div class="col-md-3">
-                <input type="text" name="keyword" class="form-control" placeholder="搜索名称/标识" value="{{ $keyword ?? '' }}">
-            </div>
-            <div class="col-md-2">
-                <button type="submit" class="btn btn-primary">搜索</button>
-                <a href="{{ admin_route('system/ai-agents') }}" class="btn btn-default">重置</a>
-            </div>
-        </div>
-    </form>
-</div>
-
-{{-- 数据表格 --}}
-<div class="table-responsive">
-    <table class="table table-striped">
-        <thead>
-            <tr>
-                <th>ID</th>
-                <th>名称</th>
-                <th>标识</th>
-                <th>类型</th>
-                <th>类名</th>
-                <th>状态</th>
-                <th>默认</th>
-                <th>排序</th>
-                <th>创建时间</th>
-                <th>操作</th>
-            </tr>
-        </thead>
-        <tbody>
-            @forelse($list as $agent)
-            <tr>
-                <td>{{ $agent->id }}</td>
-                <td>{{ $agent->name }}</td>
-                <td><code>{{ $agent->slug }}</code></td>
-                <td>
-                    @if(isset($types[$agent->type]))
-                    <span class="badge badge-info">{{ $types[$agent->type] }}</span>
-                    @else
-                    {{ $agent->type }}
-                    @endif
-                </td>
-                <td><small>{{ $agent->class }}</small></td>
-                <td>
-                    @if($agent->status == 1)
-                    <span class="badge badge-success">启用</span>
-                    @else
-                    <span class="badge badge-danger">禁用</span>
-                    @endif
-                </td>
-                <td>
-                    @if($agent->is_default == 1)
-                    <span class="badge badge-warning">默认</span>
-                    @else
-                    <a href="{{ admin_route('system/ai-agents') }}/{{ $agent->id }}/set-default" class="btn btn-sm btn-outline-secondary">设为默认</a>
-                    @endif
-                </td>
-                <td>{{ $agent->sort }}</td>
-                <td>{{ $agent->created_at }}</td>
-                <td>
-                    <a href="{{ admin_route('system/ai-agents') }}/{{ $agent->id }}" class="btn btn-sm btn-info">查看</a>
-                    <a href="{{ admin_route('system/ai-agents') }}/{{ $agent->id }}/edit" class="btn btn-sm btn-primary">编辑</a>
-                    <button class="btn btn-sm btn-danger" onclick="deleteAgent({{ $agent->id }})">删除</button>
-                </td>
-            </tr>
-            @empty
-            <tr>
-                <td colspan="10" class="text-center">暂无数据</td>
-            </tr>
-            @endforelse
-        </tbody>
-    </table>
-</div>
-
-{{-- 分页 --}}
-@if($total > $page_size)
-<div class="pagination-wrapper">
-    {{ $list->appends(request()->query())->links() }}
-</div>
-@endif
 @endsection
 
-@push('scripts')
+@push('admin_scripts')
 <script>
-function deleteAgent(id) {
-    if (!confirm('确定要删除该 Agent 吗？')) {
-        return;
+function deleteRow_aiAgentTable(id) {
+    if (confirm('确定要删除这条记录吗？')) {
+        fetch(`{{ admin_route('system/ai-agents') }}/${id}`, {
+            method: 'DELETE',
+            headers: {
+                'X-Requested-With': 'XMLHttpRequest'
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.code === 200) {
+                window.location.reload();
+            } else {
+                alert(data.msg || '删除失败');
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('删除失败');
+        });
     }
-
-    fetch(`{{ admin_route('system/ai-agents') }}/${id}`, {
-        method: 'DELETE',
-        headers: {
-            'Content-Type': 'application/json',
-            'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || ''
-        }
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.code === 200) {
-            alert('删除成功');
-            location.reload();
-        } else {
-            alert(data.msg || '删除失败');
-        }
-    })
-    .catch(error => {
-        console.error('Error:', error);
-        alert('删除失败');
-    });
 }
 </script>
 @endpush

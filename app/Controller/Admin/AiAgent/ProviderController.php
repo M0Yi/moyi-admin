@@ -29,7 +29,7 @@ class ProviderController extends AbstractController
 
         $result = $this->service->getList($params);
 
-        return $this->render->render('admin.system.ai-agent.provider.index', [
+        return $this->renderAdmin('admin.system.ai-agent.provider.index', [
             'list' => $result['data'],
             'total' => $result['total'],
             'page' => $result['page'],
@@ -42,7 +42,7 @@ class ProviderController extends AbstractController
     #[GetMapping(path: 'create')]
     public function create()
     {
-        return $this->render->render('admin.system.ai-agent.provider.create');
+        return $this->renderAdmin('admin.system.ai-agent.provider.create');
     }
 
     #[GetMapping(path: '{id}')]
@@ -53,7 +53,7 @@ class ProviderController extends AbstractController
             throw new BusinessException(ErrorCode::NOT_FOUND, 'Provider不存在');
         }
 
-        return $this->render->render('admin.system.ai-agent.provider.show', [
+        return $this->renderAdmin('admin.system.ai-agent.provider.show', [
             'provider' => $provider,
         ]);
     }
@@ -66,7 +66,7 @@ class ProviderController extends AbstractController
             throw new BusinessException(ErrorCode::NOT_FOUND, 'Provider不存在');
         }
 
-        return $this->render->render('admin.system.ai-agent.provider.edit', [
+        return $this->renderAdmin('admin.system.ai-agent.provider.edit', [
             'provider' => $provider,
         ]);
     }
