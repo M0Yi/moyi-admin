@@ -458,7 +458,7 @@ class MenuService extends BaseService
             [
                 'name' => 'icon',
                 'label' => '图标',
-                'type' => 'text',
+                'type' => 'icon',
                 'required' => false,
                 'placeholder' => 'bi bi-icon',
                 'default' => $menu?->icon ?? '',
