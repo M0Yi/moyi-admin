@@ -17,21 +17,25 @@ use Hyperf\HttpServer\Annotation\PutMapping;
 use Hyperf\HttpServer\Contract\RequestInterface;
 use App\Controller\AbstractController;
 
-#[Controller(prefix: '/admin/ai-knowledge')]
+#[Controller(prefix: '/admin/{adminPath}/system/ai-knowledge')]
 class AgentKnowledgeController extends AbstractController
 {
     #[Inject]
     protected AiAgentKnowledgeService $service;
 
     #[GetMapping(path: '')]
-    public function index(RequestInterface $request)
-    {
+    public function index(RequestInterface $request)\s{
+        // 如果是 AJAX 请求，返回 JSON 数据
+        if ($request->input('_ajax') === '1' || $request->input('format') === 'json') {
+            return $this->listData($request);
+        }
+
         $params = $request->all();
         $params['site_id'] = $request->input('site_id');
 
         $result = $this->service->getList($params);
 
-        return $this->render->render('admin.system.ai-agent.knowledge.index', [
+        return $this->renderAdmin('admin.system.ai-agent.knowledge.index', [
             'list' => $result['data'],
             'total' => $result['total'],
             'page' => $result['page'],
@@ -46,7 +50,7 @@ class AgentKnowledgeController extends AbstractController
     #[GetMapping(path: 'create')]
     public function create(RequestInterface $request)
     {
-        return $this->render->render('admin.system.ai-agent.knowledge.create', [
+        return $this->renderAdmin('admin.system.ai-agent.knowledge.create', [
             'agent_id' => $request->input('agent_id'),
         ]);
     }
@@ -59,7 +63,7 @@ class AgentKnowledgeController extends AbstractController
             throw new BusinessException(ErrorCode::NOT_FOUND, '文档不存在');
         }
 
-        return $this->render->render('admin.system.ai-agent.knowledge.show', [
+        return $this->renderAdmin('admin.system.ai-agent.knowledge.show', [
             'knowledge' => $knowledge,
         ]);
     }
@@ -72,7 +76,7 @@ class AgentKnowledgeController extends AbstractController
             throw new BusinessException(ErrorCode::NOT_FOUND, '文档不存在');
         }
 
-        return $this->render->render('admin.system.ai-agent.knowledge.edit', [
+        return $this->renderAdmin('admin.system.ai-agent.knowledge.edit', [
             'knowledge' => $knowledge,
         ]);
     }
@@ -104,5 +108,27 @@ class AgentKnowledgeController extends AbstractController
         $result = $this->service->delete($id);
 
         return $this->success($result, '删除成功');
+    }
+
+
+    /**
+     * 获取列表数据（AJAX）
+     */
+    public function listData(RequestInterface $request)
+    {
+        $params = $request->all();
+        $params['site_id'] = $request->input('site_id');
+
+        $result = $this->service->getList($params);
+
+        return $this->success([
+            'data' => $result['data'] ?? [],
+            'total' => $result['total'] ?? 0,
+            'page' => $result['page'] ?? 1,
+            'page_size' => $result['page_size'] ?? 15,
+            'last_page' => isset($result['page_size']) && $result['page_size'] > 0 
+                ? (int) ceil(($result['total'] ?? 0) / $result['page_size']) 
+                : 1,
+        ]);
     }
 }

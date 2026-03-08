@@ -49,8 +49,8 @@ class AiAgentLogService
 
         $query->orderBy('id', 'desc');
 
-        $page = $params['page'] ?? 1;
-        $pageSize = $params['page_size'] ?? 15;
+        $page = (int)($params['page'] ?? 1);
+        $pageSize = (int)($params['page_size'] ?? 15);
 
         $paginator = $query->paginate($pageSize, ['*'], 'page', $page);
 

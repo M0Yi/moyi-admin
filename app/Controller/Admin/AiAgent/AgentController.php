@@ -18,7 +18,7 @@ use Hyperf\HttpServer\Annotation\PutMapping;
 use Hyperf\HttpServer\Contract\RequestInterface;
 use App\Controller\AbstractController;
 
-#[Controller(prefix: '/admin/ai-agents')]
+#[Controller(prefix: '/admin/{adminPath}/system/ai-agents')]
 class AgentController extends AbstractController
 {
     #[Inject]
@@ -27,30 +27,49 @@ class AgentController extends AbstractController
     #[GetMapping(path: '')]
     public function index(RequestInterface $request)
     {
+        // 如果是 AJAX 请求，返回 JSON 数据
+        if ($request->input('_ajax') === '1' || $request->input('format') === 'json') {
+            return $this->listData($request);
+        }
+
+        return $this->renderAdmin('admin.system.ai-agent.agent.index');
+    }
+
+    /**
+     * 获取列表数据（AJAX）
+     */
+    public function listData(RequestInterface $request)
+    {
         $params = $request->all();
         $params['site_id'] = $request->input('site_id');
 
         $result = $this->service->getList($params);
 
-        return $this->render->render('admin.system.ai-agent.agent.index', [
-            'list' => $result['data'],
-            'total' => $result['total'],
-            'page' => $result['page'],
-            'page_size' => $result['page_size'],
-            'types' => AiAgent::getTypes(),
-            'statuses' => AiAgent::getStatuses(),
-            'type' => $request->input('type'),
-            'status' => $request->input('status'),
-            'keyword' => $request->input('keyword'),
+        return $this->success([
+            'data' => $result['data'] ?? [],
+            'total' => $result['total'] ?? 0,
+            'page' => $result['page'] ?? 1,
+            'page_size' => $result['page_size'] ?? 15,
+            'last_page' => isset($result['page_size']) && $result['page_size'] > 0 
+                ? (int) ceil(($result['total'] ?? 0) / $result['page_size']) 
+                : 1,
         ]);
     }
 
     #[GetMapping(path: 'create')]
     public function create()
     {
-        return $this->render->render('admin.system.ai-agent.agent.create', [
-            'types' => AiAgent::getTypes(),
-            'statuses' => AiAgent::getStatuses(),
+        $fields = $this->service->getFormFields('create');
+        $formSchema = [
+            'title' => '新增 AI Agent',
+            'fields' => $fields,
+            'submitUrl' => admin_route('system/ai-agents'),
+            'method' => 'POST',
+            'redirectUrl' => admin_route('system/ai-agents'),
+        ];
+
+        return $this->renderAdmin('admin.system.ai-agent.agent.create', [
+            'formSchemaJson' => json_encode($formSchema, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
         ]);
     }
 
@@ -62,7 +81,7 @@ class AgentController extends AbstractController
             throw new BusinessException(ErrorCode::NOT_FOUND, 'Agent不存在');
         }
 
-        return $this->render->render('admin.system.ai-agent.agent.show', [
+        return $this->renderAdmin('admin.system.ai-agent.agent.show', [
             'agent' => $agent,
         ]);
     }
@@ -75,10 +94,18 @@ class AgentController extends AbstractController
             throw new BusinessException(ErrorCode::NOT_FOUND, 'Agent不存在');
         }
 
-        return $this->render->render('admin.system.ai-agent.agent.edit', [
+        $fields = $this->service->getFormFields('update', $agent);
+        $formSchema = [
+            'title' => '编辑 AI Agent',
+            'fields' => $fields,
+            'submitUrl' => admin_route("system/ai-agents/{$id}"),
+            'method' => 'PUT',
+            'redirectUrl' => admin_route('system/ai-agents'),
+        ];
+        
+        return $this->renderAdmin('admin.system.ai-agent.agent.edit', [
             'agent' => $agent,
-            'types' => AiAgent::getTypes(),
-            'statuses' => AiAgent::getStatuses(),
+            'formSchemaJson' => json_encode($formSchema, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
         ]);
     }
 
