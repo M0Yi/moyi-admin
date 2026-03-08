@@ -160,4 +160,119 @@ class AiAgentService
     {
         return AiAgentModel::getStatuses();
     }
+
+    /**
+     * 获取表单字段配置
+     */
+    public function getFormFields(string $scene = 'create', ?AiAgentModel $agent = null): array
+    {
+        $typeOptions = [];
+        foreach (AiAgentModel::getTypes() as $value => $label) {
+            $typeOptions[] = ['value' => $value, 'label' => $label];
+        }
+
+        $fields = [
+            [
+                'name' => 'name',
+                'label' => 'Agent 名称',
+                'type' => 'text',
+                'required' => true,
+                'placeholder' => '请输入 Agent 名称',
+                'default' => $agent?->name ?? '',
+                'col' => 'col-12 col-md-6',
+            ],
+            [
+                'name' => 'slug',
+                'label' => 'Agent 标识',
+                'type' => 'text',
+                'required' => true,
+                'placeholder' => '例如：audit-agent',
+                'default' => $agent?->slug ?? '',
+                'help' => '唯一标识符，只能包含字母、数字、中划线',
+                'col' => 'col-12 col-md-6',
+            ],
+            [
+                'name' => 'type',
+                'label' => '类型',
+                'type' => 'select',
+                'required' => true,
+                'options' => $typeOptions,
+                'default' => $agent?->type ?? '',
+                'col' => 'col-12 col-md-6',
+            ],
+            [
+                'name' => 'class',
+                'label' => 'Agent 类名',
+                'type' => 'text',
+                'required' => true,
+                'placeholder' => '例如：App\Service\AiAgent\AuditAgent',
+                'default' => $agent?->class ?? '',
+                'help' => '完整的类名，包含命名空间',
+                'col' => 'col-12 col-md-6',
+            ],
+            [
+                'name' => 'description',
+                'label' => '描述',
+                'type' => 'textarea',
+                'required' => false,
+                'placeholder' => '请输入 Agent 描述',
+                'default' => $agent?->description ?? '',
+                'rows' => 3,
+                'col' => 'col-12',
+            ],
+            [
+                'name' => 'icon',
+                'label' => '图标',
+                'type' => 'text',
+                'required' => false,
+                'placeholder' => 'Bootstrap Icons 类名，例如：bi-robot',
+                'default' => $agent?->icon ?? '',
+                'help' => '使用 Bootstrap Icons',
+                'col' => 'col-12 col-md-6',
+            ],
+            [
+                'name' => 'config',
+                'label' => '配置 (JSON)',
+                'type' => 'textarea',
+                'required' => false,
+                'placeholder' => '{"key": "value"}',
+                'default' => $agent ? json_encode($agent->config, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT) : '',
+                'rows' => 8,
+                'help' => 'JSON 格式的配置信息',
+                'col' => 'col-12 col-md-6',
+            ],
+            [
+                'name' => 'is_default',
+                'label' => '是否默认',
+                'type' => 'switch',
+                'required' => false,
+                'onValue' => '1',
+                'offValue' => '0',
+                'default' => $agent?->is_default ?? '0',
+                'help' => '设为默认后，系统将优先使用此 Agent',
+                'col' => 'col-12 col-md-4',
+            ],
+            [
+                'name' => 'status',
+                'label' => '状态',
+                'type' => 'switch',
+                'required' => false,
+                'onValue' => '1',
+                'offValue' => '0',
+                'default' => $agent?->status ?? '1',
+                'col' => 'col-12 col-md-4',
+            ],
+            [
+                'name' => 'sort',
+                'label' => '排序',
+                'type' => 'number',
+                'required' => false,
+                'placeholder' => '数字越小越靠前',
+                'default' => $agent?->sort ?? 0,
+                'col' => 'col-12 col-md-4',
+            ],
+        ];
+
+        return $fields;
+    }
 }

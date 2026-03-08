@@ -2,99 +2,65 @@
 
 @section('title', '新增 AI Agent')
 
+@if (! ($isEmbedded ?? false))
+@push('admin_sidebar')
+    @include('admin.components.sidebar')
+@endpush
+@push('admin_navbar')
+    @include('admin.components.navbar')
+@endpush
+@endif
+
 @section('content')
-<div class="page-header">
-    <h1>新增 AI Agent</h1>
-    <div class="actions">
-        <a href="{{ admin_route('system/ai-agents') }}" class="btn btn-secondary">返回列表</a>
+<div class="container-fluid py-4">
+    <div class="mb-3">
+        <h6 class="mb-1 fw-bold">新增 AI Agent</h6>
+        <small class="text-muted">创建新的 AI Agent 配置</small>
+    </div>
+
+    <div class="card border-0 shadow-sm">
+        <div class="card-body">
+            <div class="d-flex align-items-center gap-2 text-muted mb-3" id="agentFormLoading">
+                <div class="spinner-border spinner-border-sm" role="status"></div>
+                <span>表单配置加载中，请稍候...</span>
+            </div>
+            <form id="agentForm" class="d-none">
+                <div class="row" id="agentFormFields"></div>
+            </form>
+        </div>
     </div>
 </div>
 
-<div class="card">
-    <div class="card-body">
-        <form id="agent-form" method="POST" action="{{ admin_route('system/ai-agents') }}">
-            @csrf
-            <div class="row">
-                <div class="col-md-6">
-                    <div class="form-group">
-                        <label>Agent名称 <span class="text-danger">*</span></label>
-                        <input type="text" name="name" class="form-control" required>
-                    </div>
-                </div>
-                <div class="col-md-6">
-                    <div class="form-group">
-                        <label>Agent标识 <span class="text-danger">*</span></label>
-                        <input type="text" name="slug" class="form-control" required placeholder="例如：audit-agent">
-                    </div>
-                </div>
-            </div>
-
-            <div class="row">
-                <div class="col-md-6">
-                    <div class="form-group">
-                        <label>类型 <span class="text-danger">*</span></label>
-                        <select name="type" class="form-control" required>
-                            @foreach($types as $key => $label)
-                            <option value="{{ $key }}">{{ $label }}</option>
-                            @endforeach
-                        </select>
-                    </div>
-                </div>
-                <div class="col-md-6">
-                    <div class="form-group">
-                        <label>Agent类名 <span class="text-danger">*</span></label>
-                        <input type="text" name="class" class="form-control" required placeholder="例如：App\Service\AiAgent\AuditAgent">
-                    </div>
-                </div>
-            </div>
-
-            <div class="form-group">
-                <label>描述</label>
-                <textarea name="description" class="form-control" rows="3"></textarea>
-            </div>
-
-            <div class="form-group">
-                <label>图标</label>
-                <input type="text" name="icon" class="form-control" placeholder="图标类名或URL">
-            </div>
-
-            <div class="form-group">
-                <label>配置 (JSON)</label>
-                <textarea name="config" class="form-control" rows="5" placeholder='{"key": "value"}'></textarea>
-            </div>
-
-            <div class="row">
-                <div class="col-md-4">
-                    <div class="form-group">
-                        <label>是否默认</label>
-                        <select name="is_default" class="form-control">
-                            <option value="0">否</option>
-                            <option value="1">是</option>
-                        </select>
-                    </div>
-                </div>
-                <div class="col-md-4">
-                    <div class="form-group">
-                        <label>状态</label>
-                        <select name="status" class="form-control">
-                            <option value="1">启用</option>
-                            <option value="0">禁用</option>
-                        </select>
-                    </div>
-                </div>
-                <div class="col-md-4">
-                    <div class="form-group">
-                        <label>排序</label>
-                        <input type="number" name="sort" class="form-control" value="0">
-                    </div>
-                </div>
-            </div>
-
-            <div class="form-actions">
-                <button type="submit" class="btn btn-primary">保存</button>
-                <a href="{{ admin_route('system/ai-agents') }}" class="btn btn-secondary">取消</a>
-            </div>
-        </form>
-    </div>
-</div>
+@include('admin.components.fixed-bottom-actions', [
+    'infoText' => '填写完成后点击保存按钮提交',
+    'cancelUrl' => admin_route('system/ai-agents'),
+    'submitText' => '保存',
+    'formId' => 'agentForm',
+    'submitBtnId' => 'submitBtn'
+])
 @endsection
+
+@push('admin_scripts')
+@include('components.admin-script', ['path' => '/js/components/universal-form-renderer.js'])
+<script>
+window.AiAgentFormPage = {
+    formSchema: @json($formSchemaJson)
+};
+
+document.addEventListener('DOMContentLoaded', function () {
+    if (typeof window.UniversalFormRenderer !== 'function') {
+        console.error('[AiAgentForm] UniversalFormRenderer 未正确加载');
+        return;
+    }
+    
+    var renderer = new UniversalFormRenderer({
+        schema: window.AiAgentFormPage.formSchema,
+        config: {},
+        formId: 'agentForm',
+        fieldsWrapperSelector: '#agentFormFields',
+        submitButtonId: 'submitBtn',
+        loadingIndicatorId: 'agentFormLoading'
+    });
+});
+</script>
+@endpush

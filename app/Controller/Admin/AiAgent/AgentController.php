@@ -59,9 +59,17 @@ class AgentController extends AbstractController
     #[GetMapping(path: 'create')]
     public function create()
     {
+        $fields = $this->service->getFormFields('create');
+        $formSchema = [
+            'title' => '新增 AI Agent',
+            'fields' => $fields,
+            'submitUrl' => admin_route('system/ai-agents'),
+            'method' => 'POST',
+            'redirectUrl' => admin_route('system/ai-agents'),
+        ];
+
         return $this->renderAdmin('admin.system.ai-agent.agent.create', [
-            'types' => AiAgent::getTypes(),
-            'statuses' => AiAgent::getStatuses(),
+            'formSchemaJson' => json_encode($formSchema, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
         ]);
     }
 
@@ -86,10 +94,18 @@ class AgentController extends AbstractController
             throw new BusinessException(ErrorCode::NOT_FOUND, 'Agent不存在');
         }
 
+        $fields = $this->service->getFormFields('update', $agent);
+        $formSchema = [
+            'title' => '编辑 AI Agent',
+            'fields' => $fields,
+            'submitUrl' => admin_route("system/ai-agents/{$id}"),
+            'method' => 'PUT',
+            'redirectUrl' => admin_route('system/ai-agents'),
+        ];
+        
         return $this->renderAdmin('admin.system.ai-agent.agent.edit', [
             'agent' => $agent,
-            'types' => AiAgent::getTypes(),
-            'statuses' => AiAgent::getStatuses(),
+            'formSchemaJson' => json_encode($formSchema, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
         ]);
     }
 
