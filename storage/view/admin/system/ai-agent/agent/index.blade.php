@@ -113,19 +113,6 @@
                         'actions' => [
                             [
                                 'type' => 'link',
-                                'href' => admin_route('system/ai-agents') . '/create',
-                                'icon' => 'bi-plus',
-                                'variant' => 'primary',
-                                'title' => '新增',
-                                'attributes' => [
-                                    'data-iframe-shell-trigger' => 'ai-agent-create',
-                                    'data-iframe-shell-src' => admin_route('system/ai-agents') . '/create',
-                                    'data-iframe-shell-title' => '新增 AI Agent',
-                                    'data-iframe-shell-channel' => 'ai-agent',
-                                ],
-                            ],
-                            [
-                                'type' => 'link',
                                 'href' => admin_route('system/ai-agents') . '/{id}/edit',
                                 'icon' => 'bi-pencil',
                                 'variant' => 'warning',
@@ -135,6 +122,7 @@
                                     'data-iframe-shell-src' => admin_route('system/ai-agents') . '/{id}/edit',
                                     'data-iframe-shell-title' => '编辑 AI Agent',
                                     'data-iframe-shell-channel' => 'ai-agent',
+                                    'data-iframe-shell-hide-actions' => 'true'
                                 ],
                             ],
                             [
@@ -145,7 +133,29 @@
                                 'title' => '删除',
                             ],
                         ],
+                        'visible' => true,
+                        'width' => '120',
+                        'class' => 'sticky-column',
+                        'toggleable' => false,
                     ],
+                ],
+                'data' => [],
+                'emptyMessage' => '暂无 AI Agent 数据',
+                'leftButtons' => [
+                    [
+                        'type' => 'link',
+                        'href' => admin_route('system/ai-agents/create'),
+                        'text' => '新增 AI Agent',
+                        'icon' => 'bi-plus-lg',
+                        'variant' => 'primary',
+                        'attributes' => [
+                            'data-iframe-shell-trigger' => 'ai-agent-create',
+                            'data-iframe-shell-src' => admin_route('system/ai-agents/create'),
+                            'data-iframe-shell-title' => '新增 AI Agent',
+                            'data-iframe-shell-channel' => 'ai-agent',
+                            'data-iframe-shell-hide-actions' => 'true'
+                        ]
+                    ]
                 ],
             ])
         </div>
