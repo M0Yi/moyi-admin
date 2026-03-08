@@ -22,8 +22,12 @@ class AgentSessionController extends AbstractController
     protected AiAgentSessionService $service;
 
     #[GetMapping(path: '')]
-    public function index(RequestInterface $request)
-    {
+    public function index(RequestInterface $request)\s{
+        // 如果是 AJAX 请求，返回 JSON 数据
+        if ($request->input('_ajax') === '1' || $request->input('format') === 'json') {
+            return $this->listData($request);
+        }
+
         $params = $request->all();
         $params['site_id'] = $request->input('site_id');
 
@@ -72,5 +76,27 @@ class AgentSessionController extends AbstractController
         $result = $this->service->delete($id);
 
         return $this->success($result, '删除成功');
+    }
+
+
+    /**
+     * 获取列表数据（AJAX）
+     */
+    public function listData(RequestInterface $request)
+    {
+        $params = $request->all();
+        $params['site_id'] = $request->input('site_id');
+
+        $result = $this->service->getList($params);
+
+        return $this->success([
+            'data' => $result['data'] ?? [],
+            'total' => $result['total'] ?? 0,
+            'page' => $result['page'] ?? 1,
+            'page_size' => $result['page_size'] ?? 15,
+            'last_page' => isset($result['page_size']) && $result['page_size'] > 0 
+                ? (int) ceil(($result['total'] ?? 0) / $result['page_size']) 
+                : 1,
+        ]);
     }
 }
