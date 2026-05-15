@@ -1,0 +1,117 @@
+/**
+ * 建辉慈善基金会 - 全局主题配置
+ *
+ * 使用CSS变量定义主题颜色，方便统一管理和修改
+ * 修改这里的变量值，全局颜色会自动更新
+ */
+
+:root {
+  // ========== 主品牌色 ==========
+  --color-primary: #ff5000;           // 主色 - 导航栏背景、主按钮
+  --color-primary-light: #ff6a1f;     // 主色亮色 - hover状态
+  --color-primary-dark: #e64500;      // 主色深色 - 点击状态
+  --color-primary-lighter: #fff0ea;   // 主色极浅色 - 背景高亮
+
+  // ========== 辅助色 ==========
+  --color-secondary: #C8161D;         // 辅助色 - 原来的红色，保留用于强调
+  --color-accent: #E63946;            // 强调色
+
+  // ========== 中性色 ==========
+  --color-text-primary: #111827;      // 主要文字
+  --color-text-secondary: #374151;    // 次要文字
+  --color-text-tertiary: #6b7280;     // 三级文字
+  --color-text-placeholder: #9ca3af;  // 占位文字
+
+  // ========== 背景色 ==========
+  --color-bg-primary: #ffffff;        // 主背景
+  --color-bg-secondary: #f9fafb;      // 次背景
+  --color-bg-tertiary: #f3f4f6;       // 三级背景
+  --color-bg-gray: #e5e7eb;           // 灰色背景
+
+  // ========== 边框色 ==========
+  --color-border-light: #f3f4f6;      // 浅边框
+  --color-border: #e5e7eb;            // 标准边框
+  --color-border-dark: #d1d5db;       // 深边框
+
+  // ========== 功能色 ==========
+  --color-success: #10b981;           // 成功
+  --color-success-light: #d1fae5;     // 成功浅色
+  --color-warning: #f59e0b;           // 警告
+  --color-warning-light: #fef3c7;     // 警告浅色
+  --color-error: #ef4444;             // 错误
+  --color-error-light: #fee2e2;       // 错误浅色
+  --color-info: #3b82f6;              // 信息
+  --color-info-light: #dbeafe;        // 信息浅色
+
+  // ========== 阴影 ==========
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  --shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.1);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1);
+  --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+
+  // ========== 圆角 ==========
+  --radius-sm: 4px;
+  --radius: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+
+  // ========== 间距 ==========
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing: 12px;
+  --spacing-md: 16px;
+  --spacing-lg: 24px;
+  --spacing-xl: 32px;
+  --spacing-2xl: 48px;
+
+  // ========== 字体 ==========
+  --font-xs: 12px;
+  --font-sm: 13px;
+  --font-base: 14px;
+  --font-md: 15px;
+  --font-lg: 16px;
+  --font-xl: 18px;
+  --font-2xl: 20px;
+  --font-3xl: 24px;
+  --font-4xl: 32px;
+  --font-5xl: 40px;
+
+  // ========== 过渡 ==========
+  --transition-fast: 0.15s;
+  --transition: 0.2s;
+  --transition-slow: 0.25s;
+  --transition-slower: 0.3s;
+}
+
+// ========== 主题色混合辅助函数 ==========
+@function primary($opacity: 1) {
+  @return rgba(255, 80, 0, $opacity);
+}
+
+// ========== 主题工具类 ==========
+.bg-primary {
+  background-color: var(--color-primary);
+}
+
+.bg-primary-lighter {
+  background-color: var(--color-primary-lighter);
+}
+
+.text-primary {
+  color: var(--color-primary);
+}
+
+.border-primary {
+  border-color: var(--color-primary);
+}
+
+// ========== 渐变背景 ==========
+.gradient-primary {
+  background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-light) 100%);
+}
+
+.gradient-primary-reverse {
+  background: linear-gradient(135deg, var(--color-primary-light) 0%, var(--color-primary) 100%);
+}

@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>API Test</title>
+</head>
+<body>
+  <h1>API Test</h1>
+  <div id="result">Loading...</div>
+  <script>
+    fetch('/api/v1/articles?per_page=5')
+      .then(res => res.json())
+      .then(data => {
+        document.getElementById('result').innerHTML = `
+          <p>Total: ${data.data.items.length}</p>
+          <ul>
+            ${data.data.items.map(item => `<li>${item.title}</li>`).join('')}
+          </ul>
+        `
+      })
+      .catch(err => {
+        document.getElementById('result').textContent = 'Error: ' + err.message
+      })
+  </script>
+</body>
+</html>

@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>清理轮播图</title>
+</head>
+<body>
+    <h1>轮播图清理工具</h1>
+    <button onclick="cleanupSlides()">清理轮播图（只保留ID=1）</button>
+    <div id="result"></div>
+
+    <script>
+    function cleanupSlides() {
+        fetch('http://localhost:6501/api/v1/slides?cleanup=1', {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            document.getElementById('result').innerHTML = '<pre>' + JSON.stringify(data, null, 2) + '</pre>';
+        })
+        .catch(error => {
+            document.getElementById('result').innerHTML = '<p style="color: red;">错误: ' + error + '</p>';
+        });
+    }
+
+    // 自动执行清理
+    window.onload = function() {
+        console.log('页面加载完成，准备执行清理...');
+        setTimeout(cleanupSlides, 1000);
+    };
+    </script>
+</body>
+</html>

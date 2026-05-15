@@ -1,0 +1,116 @@
+/**
+ * 全局样式
+ */
+
+// 引入主题配置
+@import './theme.scss';
+
+// ========== 全局重置 ==========
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  font-family: "Chiron GoRound TC WS", 'PingFang SC', 'Hiragino Sans GB',
+    'Microsoft YaHei', sans-serif;
+  font-weight: 400;
+  line-height: 1.6;
+  color: var(--color-text-primary);
+  background-color: var(--color-bg-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  transition: font-family 0.3s ease;
+}
+
+// 标题使用粗体
+h1, h2, h3, h4, h5, h6 {
+  font-family: "Chiron GoRound TC WS", 'PingFang SC', 'Hiragino Sans GB',
+    'Microsoft YaHei', sans-serif;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+// 粗体文字
+b, strong {
+  font-family: "Chiron GoRound TC WS", 'PingFang SC', sans-serif;
+  font-weight: 700;
+}
+
+// 按钮和链接字体
+button, .el-button, a {
+  font-family: "Chiron GoRound TC WS", 'PingFang SC', sans-serif;
+  font-weight: 500;
+}
+
+// 数字字体优化（用于统计数据、金额等）
+.number, .stat-number, .price, .amount {
+  font-family: "Chiron GoRound TC WS", 'PingFang SC', -apple-system,
+    BlinkMacSystemFont, sans-serif;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+// ========== 移除默认outline和focus样式 ==========
+a,
+button,
+input,
+textarea,
+select,
+[tabindex]:focus {
+  outline: none !important;
+}
+
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+// ========== 链接样式 ==========
+a {
+  color: var(--color-primary);
+  text-decoration: none;
+  transition: color var(--transition);
+
+  &:hover {
+    color: var(--color-primary-light);
+  }
+}
+
+// ========== 滚动条样式 ==========
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-bg-secondary);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-bg-gray);
+  border-radius: var(--radius);
+
+  &:hover {
+    background: var(--color-border-dark);
+  }
+}
+
+// ========== 选中效果 ==========
+::selection {
+  background-color: var(--color-primary);
+  color: #ffffff;
+}

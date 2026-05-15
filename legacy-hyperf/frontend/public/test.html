@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>建辉慈善基金会 - 测试</title>
+</head>
+<body>
+  <div id="app">
+    <h1>{{ message }}</h1>
+    <p>当前时间: {{ currentTime }}</p>
+    <el-button type="primary" @click="showAlert">点击测试</el-button>
+  </div>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "vue": "https://unpkg.com/vue@3/dist/vue.esm-browser.js",
+      "element-plus": "https://unpkg.com/element-plus/dist/index.full.min.mjs",
+      "element-plus/dist/index.css": "https://unpkg.com/element-plus/dist/index.css"
+    }
+  }
+  </script>
+
+  <script type="module">
+    import { createApp, ref } from 'vue'
+    import ElementPlus from 'element-plus'
+
+    const app = createApp({
+      setup() {
+        const message = ref('建辉慈善基金会 - 功能正常！')
+        const currentTime = ref(new Date().toLocaleString())
+        const showAlert = () => {
+          ElementPlus.ElMessage.success('前端功能正常！')
+        }
+
+        return {
+          message,
+          currentTime,
+          showAlert
+        }
+      }
+    })
+
+    app.use(ElementPlus)
+    app.mount('#app')
+  </script>
+</body>
+</html>

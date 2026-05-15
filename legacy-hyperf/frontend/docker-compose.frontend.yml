@@ -1,0 +1,15 @@
+services:
+  moyi-admin-frontend:
+    container_name: moyi-admin-frontend
+    image: moyi-admin-frontend
+    ports:
+      - "80:80"
+    environment:
+      - BACKEND_API_URL=http://localhost:6501
+    restart: unless-stopped
+    networks:
+      - moyi-frontend
+
+networks:
+  moyi-frontend:
+    external: false

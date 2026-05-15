@@ -1,0 +1,62 @@
+# docker-compose.yml
+# 说明：定义前端、后端应用、Redis、MySQL 服务及网络/数据卷。
+# 使用场景：本地开发或测试，生产请调整安全与持久化策略。
+services:
+  moyi-admin-frontend:
+    # 前端服务（Vue 3 + Vite + Nginx）
+    container_name: moyi-admin-frontend
+    image: moyi-admin-frontend
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "${FRONTEND_PORT:-3100}:80"        # 前端服务端口（默认3100）
+    networks:
+      - moyi
+    depends_on:
+      - moyi-admin
+    restart: unless-stopped
+    environment:
+      - BACKEND_API_URL=http://moyi-admin:${BACKEND_PORT:-6501}
+
+  moyi-admin:
+    # 主应用服务（Hyperf 框架）
+    container_name: moyi-admin
+    image: moyi-admin
+    build:
+      context: .
+    ports:
+      - "${BACKEND_PORT:-6501}:6501"     # 后端服务端口（默认6501）
+    networks:
+      - moyi
+
+  redis:
+    # Redis 缓存服务
+    image: redis:7-alpine
+    container_name: redis
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    networks:
+      - moyi
+
+  mysql:
+    # MySQL（MariaDB）数据库服务
+    image: mariadb:11
+    container_name: mysql
+    environment:
+      - MARIADB_ALLOW_EMPTY_ROOT_PASSWORD=yes
+      - MARIADB_ROOT_HOST=%
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./docker/mysql-init:/docker-entrypoint-initdb.d
+    networks:
+      - moyi
+
+networks:
+  moyi:
+    external: false
+
+volumes:
+  redis-data:
+  mysql-data:
