@@ -1,6 +1,21 @@
 package api
 
-import "net/http"
+import (
+	"html/template"
+	"net/http"
+	"strings"
+)
+
+type publicHomeData struct {
+	SiteName          string
+	PublicTagline     string
+	PublicHeadline    string
+	PublicDescription string
+	AdminLoginPath    string
+	DebugLoginEnabled bool
+	DebugUsername     string
+	DebugPassword     string
+}
 
 func homeHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -9,19 +24,39 @@ func homeHandler() http.HandlerFunc {
 			return
 		}
 
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(homeHTML()))
+		renderPublicHome(w, publicHomeDataFromState(installState{
+			SiteName: "Moyi Admin",
+			System:   defaultSystemConfig(),
+		}))
 	}
 }
 
-func homeHTML() string {
-	return `<!doctype html>
+func publicHomeDataFromState(state installState) publicHomeData {
+	system := state.System.normalized()
+	siteName := strings.TrimSpace(state.SiteName)
+	if siteName == "" {
+		siteName = "Moyi Admin"
+	}
+	return publicHomeData{
+		SiteName:          siteName,
+		PublicTagline:     system.PublicTagline,
+		PublicHeadline:    system.PublicHeadline,
+		PublicDescription: system.PublicDescription,
+	}
+}
+
+func renderPublicHome(w http.ResponseWriter, data publicHomeData) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_ = publicHomeTemplate.Execute(w, data)
+}
+
+var publicHomeTemplate = template.Must(template.New("public-home").Parse(`<!doctype html>
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Moyi Admin 项目进展</title>
+  <title>{{.SiteName}} 项目进展</title>
   <style>
     :root {
       color-scheme: light;
@@ -121,6 +156,20 @@ func homeHTML() string {
       color: var(--dark);
       font-size: 13px;
       font-weight: 700;
+    }
+
+    .top-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .admin-link.primary {
+      background: var(--dark);
+      color: #ffffff;
+      border-color: var(--dark);
     }
 
     .hero {
@@ -283,6 +332,19 @@ func homeHTML() string {
       color: var(--warn);
     }
 
+    .mono {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      overflow-wrap: anywhere;
+      white-space: normal;
+    }
+
+    .debug-note {
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
     .timeline {
       display: grid;
       grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -352,6 +414,12 @@ func homeHTML() string {
         color: var(--text);
       }
 
+      .admin-link.primary {
+        background: #e7eeee;
+        border-color: #e7eeee;
+        color: #101716;
+      }
+
       .hero {
         background: linear-gradient(180deg, #141d1c 0%, #101716 100%);
       }
@@ -407,6 +475,10 @@ func homeHTML() string {
       .brand-text span {
         display: none;
       }
+
+      .top-actions {
+        gap: 8px;
+      }
     }
   </style>
 </head>
@@ -416,26 +488,65 @@ func homeHTML() string {
       <div class="brand">
         <div class="logo">M</div>
         <div class="brand-text">
-          <strong>Moyi Admin</strong>
-          <span>Go + AI 重构进行中</span>
+          <strong>{{.SiteName}}</strong>
+          <span>{{.PublicTagline}}</span>
         </div>
       </div>
-      <a class="admin-link" href="/api/version">服务状态</a>
+      <div class="top-actions">
+        {{if .AdminLoginPath}}<a class="admin-link primary" href="{{.AdminLoginPath}}">进入后台</a>{{end}}
+        <a class="admin-link" href="/api/version">服务状态</a>
+      </div>
     </header>
 
     <section class="hero">
       <div class="hero-inner">
         <div class="eyebrow">AI-native Admin / Project Progress</div>
-        <h1>Moyi Admin 正在从传统 CRUD 后台，重构为 Go 驱动的 AI 数据工作台。</h1>
-        <p class="lead">这个页面用于公开展示项目方向、当前进展和下一阶段计划。后台管理入口会独立登录，后续承载数据源、智能查询、导出、报告和审计能力。</p>
+        <h1>{{.PublicHeadline}}</h1>
+        <p class="lead">{{.PublicDescription}}</p>
         <div class="hero-actions">
-          <a class="button primary" href="/api/version">查看服务状态</a>
+          {{if .AdminLoginPath}}<a class="button primary" href="{{.AdminLoginPath}}">进入后台管理</a>{{end}}
+          <a class="button secondary" href="/api/version">查看服务状态</a>
           <a class="button secondary" href="/healthz">健康检查</a>
         </div>
       </div>
     </section>
 
     <main class="content">
+      {{if .AdminLoginPath}}
+        <section aria-label="调试入口">
+          <article class="panel">
+            <div class="panel-head">
+              <h2>调试后台入口</h2>
+              <span class="badge">Debug</span>
+            </div>
+            <div class="stack">
+              <div class="row">
+                <div class="label">
+                  <strong>后台地址</strong>
+                  <span class="mono">{{.AdminLoginPath}}</span>
+                </div>
+                <a class="admin-link" href="{{.AdminLoginPath}}">打开</a>
+              </div>
+              {{if .DebugLoginEnabled}}
+                <div class="row">
+                  <div class="label">
+                    <strong>默认账号</strong>
+                    <span class="mono">{{.DebugUsername}}</span>
+                  </div>
+                </div>
+                <div class="row">
+                  <div class="label">
+                    <strong>默认密码</strong>
+                    <span class="mono">{{.DebugPassword}}</span>
+                    <span class="debug-note">登录页会自动填充账号密码，仅用于本地调试环境。</span>
+                  </div>
+                </div>
+              {{end}}
+            </div>
+          </article>
+        </section>
+      {{end}}
+
       <section class="grid" aria-label="项目内容">
         <article class="panel">
           <div class="panel-head">
@@ -528,5 +639,4 @@ func homeHTML() string {
     </main>
   </div>
 </body>
-</html>`
-}
+</html>`))

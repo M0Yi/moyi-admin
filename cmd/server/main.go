@@ -22,7 +22,7 @@ func main() {
 
 	server := &http.Server{
 		Addr:         cfg.HTTPAddr,
-		Handler:      api.NewRouter(api.RouterOptions{Logger: logger, AdminEntry: cfg.AdminEntry, AdminUsername: cfg.AdminUsername, AdminPassword: cfg.AdminPassword, SessionSecret: cfg.SessionSecret, InstallStateFile: cfg.InstallStateFile}),
+		Handler:      api.NewRouter(api.RouterOptions{Logger: logger, Env: cfg.Env, AdminEntry: cfg.AdminEntry, AdminUsername: cfg.AdminUsername, AdminPassword: cfg.AdminPassword, SessionSecret: cfg.SessionSecret, InstallStateFile: cfg.InstallStateFile}),
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  60 * time.Second,

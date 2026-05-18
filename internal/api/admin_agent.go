@@ -25,9 +25,11 @@ const defaultAgentTimeout = 18 * time.Second
 var agentHTTPClient = &http.Client{Timeout: defaultAgentTimeout}
 
 type agentChatRequest struct {
-	SessionID string             `json:"session_id,omitempty"`
-	Message   string             `json:"message"`
-	History   []agentChatMessage `json:"history,omitempty"`
+	SessionID       string             `json:"session_id,omitempty"`
+	Message         string             `json:"message"`
+	History         []agentChatMessage `json:"history,omitempty"`
+	TableAccessMode string             `json:"-"`
+	AllowedTables   []string           `json:"-"`
 }
 
 type agentChatMessage struct {
@@ -44,6 +46,7 @@ type agentChatResponse struct {
 	Files       []agentFileResult `json:"files,omitempty"`
 	ModelUsed   bool              `json:"model_used"`
 	Error       string            `json:"error,omitempty"`
+	ModelError  string            `json:"-"`
 }
 
 type agentRun struct {
@@ -94,9 +97,10 @@ type agentToolResult struct {
 }
 
 type agentRuntimeSnapshot struct {
-	Sessions    []agentSessionRecord
-	Runs        []agentRunRecord
-	ToolResults []agentToolResultRecord
+	Sessions       []agentSessionRecord
+	Runs           []agentRunRecord
+	ToolResults    []agentToolResultRecord
+	WeChatMessages []agentWeChatMessageRecord
 }
 
 type agentSessionRecord struct {
@@ -170,8 +174,21 @@ type tableToolProvider struct {
 	state            installState
 	exportDir        string
 	downloadBasePath string
+	allowedTables    map[string]struct{}
+	denyAllTables    bool
 	auditEvents      []adminAuditEvent
+	notifications    []adminNotificationDeliveryRecord
+	adminSessions    []adminSessionRecord
+	backgroundTasks  []adminBackgroundTaskRecord
+	backgroundLogs   []adminBackgroundTaskLogRecord
+	schemaSnapshots  []adminSchemaSnapshotRecord
+	settingChanges   []adminSettingChangeRecord
 	runtime          agentRuntimeSnapshot
+}
+
+type agentQueryScope struct {
+	Mode   string
+	Tables []string
 }
 
 type agentExportFormat struct {
@@ -183,6 +200,7 @@ type agentExportFormat struct {
 type agentExportSheet struct {
 	Table   string              `json:"table"`
 	Columns []string            `json:"columns"`
+	Headers []string            `json:"headers,omitempty"`
 	Rows    []map[string]string `json:"rows"`
 }
 
@@ -205,6 +223,7 @@ const (
 	agentIntentHealth       agentIntent = "system_review"
 	agentIntentDesign       agentIntent = "agent_design"
 	agentIntentUserAccess   agentIntent = "user_access"
+	agentIntentAccessScope  agentIntent = "access_scope"
 )
 
 var simpleSelectPattern = regexp.MustCompile(`(?i)^\s*select\s+(.+?)\s+from\s+([a-zA-Z_][a-zA-Z0-9_]*)(?:\s+limit\s+(\d+))?\s*$`)
@@ -300,6 +319,9 @@ func (s *adminServer) aiChat(w http.ResponseWriter, r *http.Request) {
 		StatusCode: statusCode,
 		Duration:   duration,
 	})
+	if response.ModelError != "" {
+		s.notifyAdminEvent(r, state, state.Notifications.normalized().EventAIErrors, "ai_model_error", "AI 模型调用异常", "智能体任务已降级为本地工具回复。模式："+response.Run.Mode+"，错误："+response.ModelError)
+	}
 	writeJSON(w, statusCode, response)
 }
 
@@ -340,19 +362,35 @@ func (s *adminServer) aiFileDownload(w http.ResponseWriter, r *http.Request) {
 
 func (s *adminServer) runAgentChat(ctx context.Context, state installState, payload agentChatRequest) agentChatResponse {
 	entry := s.adminEntryForState(state)
+	scope := newAgentQueryScope(payload.TableAccessMode, payload.AllowedTables)
 	tools := newTableToolProvider(state, s.agentExportDir(), entry+"/ai/files", s.listAuditEvents(50))
+	tools = tools.withQueryScope(scope)
 	tools.runtime = agentRuntimeSnapshot{
-		Sessions:    s.listAgentSessions(50),
-		Runs:        s.listAgentRuns(80),
-		ToolResults: s.listAgentToolResults(120),
+		Sessions:       s.listAgentSessions(50),
+		Runs:           s.listAgentRuns(80),
+		ToolResults:    s.listAgentToolResults(120),
+		WeChatMessages: s.listAgentWeChatMessages(120),
 	}
+	tools.notifications = s.listNotificationDeliveries(80)
+	tools.adminSessions = s.listAdminSessions(80)
+	tools.backgroundTasks = s.listBackgroundTasks(80)
+	tools.backgroundLogs = s.listBackgroundTaskLogs(120)
+	tools.schemaSnapshots = s.listSchemaSnapshots(120)
+	tools.settingChanges = s.listSettingChanges(120)
 	intent := determineAgentIntent(payload.Message)
 	results := planAndRunAgentTools(tools, payload.Message)
 	run := buildAgentRun(state, payload.Message, intent, results)
-	fallbackReply := composeLocalAgentReply(payload.Message, run, results)
+	run.Metadata["table_authorization"] = scope.Metadata()
+	fallbackReply := composeLocalAgentReply(payload.Message, run, results, scope.Mode, scope.Tables)
 	files := collectAgentFiles(results)
 
-	modelReply, modelUsed, err := callConfiguredAgentModel(ctx, state.AI, payload, run, results)
+	modelPayload := payload
+	modelPayload.TableAccessMode = scope.Mode
+	modelPayload.AllowedTables = append([]string(nil), scope.Tables...)
+	modelReply, modelUsed, err := "", false, error(nil)
+	if shouldCallAgentModel(intent, results) {
+		modelReply, modelUsed, err = callConfiguredAgentModel(ctx, state.AI, modelPayload, run, results)
+	}
 	if err == nil && strings.TrimSpace(modelReply) != "" {
 		return agentChatResponse{
 			OK:          true,
@@ -365,6 +403,15 @@ func (s *adminServer) runAgentChat(ctx context.Context, state installState, payl
 	}
 	if err != nil && !state.AI.IsDisabled() {
 		fallbackReply += "\n\n模型服务暂时没有返回可用结果，已使用后台本地受控工具完成这次查询。"
+		return agentChatResponse{
+			OK:          true,
+			Reply:       fallbackReply,
+			Run:         run,
+			ToolResults: results,
+			Files:       files,
+			ModelUsed:   false,
+			ModelError:  err.Error(),
+		}
 	}
 
 	return agentChatResponse{
@@ -431,6 +478,32 @@ func agentRunStatus(ok bool) string {
 	return "failed"
 }
 
+func boolText(value bool) string {
+	if value {
+		return "是"
+	}
+	return "否"
+}
+
+func summarizeSchemaSnapshotChecks(checksJSON string) string {
+	var checks []string
+	if err := json.Unmarshal([]byte(strings.TrimSpace(checksJSON)), &checks); err != nil || len(checks) == 0 {
+		return strings.TrimSpace(checksJSON)
+	}
+	if len(checks) > 6 {
+		checks = checks[:6]
+	}
+	return strings.Join(checks, "；")
+}
+
+func shortSchemaHash(hash string) string {
+	hash = strings.TrimSpace(hash)
+	if len(hash) > 12 {
+		return hash[:12]
+	}
+	return hash
+}
+
 func newTableToolProvider(state installState, exportDir string, downloadBasePath string, auditEvents ...[]adminAuditEvent) tableToolProvider {
 	state.Database = state.Database.sanitized()
 	state.AI = state.AI.sanitized()
@@ -446,6 +519,251 @@ func newTableToolProvider(state installState, exportDir string, downloadBasePath
 	}
 }
 
+func (p tableToolProvider) withAllowedTables(tables []string) tableToolProvider {
+	normalized := normalizeAgentAllowedTables(tables)
+	if len(normalized) == 0 {
+		p.allowedTables = nil
+		return p
+	}
+	p.allowedTables = make(map[string]struct{}, len(normalized))
+	for _, table := range normalized {
+		p.allowedTables[table] = struct{}{}
+	}
+	return p
+}
+
+const (
+	agentTableAccessAll    = "all"
+	agentTableAccessTables = "tables"
+	agentTableAccessNone   = "none"
+)
+
+func newAgentQueryScope(mode string, tables []string) agentQueryScope {
+	normalized := normalizeAgentAllowedTables(tables)
+	effective := effectiveAgentTableAccessMode(mode, normalized)
+	if effective != agentTableAccessTables {
+		normalized = nil
+	}
+	return agentQueryScope{
+		Mode:   effective,
+		Tables: append([]string(nil), normalized...),
+	}
+}
+
+func (s agentQueryScope) Metadata() string {
+	switch s.Mode {
+	case agentTableAccessNone:
+		return "none"
+	case agentTableAccessTables:
+		return strings.Join(normalizeAgentAllowedTables(s.Tables), ",")
+	default:
+		return "all"
+	}
+}
+
+func (s agentQueryScope) Instruction() string {
+	normalized := normalizeAgentAllowedTables(s.Tables)
+	switch effectiveAgentTableAccessMode(s.Mode, normalized) {
+	case agentTableAccessNone:
+		return "当前会话禁用了数据表查询，不能读取任何数据表、字段结构或导出数据。"
+	case agentTableAccessAll:
+		return "当前会话明确启用了全部只读表，可读取所有已登记数据表和虚拟表的只读数据。"
+	default:
+		return "当前会话启用了数据表白名单，只允许读取：" + strings.Join(normalized, "、") + "。任何未在白名单内的数据表都必须视为未授权，不能声称拥有读取权限，也不能根据历史记忆补答。"
+	}
+}
+
+func (s agentQueryScope) ReplyNote() string {
+	normalized := normalizeAgentAllowedTables(s.Tables)
+	switch effectiveAgentTableAccessMode(s.Mode, normalized) {
+	case agentTableAccessNone:
+		return "当前通道未启用数据查询，不能读取任何数据表。"
+	case agentTableAccessAll:
+		return "当前通道明确选择了全部只读表，按后台全局只读权限执行。"
+	default:
+		return "当前通道只允许读取：" + strings.Join(normalized, "、") + "。"
+	}
+}
+
+func normalizeAgentTableAccessMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "", "all", "*", "全部", "全部只读":
+		return agentTableAccessAll
+	case "tables", "table", "allowlist", "whitelist", "limited", "指定表", "指定数据表":
+		return agentTableAccessTables
+	case "none", "disabled", "off", "deny", "禁用", "禁用数据查询":
+		return agentTableAccessNone
+	default:
+		return agentTableAccessAll
+	}
+}
+
+func effectiveAgentTableAccessMode(mode string, tables []string) string {
+	mode = normalizeAgentTableAccessMode(mode)
+	if mode == agentTableAccessTables && len(normalizeAgentAllowedTables(tables)) == 0 {
+		return agentTableAccessNone
+	}
+	return mode
+}
+
+func (p tableToolProvider) withTableAccess(mode string, tables []string) tableToolProvider {
+	return p.withQueryScope(newAgentQueryScope(mode, tables))
+}
+
+func (p tableToolProvider) withQueryScope(scope agentQueryScope) tableToolProvider {
+	switch effectiveAgentTableAccessMode(scope.Mode, scope.Tables) {
+	case agentTableAccessNone:
+		p.allowedTables = nil
+		p.denyAllTables = true
+		return p
+	case agentTableAccessTables:
+		return p.withAllowedTables(scope.Tables)
+	default:
+		p.allowedTables = nil
+		p.denyAllTables = false
+		return p
+	}
+}
+
+func normalizeAgentAllowedTables(tables []string) []string {
+	out := make([]string, 0, len(tables))
+	seen := map[string]struct{}{}
+	for _, table := range tables {
+		for _, part := range strings.FieldsFunc(table, func(r rune) bool {
+			return r == ',' || r == '，' || r == '\n' || r == '\r' || r == '\t' || r == ';' || r == '；' || r == ' '
+		}) {
+			name := normalizeAgentTableName(part)
+			if name == "" {
+				continue
+			}
+			if name == "*" || name == "all" || name == "全部" {
+				return nil
+			}
+			if _, ok := seen[name]; ok {
+				continue
+			}
+			seen[name] = struct{}{}
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
+func agentAllowedTablesString(tables []string) string {
+	normalized := normalizeAgentAllowedTables(tables)
+	return strings.Join(normalized, ", ")
+}
+
+func agentAuthorizationMetadata(mode string, tables []string) string {
+	return newAgentQueryScope(mode, tables).Metadata()
+}
+
+func agentAuthorizationInstruction(mode string, tables []string) string {
+	return newAgentQueryScope(mode, tables).Instruction()
+}
+
+func agentAuthorizationReplyNote(mode string, tables []string) string {
+	return newAgentQueryScope(mode, tables).ReplyNote()
+}
+
+func (p tableToolProvider) isTableAuthorized(table string) bool {
+	table = normalizeAgentTableName(table)
+	if p.denyAllTables {
+		return false
+	}
+	if table == "" || len(p.allowedTables) == 0 {
+		return true
+	}
+	_, ok := p.allowedTables[table]
+	return ok
+}
+
+func (p tableToolProvider) authorizedDefinitions() []agentTableDefinition {
+	if p.denyAllTables {
+		return nil
+	}
+	definitions := agentTableDefinitions()
+	if len(p.allowedTables) == 0 {
+		return definitions
+	}
+	out := make([]agentTableDefinition, 0, len(definitions))
+	for _, definition := range definitions {
+		if _, ok := p.allowedTables[definition.Name]; ok {
+			out = append(out, definition)
+		}
+	}
+	return out
+}
+
+func (p tableToolProvider) authorizedTableSummary() string {
+	if p.denyAllTables {
+		return "未授权任何数据表"
+	}
+	definitions := p.authorizedDefinitions()
+	names := make([]string, 0, minInt(len(definitions), 10))
+	known := map[string]struct{}{}
+	for _, definition := range definitions {
+		known[definition.Name] = struct{}{}
+		if len(names) >= 10 {
+			break
+		}
+		names = append(names, definition.Name+"("+definition.DisplayName+")")
+	}
+	if len(p.allowedTables) > 0 && len(names) < 10 {
+		extra := make([]string, 0, len(p.allowedTables))
+		for table := range p.allowedTables {
+			if _, ok := known[table]; ok {
+				continue
+			}
+			extra = append(extra, table)
+		}
+		sort.Strings(extra)
+		for _, table := range extra {
+			if len(names) >= 10 {
+				break
+			}
+			names = append(names, table)
+		}
+	}
+	if len(names) == 0 {
+		return "无授权数据表"
+	}
+	total := len(definitions)
+	if len(p.allowedTables) > 0 && len(p.allowedTables) > total {
+		total = len(p.allowedTables)
+	}
+	if total > len(names) {
+		names = append(names, "等 "+strconv.Itoa(total)+" 张")
+	}
+	return strings.Join(names, "、")
+}
+
+func (p tableToolProvider) unauthorizedTableResult(toolName string, table string) agentToolResult {
+	table = normalizeAgentTableName(table)
+	return agentToolResult{
+		Name:  toolName,
+		OK:    false,
+		Table: table,
+		Error: "当前微信渠道未授权查询 `" + table + "`。已授权：" + p.authorizedTableSummary() + "。",
+	}
+}
+
+func isUnauthorizedAgentResult(result agentToolResult) bool {
+	return !result.OK && strings.Contains(result.Error, "未授权")
+}
+
+func shouldCallAgentModel(intent agentIntent, results []agentToolResult) bool {
+	if intent == agentIntentAccessScope {
+		return false
+	}
+	for _, result := range results {
+		if !result.OK {
+			return false
+		}
+	}
+	return true
+}
+
 func determineAgentIntent(message string) agentIntent {
 	lower := strings.ToLower(strings.TrimSpace(message))
 	if sql, ok := extractAgentSQL(message); ok && strings.HasPrefix(strings.ToLower(sql), "select ") {
@@ -453,6 +771,13 @@ func determineAgentIntent(message string) agentIntent {
 	}
 	if containsAny(lower, "delete", "update", "insert", "drop", "alter", "truncate", "create", "replace", "attach", "detach", "pragma", "vacuum") {
 		return agentIntentGuardrail
+	}
+	if isAgentAccessScopeQuestion(message) {
+		return agentIntentAccessScope
+	}
+	if containsAny(lower, "插件扩展", "扩展包", "插件系统", "资源模型", "资源定义", "crud 生成", "crud生成", "工具生成", "ai 工具生成", "ai工具生成", "resource model", "resource tool", "plugin extension") &&
+		!containsAny(lower, "导出", "表格", "文件", "下载", "发给我", "返回文件", "excel", "xlsx", "csv", "json") {
+		return agentIntentPreview
 	}
 	if containsAny(lower, "codex", "更强", "智能体方案", "智能体构造", "构造方案", "架构", "工作台", "agent os", "agent") ||
 		(strings.Contains(lower, "智能体") && containsAny(lower, "设计", "方案", "调整", "丰富", "核心", "主要内容")) {
@@ -489,6 +814,34 @@ func determineAgentIntent(message string) agentIntent {
 		return agentIntentPreview
 	}
 	return agentIntentAdmin
+}
+
+func isAgentAccessScopeQuestion(message string) bool {
+	lower := strings.ToLower(strings.TrimSpace(message))
+	if lower == "" {
+		return false
+	}
+	if containsAny(lower, "后台权限", "权限表", "权限记录", "角色权限", "菜单权限", "admin_permissions", "permission table", "permissions table") {
+		return false
+	}
+	return containsAny(lower,
+		"我有哪些权限",
+		"我有什么权限",
+		"我的权限",
+		"查询我有哪些权限",
+		"当前权限",
+		"当前通道权限",
+		"这个通道权限",
+		"微信通道权限",
+		"数据权限",
+		"授权数据",
+		"授权了哪些表",
+		"授权了什么表",
+		"可查询哪些表",
+		"可以查询哪些表",
+		"能查哪些表",
+		"可读哪些表",
+	)
 }
 
 func buildAgentRun(state installState, message string, intent agentIntent, results []agentToolResult) agentRun {
@@ -531,6 +884,8 @@ func summarizeAgentGoal(message string, intent agentIntent) string {
 		return "拦截高风险数据操作"
 	case agentIntentUserAccess:
 		return "检查后台账号与权限"
+	case agentIntentAccessScope:
+		return "查看当前会话数据权限"
 	case agentIntentAdmin:
 		return "处理后台管理任务"
 	default:
@@ -564,6 +919,12 @@ func buildAgentPlan(intent agentIntent) []agentPlanStep {
 			{Title: "定位账号表", Detail: "把管理员、账号、权限类问题映射到后台用户与权限表。", Status: "done"},
 			{Title: "读取只读数据", Detail: "查询管理员账号数量、角色和权限边界。", Status: "done"},
 			{Title: "直接回答", Detail: "优先给出明确数量，再展示依据。", Status: "done"},
+		}
+	case agentIntentAccessScope:
+		return []agentPlanStep{
+			{Title: "读取权限快照", Detail: "直接读取本次会话启动时冻结的数据权限，不访问业务数据表。", Status: "done"},
+			{Title: "整理边界", Detail: "说明数据权限模式、可读表数量和授权表清单。", Status: "done"},
+			{Title: "保持只读", Detail: "权限查询不会修改通道配置，也不会触发导出。", Status: "done"},
 		}
 	case agentIntentExport:
 		return []agentPlanStep{
@@ -679,6 +1040,12 @@ func buildAgentInsights(intent agentIntent, results []agentToolResult) []agentIn
 				Detail: "`" + result.Table + "` 的字段已识别，下一步可让智能体基于字段生成只读 SELECT。",
 				Tone:   "info",
 			})
+		case "access_scope":
+			insights = append(insights, agentInsight{
+				Title:  "权限快照已冻结",
+				Detail: result.Message,
+				Tone:   "info",
+			})
 		}
 	}
 	if intent == agentIntentHealth {
@@ -731,6 +1098,12 @@ func buildAgentSuggestions(intent agentIntent, results []agentToolResult) []agen
 			{Label: "菜单入口", Prompt: "预览后台菜单"},
 			{Label: "账号数量", Prompt: "我们后台有几个管理员账号？"},
 		}
+	case agentIntentAccessScope:
+		return []agentSuggestion{
+			{Label: "可读表", Prompt: "列出当前可查询的数据表"},
+			{Label: "数据源", Prompt: "预览数据源配置"},
+			{Label: "导出授权表", Prompt: "把当前授权的数据表清单导出 CSV 发给我"},
+		}
 	case agentIntentExport:
 		return []agentSuggestion{
 			{Label: "导出账号", Prompt: "把管理员账号的账号、角色、状态整理成 XLSX 文件发给我"},
@@ -782,6 +1155,9 @@ func planAndRunAgentTools(tools tableToolProvider, message string) []agentToolRe
 	if intent == agentIntentDesign {
 		return []agentToolResult{tools.inspectAgentDesign()}
 	}
+	if intent == agentIntentAccessScope {
+		return []agentToolResult{tools.accessScopeResult()}
+	}
 	if intent == agentIntentExport {
 		return []agentToolResult{tools.exportTables(message)}
 	}
@@ -793,20 +1169,47 @@ func planAndRunAgentTools(tools tableToolProvider, message string) []agentToolRe
 		}
 	}
 	if intent == agentIntentUserAccess {
-		results := []agentToolResult{
-			tools.countTable("admin_users"),
-			tools.previewTable("admin_users", 20),
-			tools.previewTable("admin_roles", 20),
+		countUsers := tools.countTable("admin_users")
+		if isUnauthorizedAgentResult(countUsers) {
+			return []agentToolResult{countUsers}
+		}
+		previewUsers := tools.previewTable("admin_users", 20)
+		if isUnauthorizedAgentResult(previewUsers) {
+			return []agentToolResult{previewUsers}
+		}
+		results := []agentToolResult{countUsers, previewUsers}
+		roles := tools.previewTable("admin_roles", 20)
+		if roles.OK {
+			results = append(results, roles)
 		}
 		if containsAny(lower, "权限", "permission", "permissions") {
-			results = append(results, tools.previewTable("admin_permissions", 20))
+			permissions := tools.previewTable("admin_permissions", 20)
+			if isUnauthorizedAgentResult(permissions) {
+				return []agentToolResult{permissions}
+			}
+			results = append(results, permissions)
 		}
 		if containsAny(lower, "菜单", "导航", "menu", "menus") {
-			results = append(results, tools.previewTable("admin_menus", 20))
+			menus := tools.previewTable("admin_menus", 20)
+			if isUnauthorizedAgentResult(menus) {
+				return []agentToolResult{menus}
+			}
+			results = append(results, menus)
 		}
 		return results
 	}
 	if intent == agentIntentPreview {
+		tables := inferAgentTablesFromMessage(message)
+		if len(tables) > 1 {
+			results := make([]agentToolResult, 0, len(tables))
+			for i, table := range tables {
+				if i >= 4 {
+					break
+				}
+				results = append(results, tools.previewTable(table, 10))
+			}
+			return results
+		}
 		return []agentToolResult{tools.previewTable(inferAgentTableName(message), 10)}
 	}
 	if containsAny(lower, "字段", "结构", "schema", "describe", "columns") {
@@ -821,7 +1224,7 @@ func planAndRunAgentTools(tools tableToolProvider, message string) []agentToolRe
 	return []agentToolResult{tools.listTables()}
 }
 
-func composeLocalAgentReply(message string, run agentRun, results []agentToolResult) string {
+func composeLocalAgentReply(message string, run agentRun, results []agentToolResult, tableAccessMode string, allowedTables []string) string {
 	successful := make([]agentToolResult, 0, len(results))
 	failed := make([]string, 0)
 	for _, result := range results {
@@ -848,7 +1251,10 @@ func composeLocalAgentReply(message string, run agentRun, results []agentToolRes
 		return "我会把后台的核心体验收敛成智能体工作台：先理解任务，再制定计划，然后通过受控工具读取数据，最后给出洞察、表格结果和下一步动作。当前已经具备计划、工具轨迹、只读查询和模型兜底；下一步应该接入真实数据库 Schema、导出工具和审计记忆。"
 	}
 	if run.Mode == string(agentIntentHealth) {
-		return "系统体检完成：当前智能体能识别受控数据表、检查数据源状态，并展示已启用的工具边界。重点短板是业务库驱动、导出任务和长期记忆还没有接上。"
+		return "系统体检完成：当前智能体能识别受控数据表、检查数据源状态，并展示已启用的工具边界。" + agentAuthorizationReplyNote(tableAccessMode, allowedTables)
+	}
+	if run.Mode == string(agentIntentAccessScope) {
+		return composeAccessScopeReply(results)
 	}
 	if run.Mode == string(agentIntentUserAccess) {
 		count := ""
@@ -867,14 +1273,14 @@ func composeLocalAgentReply(message string, run agentRun, results []agentToolRes
 			count = "0"
 		}
 		if username != "" {
-			return fmt.Sprintf("当前后台管理员账号共 %s 个。已识别内置管理员 `%s`，角色为 %s。智能体现在默认拥有所有已登记数据表的只读读取权限，但仍会拒绝写入和危险 SQL。", count, username, role)
+			return fmt.Sprintf("当前后台管理员账号共 %s 个。已识别内置管理员 `%s`，角色为 %s。%s", count, username, role, agentAuthorizationReplyNote(tableAccessMode, allowedTables))
 		}
-		return fmt.Sprintf("当前后台管理员账号共 %s 个。智能体已按全表只读权限检查后台账号表。", count)
+		return fmt.Sprintf("当前后台管理员账号共 %s 个。%s", count, agentAuthorizationReplyNote(tableAccessMode, allowedTables))
 	}
 	if run.Mode == string(agentIntentExport) {
 		for _, result := range successful {
 			if result.File != nil {
-				return fmt.Sprintf("已按后台只读权限整理数据并生成表格文件 `%s`，可以直接下载。", result.File.Name)
+				return fmt.Sprintf("已按当前通道权限整理数据并生成表格文件 `%s`，可以直接下载。", result.File.Name)
 			}
 		}
 		return "已读取数据，但暂时没有生成可下载文件。"
@@ -894,7 +1300,7 @@ func composeLocalAgentReply(message string, run agentRun, results []agentToolRes
 				}
 			}
 		}
-		return fmt.Sprintf("我已列出当前可查询的受控数据表，共 %d 张，包含中文名称、内部名和表注释：%s。", len(names), strings.Join(names, "、"))
+		return fmt.Sprintf("我已列出当前通道可查询的受控数据表，共 %d 张，包含中文名称、内部名和表注释：%s。", len(names), strings.Join(names, "、"))
 	case "describe_table":
 		return fmt.Sprintf("`%s` 的字段结构已读取，共 %d 个字段。", result.Table, len(result.Rows))
 	case "preview_table":
@@ -909,6 +1315,27 @@ func composeLocalAgentReply(message string, run agentRun, results []agentToolRes
 	default:
 		return "已完成这次后台数据工具调用。"
 	}
+}
+
+func composeAccessScopeReply(results []agentToolResult) string {
+	for _, result := range results {
+		if result.Name != "access_scope" || len(result.Rows) == 0 {
+			continue
+		}
+		row := result.Rows[0]
+		mode := displayFallback(row["mode"], "未知")
+		count := displayFallback(row["table_count"], "0")
+		tables := strings.TrimSpace(row["tables"])
+		summary := strings.TrimSpace(row["summary"])
+		if tables == "" {
+			return "当前会话数据权限：" + mode + "。可读数据表 0 张。权限查询只读取冻结快照，不会修改通道配置。"
+		}
+		if summary == "" {
+			summary = tables
+		}
+		return "当前会话数据权限：" + mode + "。可读数据表 " + count + " 张：" + summary + "。权限查询只读取冻结快照，不会修改通道配置。"
+	}
+	return "当前会话数据权限暂时无法读取。"
 }
 
 func callConfiguredAgentModel(ctx context.Context, ai aiConfig, payload agentChatRequest, run agentRun, results []agentToolResult) (string, bool, error) {
@@ -927,10 +1354,11 @@ func callConfiguredAgentModel(ctx context.Context, ai aiConfig, payload agentCha
 
 	toolContext, _ := json.Marshal(results)
 	runContext, _ := json.Marshal(run)
+	authorizationInstruction := agentAuthorizationInstruction(payload.TableAccessMode, payload.AllowedTables)
 	messages := []map[string]string{
 		{
 			"role":    "system",
-			"content": "你是 Moyi Admin 后台管理员智能体，不是单纯的数据库查询机器人。工作方式参考 Codex：先理解目标，判断是否需要工具，解释计划，调用受控工具，再给出可执行结论。只有任务涉及数据、表、统计、筛选、导出或账号权限时才使用数据工具；普通后台管理咨询不要查询数据库。默认拥有所有已登记数据表和虚拟表的只读读取权限；遇到账号、权限、数量、导出问题要主动查询或生成文件，不要反问用户是否启用模块。只能基于系统提供的 run 与工具结果回答；不要编造数据库内容；不要泄露密钥、密码哈希、盐值或会话信息。回答要简洁、像后台管理里的执行助手。",
+			"content": "你是 Moyi Admin 后台管理员智能体，不是单纯的数据库查询机器人。工作方式参考 Codex：先理解目标，判断是否需要工具，解释计划，调用受控工具，再给出可执行结论。只有任务涉及数据、表、统计、筛选、导出或账号权限时才使用数据工具；普通后台管理咨询不要查询数据库。权限边界：" + authorizationInstruction + " 遇到账号、权限、数量、导出问题要主动查询或生成文件；如果工具结果提示未授权，必须直接说明当前通道无权访问对应表，不要反问用户是否启用模块，也不要继续推测。只能基于系统提供的 run 与工具结果回答；不要编造数据库内容；不要泄露密钥、密码哈希、盐值或会话信息。回答要简洁、像后台管理里的执行助手。",
 		},
 	}
 	for _, history := range tailAgentHistory(payload.History, 6) {
@@ -1012,7 +1440,14 @@ func agentTableDefinitions() []agentTableDefinition {
 			Type:        "derived_view",
 			DisplayName: "后台配置",
 			Description: "后台运行参数与基础配置",
-			Aliases:     []string{"系统配置", "配置项", "设置", "后台设置", "运行参数"},
+			Aliases:     []string{"系统配置", "配置项", "设置", "后台设置", "运行参数", "首页设置", "站点资料", "展示设置"},
+		},
+		{
+			Name:        "setting_change_logs",
+			Type:        "metadata_table",
+			DisplayName: "设置变更记录",
+			Description: "系统设置、存储、AI、安全、通知和任务设置的保存历史与变更摘要",
+			Aliases:     []string{"设置变更", "变更记录", "设置历史", "配置历史", "修改记录", "基础设置记录", "设置日志"},
 		},
 		{
 			Name:        "storage_settings",
@@ -1036,11 +1471,46 @@ func agentTableDefinitions() []agentTableDefinition {
 			Aliases:     []string{"审计日志", "运行日志", "操作日志", "登录日志", "后台日志", "日志事件", "审计事件"},
 		},
 		{
+			Name:        "notification_deliveries",
+			Type:        "metadata_table",
+			DisplayName: "通知发送记录",
+			Description: "后台 Webhook / 飞书机器人通知事件、接收人、发送状态和失败原因",
+			Aliases:     []string{"通知事件", "通知记录", "发送记录", "Webhook 记录", "飞书通知", "飞书机器人", "告警记录", "通知发送"},
+		},
+		{
+			Name:        "background_tasks",
+			Type:        "metadata_table",
+			DisplayName: "后台任务",
+			Description: "后台异步任务、队列状态、尝试次数、执行结果和失败原因",
+			Aliases:     []string{"后台任务", "任务队列", "异步任务", "队列任务", "任务记录", "失败任务", "重试任务"},
+		},
+		{
+			Name:        "task_worker_settings",
+			Type:        "derived_view",
+			DisplayName: "后台任务执行器设置",
+			Description: "后台任务自动执行、扫描间隔、批量数量和定时调度策略",
+			Aliases:     []string{"任务设置", "任务执行器", "worker 设置", "自动执行", "定时调度", "调度设置"},
+		},
+		{
+			Name:        "background_task_logs",
+			Type:        "metadata_table",
+			DisplayName: "后台任务日志",
+			Description: "后台任务入队、开始、成功、失败、重试和取消等生命周期日志",
+			Aliases:     []string{"任务日志", "后台任务日志", "任务生命周期", "执行日志", "队列日志", "重试日志"},
+		},
+		{
 			Name:        "admin_users",
 			Type:        "metadata_table",
 			DisplayName: "后台管理员账号",
 			Description: "后台管理员账号、显示名称、角色和启用状态",
 			Aliases:     []string{"管理员账号", "后台账号", "账号", "账户", "用户", "用户管理", "管理员", "超级管理员账号"},
+		},
+		{
+			Name:        "admin_sessions",
+			Type:        "metadata_table",
+			DisplayName: "后台登录会话",
+			Description: "后台管理员登录会话、来源 IP、到期时间和下线状态",
+			Aliases:     []string{"登录会话", "后台会话", "在线会话", "在线管理员", "会话管理", "session"},
 		},
 		{
 			Name:        "admin_roles",
@@ -1071,6 +1541,34 @@ func agentTableDefinitions() []agentTableDefinition {
 			Aliases:     []string{"数据源", "数据源巡检", "迁移参考", "旧系统比对", "legacy-hyperf", "legacy hyperf"},
 		},
 		{
+			Name:        "schema_snapshots",
+			Type:        "metadata_table",
+			DisplayName: "数据源结构快照",
+			Description: "数据源测试时沉淀的真实表结构、表注释、字段注释、索引和扫描摘要",
+			Aliases:     []string{"结构快照", "Schema 快照", "schema snapshots", "表结构", "表注释", "字段注释", "字段说明", "数据库结构", "结构扫描"},
+		},
+		{
+			Name:        "plugin_extensions",
+			Type:        "computed_view",
+			DisplayName: "插件扩展包",
+			Description: "已登记的插件能力包、资源声明、工具数量和接入状态",
+			Aliases:     []string{"插件扩展", "插件", "扩展包", "能力包", "插件系统", "extension", "plugin", "plugin extension"},
+		},
+		{
+			Name:        "resource_models",
+			Type:        "computed_view",
+			DisplayName: "资源模型",
+			Description: "由插件或核心模块声明的资源、字段、动作和权限边界",
+			Aliases:     []string{"资源模型", "资源定义", "CRUD 生成", "crud", "资源", "模型", "工具生成器", "resource model"},
+		},
+		{
+			Name:        "resource_tools",
+			Type:        "computed_view",
+			DisplayName: "资源工具",
+			Description: "资源模型自动生成的 AI 可调用只读、导出和受控管理工具",
+			Aliases:     []string{"AI 工具生成", "AI工具生成", "工具生成", "资源工具", "CRUD 工具", "工具注册", "tool registry", "resource tool"},
+		},
+		{
 			Name:        "ai_capabilities",
 			Type:        "computed_view",
 			DisplayName: "智能体能力",
@@ -1099,6 +1597,13 @@ func agentTableDefinitions() []agentTableDefinition {
 			Aliases:     []string{"工具结果", "工具调用", "工具轨迹", "AI 工具结果", "agent tool results"},
 		},
 		{
+			Name:        "agent_wechat_messages",
+			Type:        "metadata_table",
+			DisplayName: "微信 Agent 聊天记录",
+			Description: "微信 Agent 通道的用户消息、AI 回复、文件回复、发送状态和错误信息",
+			Aliases:     []string{"微信聊天记录", "微信回复记录", "微信 Agent 记录", "微信通道记录", "聊天归档", "agent wechat messages"},
+		},
+		{
 			Name:        "agent_blueprint",
 			Type:        "computed_view",
 			DisplayName: "智能体构造方案",
@@ -1119,7 +1624,7 @@ func agentTableDefinitionByName(name string) (agentTableDefinition, bool) {
 }
 
 func (p tableToolProvider) listTables() agentToolResult {
-	definitions := agentTableDefinitions()
+	definitions := p.authorizedDefinitions()
 	rows := make([]map[string]string, 0, len(definitions))
 	for _, definition := range definitions {
 		rows = append(rows, map[string]string{
@@ -1132,14 +1637,54 @@ func (p tableToolProvider) listTables() agentToolResult {
 	return agentToolResult{
 		Name:    "list_tables",
 		OK:      true,
-		Message: "已读取当前所有已登记只读数据表列表，包含内部名、中文名称和表注释。",
+		Message: "已读取当前渠道已授权的只读数据表列表，包含内部名、中文名称和表注释。",
 		Columns: []string{"name", "display_name", "type", "comment"},
 		Rows:    rows,
 	}
 }
 
+func (p tableToolProvider) accessScopeResult() agentToolResult {
+	mode := "全部只读表"
+	if p.denyAllTables {
+		mode = "禁用数据查询"
+	} else if len(p.allowedTables) > 0 {
+		mode = "指定数据表"
+	}
+	tables := p.authorizedTableNames()
+	return agentToolResult{
+		Name:    "access_scope",
+		OK:      true,
+		Message: "已读取当前会话冻结的数据权限快照；本次查询不会修改通道配置。",
+		Columns: []string{"mode", "table_count", "tables", "summary"},
+		Rows: []map[string]string{{
+			"mode":        mode,
+			"table_count": strconv.Itoa(len(tables)),
+			"tables":      strings.Join(tables, ","),
+			"summary":     p.authorizedTableSummary(),
+		}},
+	}
+}
+
+func (p tableToolProvider) authorizedTableNames() []string {
+	if p.denyAllTables {
+		return nil
+	}
+	if len(p.allowedTables) == 0 {
+		return knownAgentTables()
+	}
+	names := make([]string, 0, len(p.allowedTables))
+	for table := range p.allowedTables {
+		names = append(names, table)
+	}
+	sort.Strings(names)
+	return names
+}
+
 func (p tableToolProvider) countTable(table string) agentToolResult {
 	table = normalizeAgentTableName(table)
+	if !p.isTableAuthorized(table) {
+		return p.unauthorizedTableResult("count_table", table)
+	}
 	if _, ok := p.tableColumns(table); !ok {
 		return unknownAgentTableResult("count_table", table)
 	}
@@ -1193,6 +1738,9 @@ func (p tableToolProvider) exportTables(message string) agentToolResult {
 	exportedTables := make([]string, 0, len(tables))
 	for _, table := range tables {
 		table = normalizeAgentTableName(table)
+		if !p.isTableAuthorized(table) {
+			return p.unauthorizedTableResult("export_table", table)
+		}
 		columns, ok := p.exportColumnsForMessage(table, message)
 		if !ok {
 			return unknownAgentTableResult("export_table", table)
@@ -1212,6 +1760,7 @@ func (p tableToolProvider) exportTables(message string) agentToolResult {
 		exportData.Sheets = append(exportData.Sheets, agentExportSheet{
 			Table:   table,
 			Columns: columns,
+			Headers: p.exportHeadersForColumns(table, columns),
 			Rows:    sheetRows,
 		})
 		exportData.TotalRows += len(sheetRows)
@@ -1321,7 +1870,7 @@ func writeAgentCSV(filePath string, data agentExportData) (err error) {
 				return err
 			}
 		}
-		header := append([]string{"table"}, sheet.Columns...)
+		header := agentExportSheetHeaders(sheet)
 		if err := writer.Write(header); err != nil {
 			return err
 		}
@@ -1503,7 +2052,7 @@ func agentXLSXWorksheet(sheet agentExportSheet) string {
 	body.WriteString(`<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">`)
 	body.WriteString(`<sheetData>`)
 
-	header := append([]string{"table"}, sheet.Columns...)
+	header := agentExportSheetHeaders(sheet)
 	agentXLSXRow(&body, 1, header)
 	for rowIndex, row := range sheet.Rows {
 		values := make([]string, 0, len(sheet.Columns)+1)
@@ -1517,6 +2066,14 @@ func agentXLSXWorksheet(sheet agentExportSheet) string {
 	body.WriteString(`</sheetData>`)
 	body.WriteString(`</worksheet>`)
 	return body.String()
+}
+
+func agentExportSheetHeaders(sheet agentExportSheet) []string {
+	headers := append([]string(nil), sheet.Headers...)
+	if len(headers) != len(sheet.Columns) {
+		headers = append([]string(nil), sheet.Columns...)
+	}
+	return append([]string{"数据表"}, headers...)
 }
 
 func agentXLSXRow(body *strings.Builder, rowIndex int, values []string) {
@@ -1591,6 +2148,9 @@ func (p tableToolProvider) inspectAgentDesign() agentToolResult {
 
 func (p tableToolProvider) describeTable(table string) agentToolResult {
 	table = normalizeAgentTableName(table)
+	if !p.isTableAuthorized(table) {
+		return p.unauthorizedTableResult("describe_table", table)
+	}
 	columns, ok := p.tableColumns(table)
 	if !ok {
 		return unknownAgentTableResult("describe_table", table)
@@ -1616,6 +2176,9 @@ func (p tableToolProvider) describeTable(table string) agentToolResult {
 
 func (p tableToolProvider) previewTable(table string, limit int) agentToolResult {
 	table = normalizeAgentTableName(table)
+	if !p.isTableAuthorized(table) {
+		return p.unauthorizedTableResult("preview_table", table)
+	}
 	columns, ok := p.tableColumns(table)
 	if !ok {
 		return unknownAgentTableResult("preview_table", table)
@@ -1664,6 +2227,12 @@ func (p tableToolProvider) runReadOnlyQuery(sql string) agentToolResult {
 
 	rawColumns := strings.TrimSpace(matches[1])
 	table := normalizeAgentTableName(matches[2])
+	if !p.isTableAuthorized(table) {
+		result.Table = table
+		result.OK = false
+		result.Error = p.unauthorizedTableResult("query_readonly", table).Error
+		return result
+	}
 	limit := 10
 	if matches[3] != "" {
 		parsedLimit, err := strconv.Atoi(matches[3])
@@ -1742,6 +2311,16 @@ func (p tableToolProvider) tableColumns(table string) ([]agentTableColumn, bool)
 			{Name: "key", Type: "string", Description: "配置项"},
 			{Name: "value", Type: "string", Description: "配置值，敏感字段已屏蔽"},
 		}, true
+	case "setting_change_logs":
+		return []agentTableColumn{
+			{Name: "time", Type: "datetime", Description: "变更时间"},
+			{Name: "category", Type: "string", Description: "设置分组"},
+			{Name: "action", Type: "string", Description: "保存动作"},
+			{Name: "actor", Type: "string", Description: "操作者"},
+			{Name: "summary", Type: "string", Description: "变更摘要"},
+			{Name: "before", Type: "string", Description: "变更前 JSON，敏感字段已脱敏"},
+			{Name: "after", Type: "string", Description: "变更后 JSON，敏感字段已脱敏"},
+		}, true
 	case "storage_settings":
 		return []agentTableColumn{
 			{Name: "driver", Type: "string", Description: "存储驱动"},
@@ -1772,6 +2351,54 @@ func (p tableToolProvider) tableColumns(table string) ([]agentTableColumn, bool)
 			{Name: "ip", Type: "string", Description: "客户端 IP"},
 			{Name: "status", Type: "string", Description: "响应状态码"},
 		}, true
+	case "notification_deliveries":
+		return []agentTableColumn{
+			{Name: "time", Type: "datetime", Description: "发送时间"},
+			{Name: "event", Type: "string", Description: "通知事件类型"},
+			{Name: "title", Type: "string", Description: "通知标题"},
+			{Name: "receiver", Type: "string", Description: "接收人或接收备注"},
+			{Name: "channel", Type: "string", Description: "通知通道"},
+			{Name: "target", Type: "string", Description: "脱敏后的发送目标"},
+			{Name: "status", Type: "string", Description: "发送状态"},
+			{Name: "status_code", Type: "integer", Description: "通知通道响应状态码"},
+			{Name: "error", Type: "string", Description: "失败原因"},
+		}, true
+	case "background_tasks":
+		return []agentTableColumn{
+			{Name: "task_id", Type: "string", Description: "任务标识"},
+			{Name: "name", Type: "string", Description: "任务名称"},
+			{Name: "type", Type: "string", Description: "任务类型"},
+			{Name: "queue", Type: "string", Description: "队列名称"},
+			{Name: "status", Type: "string", Description: "任务状态"},
+			{Name: "attempts", Type: "string", Description: "尝试次数/最大次数"},
+			{Name: "created_by", Type: "string", Description: "创建人"},
+			{Name: "created_at", Type: "datetime", Description: "创建时间"},
+			{Name: "available_at", Type: "datetime", Description: "可执行时间"},
+			{Name: "finished_at", Type: "datetime", Description: "完成时间"},
+			{Name: "result", Type: "string", Description: "执行结果"},
+			{Name: "last_error", Type: "string", Description: "最近失败原因"},
+		}, true
+	case "task_worker_settings":
+		return []agentTableColumn{
+			{Name: "enabled", Type: "boolean", Description: "是否开启自动执行"},
+			{Name: "interval_seconds", Type: "integer", Description: "Worker 扫描间隔秒数"},
+			{Name: "batch_size", Type: "integer", Description: "单轮最多执行任务数"},
+			{Name: "schedule_health_enabled", Type: "boolean", Description: "是否启用系统体检定时任务"},
+			{Name: "schedule_health_minutes", Type: "integer", Description: "系统体检定时间隔分钟"},
+			{Name: "schedule_cleanup_enabled", Type: "boolean", Description: "是否启用导出清理定时任务"},
+			{Name: "schedule_cleanup_minutes", Type: "integer", Description: "导出清理定时间隔分钟"},
+			{Name: "status", Type: "string", Description: "执行器状态说明"},
+		}, true
+	case "background_task_logs":
+		return []agentTableColumn{
+			{Name: "time", Type: "datetime", Description: "日志时间"},
+			{Name: "task_id", Type: "string", Description: "任务标识"},
+			{Name: "level", Type: "string", Description: "日志级别"},
+			{Name: "event", Type: "string", Description: "生命周期事件"},
+			{Name: "status", Type: "string", Description: "任务状态"},
+			{Name: "attempt", Type: "integer", Description: "当前尝试次数"},
+			{Name: "message", Type: "string", Description: "日志消息"},
+		}, true
 	case "admin_users":
 		return []agentTableColumn{
 			{Name: "username", Type: "string", Description: "登录账号"},
@@ -1781,6 +2408,16 @@ func (p tableToolProvider) tableColumns(table string) ([]agentTableColumn, bool)
 			{Name: "source", Type: "string", Description: "数据来源"},
 			{Name: "created_at", Type: "datetime", Description: "创建时间"},
 			{Name: "last_seen", Type: "string", Description: "最近访问"},
+		}, true
+	case "admin_sessions":
+		return []agentTableColumn{
+			{Name: "session_id", Type: "string", Description: "会话标识"},
+			{Name: "username", Type: "string", Description: "管理员账号"},
+			{Name: "ip", Type: "string", Description: "来源 IP"},
+			{Name: "user_agent", Type: "string", Description: "浏览器或客户端"},
+			{Name: "status", Type: "string", Description: "会话状态"},
+			{Name: "created_at", Type: "datetime", Description: "登录时间"},
+			{Name: "expires_at", Type: "datetime", Description: "到期时间"},
 		}, true
 	case "admin_roles":
 		return []agentTableColumn{
@@ -1811,6 +2448,53 @@ func (p tableToolProvider) tableColumns(table string) ([]agentTableColumn, bool)
 			{Name: "target", Type: "string", Description: "连接目标或参考目录"},
 			{Name: "role", Type: "string", Description: "用途"},
 			{Name: "status", Type: "string", Description: "当前接入状态"},
+			{Name: "schema_summary", Type: "string", Description: "最近一次结构扫描摘要，包含表名、字段名、注释和索引概览"},
+		}, true
+	case "schema_snapshots":
+		return []agentTableColumn{
+			{Name: "id", Type: "integer", Description: "快照自增标识"},
+			{Name: "data_source", Type: "string", Description: "数据源名称"},
+			{Name: "driver", Type: "string", Description: "数据库驱动"},
+			{Name: "target", Type: "string", Description: "连接目标"},
+			{Name: "summary", Type: "string", Description: "结构扫描摘要"},
+			{Name: "table_count", Type: "integer", Description: "表数量"},
+			{Name: "column_count", Type: "integer", Description: "字段数量"},
+			{Name: "schema_hash", Type: "string", Description: "结构快照哈希，用于判断结构是否变化"},
+			{Name: "checks", Type: "string", Description: "扫描检查项，包含表清单、字段结构、表注释、字段注释和索引概览"},
+			{Name: "captured_at", Type: "datetime", Description: "快照采集时间"},
+		}, true
+	case "plugin_extensions":
+		return []agentTableColumn{
+			{Name: "key", Type: "string", Description: "插件标识"},
+			{Name: "name", Type: "string", Description: "插件名称"},
+			{Name: "kind", Type: "string", Description: "插件类型"},
+			{Name: "version", Type: "string", Description: "插件版本"},
+			{Name: "resources", Type: "string", Description: "插件声明的资源模型"},
+			{Name: "tools", Type: "string", Description: "插件生成或登记的工具数量"},
+			{Name: "status", Type: "string", Description: "接入状态"},
+			{Name: "description", Type: "string", Description: "插件说明"},
+		}, true
+	case "resource_models":
+		return []agentTableColumn{
+			{Name: "key", Type: "string", Description: "资源模型标识"},
+			{Name: "name", Type: "string", Description: "资源名称"},
+			{Name: "plugin", Type: "string", Description: "来源插件"},
+			{Name: "source", Type: "string", Description: "资源来源类型"},
+			{Name: "actions", Type: "string", Description: "可生成工具的动作"},
+			{Name: "fields", Type: "string", Description: "字段数量、表注释和字段注释摘要"},
+			{Name: "tools", Type: "integer", Description: "已生成工具数量"},
+			{Name: "status", Type: "string", Description: "接入状态"},
+			{Name: "description", Type: "string", Description: "资源说明"},
+		}, true
+	case "resource_tools":
+		return []agentTableColumn{
+			{Name: "name", Type: "string", Description: "工具名称"},
+			{Name: "resource", Type: "string", Description: "所属资源"},
+			{Name: "resource_key", Type: "string", Description: "资源模型标识"},
+			{Name: "action", Type: "string", Description: "工具动作"},
+			{Name: "permission", Type: "string", Description: "权限动作"},
+			{Name: "boundary", Type: "string", Description: "执行边界"},
+			{Name: "status", Type: "string", Description: "工具状态"},
 		}, true
 	case "agent_sessions":
 		return []agentTableColumn{
@@ -1851,6 +2535,23 @@ func (p tableToolProvider) tableColumns(table string) ([]agentTableColumn, bool)
 			{Name: "row_count", Type: "integer", Description: "返回行数"},
 			{Name: "columns", Type: "string", Description: "返回字段"},
 		}, true
+	case "agent_wechat_messages":
+		return []agentTableColumn{
+			{Name: "channel_key", Type: "string", Description: "微信 Agent 通道标识"},
+			{Name: "channel_name", Type: "string", Description: "通道名称"},
+			{Name: "message_id", Type: "string", Description: "微信消息标识"},
+			{Name: "session_id", Type: "string", Description: "会话标识"},
+			{Name: "run_id", Type: "string", Description: "智能体运行标识"},
+			{Name: "from_user_id", Type: "string", Description: "微信用户"},
+			{Name: "to_user_id", Type: "string", Description: "机器人账号"},
+			{Name: "inbound_text", Type: "string", Description: "用户消息"},
+			{Name: "reply_text", Type: "string", Description: "AI 回复"},
+			{Name: "files", Type: "string", Description: "回复文件"},
+			{Name: "status", Type: "string", Description: "发送状态"},
+			{Name: "error", Type: "string", Description: "错误信息"},
+			{Name: "received_at", Type: "datetime", Description: "收到时间"},
+			{Name: "replied_at", Type: "datetime", Description: "回复时间"},
+		}, true
 	case "ai_capabilities":
 		return []agentTableColumn{
 			{Name: "name", Type: "string", Description: "工具能力"},
@@ -1886,8 +2587,13 @@ func (p tableToolProvider) tableRows(table string) []map[string]string {
 	case "admin_settings":
 		system := state.System.normalized()
 		storage := state.Storage.normalized()
+		notifications := state.Notifications.normalized()
 		return []map[string]string{
 			{"key": "site_name", "value": state.SiteName},
+			{"key": "admin_tagline", "value": system.AdminTagline},
+			{"key": "public_tagline", "value": system.PublicTagline},
+			{"key": "public_headline", "value": system.PublicHeadline},
+			{"key": "public_description", "value": system.PublicDescription},
 			{"key": "admin_entry", "value": state.AdminEntry},
 			{"key": "database", "value": state.Database.DisplayName() + " / " + state.Database.DisplayTarget()},
 			{"key": "ai_provider", "value": state.AI.DisplayName()},
@@ -1896,7 +2602,23 @@ func (p tableToolProvider) tableRows(table string) []map[string]string {
 			{"key": "timezone", "value": system.Timezone},
 			{"key": "locale", "value": system.Locale},
 			{"key": "storage", "value": storage.DisplayName() + " / " + storage.LocalPath},
+			{"key": "notification_channel", "value": notifications.DisplayName()},
+			{"key": "notification_receiver", "value": notifications.Receiver},
 		}
+	case "setting_change_logs":
+		out := make([]map[string]string, 0, len(p.settingChanges))
+		for _, row := range p.settingChanges {
+			out = append(out, map[string]string{
+				"time":     formatAgentTime(row.Timestamp),
+				"category": settingChangeCategoryLabel(row.Category),
+				"action":   row.Action,
+				"actor":    displayNotificationValue(row.Actor, "system"),
+				"summary":  row.Summary,
+				"before":   truncateAuditText(row.BeforeJSON, 400),
+				"after":    truncateAuditText(row.AfterJSON, 400),
+			})
+		}
+		return out
 	case "storage_settings":
 		storage := state.Storage.normalized()
 		return []map[string]string{
@@ -1932,6 +2654,72 @@ func (p tableToolProvider) tableRows(table string) []map[string]string {
 			})
 		}
 		return out
+	case "notification_deliveries":
+		out := make([]map[string]string, 0, len(p.notifications))
+		for _, record := range p.notifications {
+			out = append(out, map[string]string{
+				"time":        formatAdminTime(record.Timestamp),
+				"event":       record.Event,
+				"title":       record.Title,
+				"receiver":    record.Receiver,
+				"channel":     notificationChannelLabel(record.Channel),
+				"target":      record.Target,
+				"message":     record.Message,
+				"status":      notificationDeliveryStatusLabel(record.Status, record.StatusCode),
+				"status_code": strconv.Itoa(record.StatusCode),
+				"error":       record.Error,
+			})
+		}
+		return out
+	case "background_tasks":
+		rows := buildAdminBackgroundTaskRows(p.backgroundTasks, "")
+		out := make([]map[string]string, 0, len(rows))
+		for _, row := range rows {
+			out = append(out, map[string]string{
+				"task_id":      row.IDShort,
+				"name":         row.Name,
+				"type":         row.TypeName,
+				"queue":        row.Queue,
+				"status":       row.Status,
+				"attempts":     row.Attempts,
+				"created_by":   row.CreatedBy,
+				"created_at":   row.CreatedAt,
+				"available_at": row.AvailableAt,
+				"finished_at":  row.FinishedAt,
+				"result":       row.Result,
+				"last_error":   row.LastError,
+			})
+		}
+		return out
+	case "task_worker_settings":
+		worker := state.TaskWorker.normalized()
+		return []map[string]string{
+			{
+				"enabled":                  boolText(worker.Enabled),
+				"interval_seconds":         strconv.Itoa(worker.IntervalSeconds),
+				"batch_size":               strconv.Itoa(worker.BatchSize),
+				"schedule_health_enabled":  boolText(worker.ScheduleHealthEnabled),
+				"schedule_health_minutes":  strconv.Itoa(worker.ScheduleHealthMinutes),
+				"schedule_cleanup_enabled": boolText(worker.ScheduleCleanupEnabled),
+				"schedule_cleanup_minutes": strconv.Itoa(worker.ScheduleCleanupMinutes),
+				"status":                   worker.StatusText(),
+			},
+		}
+	case "background_task_logs":
+		rows := buildAdminBackgroundTaskLogRows(p.backgroundLogs)
+		out := make([]map[string]string, 0, len(rows))
+		for _, row := range rows {
+			out = append(out, map[string]string{
+				"time":    row.Time,
+				"task_id": row.TaskIDShort,
+				"level":   row.Level,
+				"event":   row.Event,
+				"status":  row.Status,
+				"attempt": strconv.Itoa(row.Attempt),
+				"message": row.Message,
+			})
+		}
+		return out
 	case "admin_users":
 		rows := buildAdminUserRows(state, "")
 		out := make([]map[string]string, 0, len(rows))
@@ -1944,6 +2732,21 @@ func (p tableToolProvider) tableRows(table string) []map[string]string {
 				"source":       row.Source,
 				"created_at":   row.CreatedAt,
 				"last_seen":    row.LastSeen,
+			})
+		}
+		return out
+	case "admin_sessions":
+		rows := buildAdminSessionRows(p.adminSessions, "", "")
+		out := make([]map[string]string, 0, len(rows))
+		for _, row := range rows {
+			out = append(out, map[string]string{
+				"session_id": row.IDShort,
+				"username":   row.Username,
+				"ip":         row.IP,
+				"user_agent": row.UserAgent,
+				"status":     row.Status,
+				"created_at": row.CreatedAt,
+				"expires_at": row.ExpiresAt,
 			})
 		}
 		return out
@@ -1993,11 +2796,85 @@ func (p tableToolProvider) tableRows(table string) []map[string]string {
 				status += "：" + row.Message
 			}
 			out = append(out, map[string]string{
-				"name":   row.Name,
-				"driver": row.Driver,
-				"target": row.Target,
-				"role":   row.Role,
-				"status": status,
+				"name":           row.Name,
+				"driver":         row.Driver,
+				"target":         row.Target,
+				"role":           row.Role,
+				"status":         status,
+				"schema_summary": row.Schema,
+			})
+		}
+		return out
+	case "schema_snapshots":
+		out := make([]map[string]string, 0, len(p.schemaSnapshots))
+		for _, row := range p.schemaSnapshots {
+			checks := summarizeSchemaSnapshotChecks(row.ChecksJSON)
+			out = append(out, map[string]string{
+				"id":           strconv.FormatInt(row.ID, 10),
+				"data_source":  row.DataSourceName,
+				"driver":       row.Driver,
+				"target":       row.Target,
+				"summary":      row.Summary,
+				"table_count":  strconv.Itoa(row.TableCount),
+				"column_count": strconv.Itoa(row.ColumnCount),
+				"schema_hash":  shortSchemaHash(row.SchemaHash),
+				"checks":       checks,
+				"captured_at":  formatAgentTime(row.CapturedAt),
+			})
+		}
+		return out
+	case "plugin_extensions":
+		models := buildResourceModels(state)
+		tools := buildResourceTools(models)
+		plugins := buildPluginExtensions(state, models, tools)
+		out := make([]map[string]string, 0, len(plugins))
+		for _, row := range plugins {
+			out = append(out, map[string]string{
+				"key":         row.Key,
+				"name":        row.Name,
+				"kind":        row.Kind,
+				"version":     row.Version,
+				"resources":   row.Resources,
+				"tools":       row.Tools,
+				"status":      row.Status,
+				"description": row.Description,
+			})
+		}
+		return out
+	case "resource_models":
+		models := buildResourceModels(state)
+		out := make([]map[string]string, 0, len(models))
+		for _, row := range models {
+			fields := strconv.Itoa(row.FieldCount) + " 个"
+			if row.FieldsSummary != "" {
+				fields += "：" + row.FieldsSummary
+			}
+			out = append(out, map[string]string{
+				"key":         row.Key,
+				"name":        row.Name,
+				"plugin":      row.Plugin,
+				"source":      row.Source,
+				"actions":     row.Actions,
+				"fields":      fields,
+				"tools":       strconv.Itoa(row.ToolCount),
+				"status":      row.Status,
+				"description": row.Description + " " + row.ReadScope,
+			})
+		}
+		return out
+	case "resource_tools":
+		models := buildResourceModels(state)
+		tools := buildResourceTools(models)
+		out := make([]map[string]string, 0, len(tools))
+		for _, row := range tools {
+			out = append(out, map[string]string{
+				"name":         row.Name,
+				"resource":     row.Resource,
+				"resource_key": row.ResourceKey,
+				"action":       row.Action,
+				"permission":   row.Permission,
+				"boundary":     row.Boundary,
+				"status":       row.Status,
 			})
 		}
 		return out
@@ -2064,6 +2941,27 @@ func (p tableToolProvider) tableRows(table string) []map[string]string {
 			})
 		}
 		return out
+	case "agent_wechat_messages":
+		out := make([]map[string]string, 0, len(p.runtime.WeChatMessages))
+		for _, row := range p.runtime.WeChatMessages {
+			out = append(out, map[string]string{
+				"channel_key":  row.ChannelKey,
+				"channel_name": row.ChannelName,
+				"message_id":   row.MessageID,
+				"session_id":   row.SessionID,
+				"run_id":       row.RunID,
+				"from_user_id": row.FromUserID,
+				"to_user_id":   row.ToUserID,
+				"inbound_text": row.InboundText,
+				"reply_text":   row.ReplyText,
+				"files":        adminAgentWeChatFileSummary(row.Files),
+				"status":       agentRunStatusText(row.Status),
+				"error":        row.Error,
+				"received_at":  formatAgentTime(row.ReceivedAt),
+				"replied_at":   formatAgentTime(row.RepliedAt),
+			})
+		}
+		return out
 	case "ai_capabilities":
 		return []map[string]string{
 			{"name": "planner", "boundary": "任务理解、步骤拆解和下一步建议", "status": "已启用"},
@@ -2072,6 +2970,8 @@ func (p tableToolProvider) tableRows(table string) []map[string]string {
 			{"name": "preview_table", "boundary": "最多预览 50 行，屏蔽敏感字段", "status": "已启用"},
 			{"name": "query_readonly", "boundary": "仅允许单表 SELECT，拒绝写入语句", "status": "已启用"},
 			{"name": "agent_memory", "boundary": "会话、运行和工具结果写入元数据表", "status": "已启用"},
+			{"name": "resource_registry", "boundary": "插件扩展、资源模型和生成工具统一登记，供智能体发现", "status": "已启用"},
+			{"name": "resource_tool_generator", "boundary": "从资源模型生成读取结构、预览、查询和导出工具", "status": "本次接入"},
 			{"name": "insight_engine", "boundary": "基于工具结果生成洞察和建议", "status": "已启用"},
 		}
 	case "agent_blueprint":
@@ -2163,6 +3063,30 @@ func (p tableToolProvider) exportColumnsForMessage(table string, message string)
 	return selected, true
 }
 
+func (p tableToolProvider) exportHeadersForColumns(table string, selectedColumns []string) []string {
+	definitions, ok := p.tableColumns(table)
+	if !ok {
+		return append([]string(nil), selectedColumns...)
+	}
+	labels := make(map[string]string, len(definitions))
+	for _, column := range definitions {
+		label := normalizeSchemaComment(column.Description)
+		if label == "" {
+			label = column.Name
+		}
+		labels[column.Name] = label
+	}
+	headers := make([]string, 0, len(selectedColumns))
+	for _, column := range selectedColumns {
+		if label := strings.TrimSpace(labels[column]); label != "" {
+			headers = append(headers, label)
+			continue
+		}
+		headers = append(headers, column)
+	}
+	return headers
+}
+
 func (p tableToolProvider) filterRowsForMessage(table string, rows []map[string]string, message string) []map[string]string {
 	filters := inferAgentFilters(table, message)
 	if len(filters) == 0 {
@@ -2190,6 +3114,21 @@ func agentColumnAliases(table string) map[string][]string {
 			"ai_provider":     {"AI 服务商", "AI服务商", "模型服务商"},
 			"ai_model":        {"AI 模型", "AI模型", "对话模型"},
 		}
+	case "admin_settings":
+		return map[string][]string{
+			"key":   {"配置项", "设置项", "键"},
+			"value": {"配置值", "设置值", "值"},
+		}
+	case "setting_change_logs":
+		return map[string][]string{
+			"time":     {"时间", "变更时间", "修改时间", "保存时间"},
+			"category": {"分组", "设置分组", "配置分组", "模块"},
+			"action":   {"动作", "操作", "保存动作"},
+			"actor":    {"操作者", "管理员", "操作人"},
+			"summary":  {"摘要", "说明", "变更说明"},
+			"before":   {"变更前", "修改前", "旧值"},
+			"after":    {"变更后", "修改后", "新值"},
+		}
 	case "admin_users":
 		return map[string][]string{
 			"username":     {"账号", "用户名", "登录账号", "账号名"},
@@ -2199,6 +3138,16 @@ func agentColumnAliases(table string) map[string][]string {
 			"source":       {"来源", "数据来源"},
 			"created_at":   {"创建时间", "初始化时间"},
 			"last_seen":    {"最近访问", "最近登录", "最后访问"},
+		}
+	case "admin_sessions":
+		return map[string][]string{
+			"session_id": {"会话", "会话ID", "session"},
+			"username":   {"账号", "管理员", "用户名"},
+			"ip":         {"IP", "来源IP", "登录IP"},
+			"user_agent": {"浏览器", "客户端", "UserAgent"},
+			"status":     {"状态", "会话状态", "在线状态"},
+			"created_at": {"登录时间", "创建时间"},
+			"expires_at": {"到期时间", "过期时间"},
 		}
 	case "storage_settings":
 		return map[string][]string{
@@ -2230,6 +3179,55 @@ func agentColumnAliases(table string) map[string][]string {
 			"ip":       {"IP", "客户端IP", "来源IP"},
 			"status":   {"状态码", "响应码", "状态"},
 		}
+	case "notification_deliveries":
+		return map[string][]string{
+			"time":        {"时间", "发送时间"},
+			"event":       {"事件", "通知事件", "事件类型"},
+			"title":       {"标题", "通知标题"},
+			"receiver":    {"接收人", "接收备注"},
+			"channel":     {"通道", "通知通道"},
+			"target":      {"目标", "Webhook", "飞书机器人", "发送目标"},
+			"message":     {"消息", "内容", "通知内容"},
+			"status":      {"状态", "发送状态"},
+			"status_code": {"状态码", "响应码"},
+			"error":       {"错误", "失败原因"},
+		}
+	case "background_tasks":
+		return map[string][]string{
+			"task_id":      {"任务ID", "任务标识", "ID"},
+			"name":         {"任务名称", "名称"},
+			"type":         {"任务类型", "类型"},
+			"queue":        {"队列", "队列名称"},
+			"status":       {"状态", "任务状态", "执行状态"},
+			"attempts":     {"尝试次数", "重试次数"},
+			"created_by":   {"创建人", "管理员"},
+			"created_at":   {"创建时间", "入队时间"},
+			"available_at": {"可执行时间", "下次执行"},
+			"finished_at":  {"完成时间", "结束时间"},
+			"result":       {"结果", "执行结果"},
+			"last_error":   {"错误", "失败原因", "异常"},
+		}
+	case "task_worker_settings":
+		return map[string][]string{
+			"enabled":                  {"启用", "自动执行", "Worker状态"},
+			"interval_seconds":         {"扫描间隔", "间隔", "秒"},
+			"batch_size":               {"批量", "单轮数量", "执行数量"},
+			"schedule_health_enabled":  {"体检调度", "系统体检"},
+			"schedule_health_minutes":  {"体检间隔", "体检分钟"},
+			"schedule_cleanup_enabled": {"清理调度", "导出清理"},
+			"schedule_cleanup_minutes": {"清理间隔", "清理分钟"},
+			"status":                   {"状态", "说明"},
+		}
+	case "background_task_logs":
+		return map[string][]string{
+			"time":    {"时间", "日志时间"},
+			"task_id": {"任务ID", "任务标识"},
+			"level":   {"级别", "日志级别"},
+			"event":   {"事件", "生命周期", "动作"},
+			"status":  {"状态", "任务状态"},
+			"attempt": {"尝试", "尝试次数", "重试次数"},
+			"message": {"消息", "日志", "内容"},
+		}
 	case "admin_roles":
 		return map[string][]string{
 			"key":    {"角色标识", "标识"},
@@ -2254,11 +3252,58 @@ func agentColumnAliases(table string) map[string][]string {
 		}
 	case "data_sources":
 		return map[string][]string{
-			"name":   {"名称", "数据源"},
-			"driver": {"类型", "驱动"},
-			"target": {"地址", "目标"},
-			"role":   {"用途"},
-			"status": {"状态"},
+			"name":           {"名称", "数据源"},
+			"driver":         {"类型", "驱动"},
+			"target":         {"地址", "目标"},
+			"role":           {"用途"},
+			"status":         {"状态"},
+			"schema_summary": {"结构", "结构摘要", "表结构", "字段结构", "表注释", "字段注释"},
+		}
+	case "schema_snapshots":
+		return map[string][]string{
+			"id":           {"快照ID", "标识"},
+			"data_source":  {"数据源", "数据源名称"},
+			"driver":       {"驱动", "数据库类型"},
+			"target":       {"地址", "目标"},
+			"summary":      {"摘要", "结构摘要", "扫描摘要"},
+			"table_count":  {"表数量", "表数"},
+			"column_count": {"字段数量", "字段数"},
+			"schema_hash":  {"哈希", "结构哈希", "变更哈希"},
+			"checks":       {"检查项", "表结构", "字段结构", "表注释", "字段注释", "索引"},
+			"captured_at":  {"采集时间", "扫描时间", "检查时间"},
+		}
+	case "plugin_extensions":
+		return map[string][]string{
+			"key":         {"插件标识", "标识", "key"},
+			"name":        {"插件名称", "名称"},
+			"kind":        {"类型", "插件类型"},
+			"version":     {"版本", "插件版本"},
+			"resources":   {"资源", "资源模型"},
+			"tools":       {"工具", "工具数量"},
+			"status":      {"状态", "接入状态"},
+			"description": {"说明", "插件说明"},
+		}
+	case "resource_models":
+		return map[string][]string{
+			"key":         {"资源标识", "标识", "key"},
+			"name":        {"资源名称", "名称"},
+			"plugin":      {"插件", "来源插件"},
+			"source":      {"来源", "资源来源"},
+			"actions":     {"动作", "可用动作", "生成动作"},
+			"fields":      {"字段", "字段注释", "表注释", "字段摘要"},
+			"tools":       {"工具", "工具数量"},
+			"status":      {"状态", "接入状态"},
+			"description": {"说明", "资源说明"},
+		}
+	case "resource_tools":
+		return map[string][]string{
+			"name":         {"工具", "工具名称"},
+			"resource":     {"资源", "所属资源"},
+			"resource_key": {"资源标识", "资源key"},
+			"action":       {"动作", "工具动作"},
+			"permission":   {"权限", "权限动作"},
+			"boundary":     {"边界", "执行边界"},
+			"status":       {"状态", "工具状态"},
 		}
 	case "agent_sessions":
 		return map[string][]string{
@@ -2298,6 +3343,23 @@ func agentColumnAliases(table string) map[string][]string {
 			"file":      {"文件", "生成文件"},
 			"row_count": {"行数", "返回行数"},
 			"columns":   {"字段", "返回字段"},
+		}
+	case "agent_wechat_messages":
+		return map[string][]string{
+			"channel_key":  {"通道", "通道标识"},
+			"channel_name": {"通道名称", "微信通道"},
+			"message_id":   {"消息ID", "微信消息"},
+			"session_id":   {"会话", "会话ID"},
+			"run_id":       {"运行ID", "智能体运行"},
+			"from_user_id": {"微信用户", "发送人", "用户"},
+			"to_user_id":   {"机器人", "接收账号"},
+			"inbound_text": {"用户消息", "提问", "消息内容"},
+			"reply_text":   {"AI回复", "回复", "回答"},
+			"files":        {"文件", "回复文件"},
+			"status":       {"状态", "发送状态"},
+			"error":        {"错误", "失败原因"},
+			"received_at":  {"收到时间", "消息时间"},
+			"replied_at":   {"回复时间", "发送时间"},
 		}
 	case "ai_capabilities":
 		return map[string][]string{

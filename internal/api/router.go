@@ -8,12 +8,14 @@ import (
 )
 
 type RouterOptions struct {
-	Logger           *slog.Logger
-	AdminEntry       string
-	AdminUsername    string
-	AdminPassword    string
-	SessionSecret    string
-	InstallStateFile string
+	Logger            *slog.Logger
+	Env               string
+	AdminEntry        string
+	AdminUsername     string
+	AdminPassword     string
+	SessionSecret     string
+	InstallStateFile  string
+	DisableTaskWorker bool
 }
 
 func NewRouter(options RouterOptions) http.Handler {
@@ -25,13 +27,28 @@ func NewRouter(options RouterOptions) http.Handler {
 	if adminEntry == "" {
 		adminEntry = "/moyi-7k3x9-admin"
 	}
-	admin := newAdminServer(adminEntry, options.AdminUsername, options.AdminPassword, options.SessionSecret, options.InstallStateFile)
+	admin := newAdminServer(adminEntry, options.AdminUsername, options.AdminPassword, options.SessionSecret, options.InstallStateFile, options.Env)
+	if !options.DisableTaskWorker {
+		admin.startBackgroundTaskWorker()
+		admin.startAgentWeChatChannelWorker()
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /", admin.get)
 	mux.HandleFunc("POST /", admin.post)
 	mux.HandleFunc("POST /api/install/check-database", admin.checkDatabase)
 	mux.HandleFunc("POST /api/install/check-ai", admin.checkAI)
+	mux.HandleFunc("POST /api/agent/pair/exchange", admin.agentWeChatPairExchange)
+	mux.HandleFunc("GET /api/agent/channels/wechat/bind", admin.agentWeChatBindInfo)
+	mux.HandleFunc("POST /api/agent/channels/wechat/bind", admin.agentWeChatBindExchange)
+	mux.HandleFunc("GET /api/agent/channels/openclaw-weixin/session", admin.agentWeChatSession)
+	mux.HandleFunc("POST /api/agent/channels/openclaw-weixin/session", admin.agentWeChatSession)
+	mux.HandleFunc("GET /api/agent/channels/wechat/session", admin.agentWeChatSession)
+	mux.HandleFunc("POST /api/agent/channels/wechat/session", admin.agentWeChatSession)
+	mux.HandleFunc("GET /api/agent/me", admin.agentWeChatMe)
+	mux.HandleFunc("POST /api/agent/messages", admin.agentWeChatMessage)
+	mux.HandleFunc("POST /api/agent/chat", admin.agentWeChatMessage)
+	mux.HandleFunc("POST /api/agent/channels/wechat/message", admin.agentWeChatMessage)
 	mux.HandleFunc("GET /healthz", healthHandler)
 	mux.HandleFunc("GET /api/health", healthHandler)
 	mux.HandleFunc("GET /api/version", versionHandler)

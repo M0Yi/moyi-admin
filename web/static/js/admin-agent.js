@@ -1,4 +1,125 @@
 (function () {
+  document.querySelectorAll("[data-disclosure-toggle]").forEach((button) => {
+    const targetID = button.getAttribute("data-disclosure-toggle");
+    const target = targetID ? document.getElementById(targetID) : null;
+    if (!target) {
+      return;
+    }
+    const openLabel = button.getAttribute("data-open-label") || button.textContent || "展开";
+    const closeLabel = button.getAttribute("data-close-label") || "收起";
+    function sync(open) {
+      target.hidden = !open;
+      button.setAttribute("aria-expanded", open ? "true" : "false");
+      button.textContent = open ? closeLabel : openLabel;
+    }
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      sync(target.hidden);
+    });
+    sync(!target.hidden);
+  });
+})();
+
+(function () {
+  document.querySelectorAll("[data-allowed-tables-preset]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const form = button.closest("form");
+      const textarea = form ? form.querySelector('textarea[name="wechat_allowed_tables"]') : null;
+      const scope = form ? form.querySelector('select[name="wechat_data_scope"]') : null;
+      if (!textarea) {
+        return;
+      }
+      textarea.value = button.getAttribute("data-allowed-tables-preset") || "";
+      if (scope) {
+        scope.value = "tables";
+        scope.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      textarea.dispatchEvent(new Event("input", { bubbles: true }));
+      textarea.dispatchEvent(new Event("change", { bubbles: true }));
+      textarea.focus();
+    });
+  });
+
+  document.querySelectorAll('form select[name="wechat_data_scope"]').forEach((scope) => {
+    const form = scope.closest("form");
+    const textarea = form ? form.querySelector('textarea[name="wechat_allowed_tables"]') : null;
+    if (!textarea) {
+      return;
+    }
+    function sync() {
+      const useTables = scope.value === "tables";
+      textarea.disabled = !useTables;
+      textarea.closest("label")?.classList.toggle("is-disabled", !useTables);
+    }
+    scope.addEventListener("change", sync);
+    sync();
+  });
+})();
+
+(function () {
+  const hub = document.querySelector("[data-settings-hub]");
+  if (!hub) {
+    return;
+  }
+  const tabs = Array.from(hub.querySelectorAll("[data-settings-tab]"));
+  const sections = Array.from(hub.querySelectorAll("[data-settings-section]"));
+  if (tabs.length === 0 || sections.length === 0) {
+    return;
+  }
+
+  const savedTarget = {
+    system: "system",
+    storage: "storage",
+    ai: "ai",
+    security: "security",
+    notifications: "notifications",
+    notification_test: "notifications",
+    task_worker: "queue",
+  };
+
+  function knownSection(key) {
+    return sections.some((section) => section.getAttribute("data-settings-section") === key);
+  }
+
+  function currentSectionFromURL() {
+    const hash = window.location.hash.replace(/^#settings-/, "");
+    if (knownSection(hash)) {
+      return hash;
+    }
+    const saved = new URLSearchParams(window.location.search).get("saved") || "";
+    if (knownSection(savedTarget[saved])) {
+      return savedTarget[saved];
+    }
+    return "system";
+  }
+
+  function activate(sectionKey, replaceURL) {
+    if (!knownSection(sectionKey)) {
+      sectionKey = "system";
+    }
+    tabs.forEach((tab) => {
+      const active = tab.getAttribute("data-settings-tab") === sectionKey;
+      tab.classList.toggle("active", active);
+      tab.setAttribute("aria-pressed", active ? "true" : "false");
+    });
+    sections.forEach((section) => {
+      const active = section.getAttribute("data-settings-section") === sectionKey;
+      section.classList.toggle("is-active", active);
+      section.hidden = !active;
+    });
+    if (replaceURL && window.history && window.location.hash !== "#settings-" + sectionKey) {
+      window.history.replaceState(null, "", "#settings-" + sectionKey);
+    }
+  }
+
+  tabs.forEach((tab) => {
+    tab.addEventListener("click", () => activate(tab.getAttribute("data-settings-tab"), true));
+  });
+  window.addEventListener("hashchange", () => activate(currentSectionFromURL(), false));
+  activate(currentSectionFromURL(), false);
+})();
+
+(function () {
   const dataSourceForms = Array.from(document.querySelectorAll("[data-ds-form]"));
   dataSourceForms.forEach((form) => {
     const driver = form.querySelector("[data-ds-driver]");

@@ -9,12 +9,14 @@ import (
 	"crypto/subtle"
 	"database/sql"
 	"encoding/base64"
+	"encoding/csv"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"html/template"
 	"io"
+	"log/slog"
 	"mime"
 	"mime/multipart"
 	"net"
@@ -27,6 +29,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	mysql "github.com/go-sql-driver/mysql"
 )
 
 const (
@@ -41,15 +45,19 @@ const (
 var aiCheckHTTPClient = &http.Client{Timeout: defaultAITestTimeout}
 
 type adminServer struct {
-	basePath      string
-	username      string
-	password      string
-	sessionSecret string
-	store         *installStore
-	auditMu       sync.Mutex
+	basePath                  string
+	env                       string
+	username                  string
+	password                  string
+	sessionSecret             string
+	store                     *installStore
+	auditMu                   sync.Mutex
+	taskMu                    sync.Mutex
+	agentChannelMu            sync.Mutex
+	agentChannelLastIdleLogAt time.Time
 }
 
-func newAdminServer(entry string, username string, password string, sessionSecret string, stateFile string) *adminServer {
+func newAdminServer(entry string, username string, password string, sessionSecret string, stateFile string, env string) *adminServer {
 	if username == "" {
 		username = "admin"
 	}
@@ -59,9 +67,13 @@ func newAdminServer(entry string, username string, password string, sessionSecre
 	if sessionSecret == "" {
 		sessionSecret = "moyi-admin-dev-session-secret"
 	}
+	if strings.TrimSpace(env) == "" {
+		env = "development"
+	}
 
 	return &adminServer{
 		basePath:      entry,
+		env:           strings.ToLower(strings.TrimSpace(env)),
 		username:      username,
 		password:      password,
 		sessionSecret: sessionSecret,
@@ -118,6 +130,10 @@ func (s *adminServer) adminRoute(w http.ResponseWriter, r *http.Request) {
 		s.adminPage(w, r, "foundation")
 	case r.Method == http.MethodGet && subpath == "/data-sources":
 		s.adminPage(w, r, "data-sources")
+	case r.Method == http.MethodGet && subpath == "/extensions":
+		s.adminPage(w, r, "extensions")
+	case r.Method == http.MethodGet && subpath == "/extensions/export":
+		s.extensionsExport(w, r)
 	case r.Method == http.MethodPost && subpath == "/data-sources/save":
 		s.dataSourceSaveSubmit(w, r)
 	case r.Method == http.MethodPost && subpath == "/data-sources/test":
@@ -128,6 +144,16 @@ func (s *adminServer) adminRoute(w http.ResponseWriter, r *http.Request) {
 		s.adminPage(w, r, "ai")
 	case r.Method == http.MethodPost && subpath == "/ai/chat":
 		s.aiChat(w, r)
+	case r.Method == http.MethodGet && subpath == "/wechat-agent":
+		s.adminPage(w, r, "wechat-agent")
+	case r.Method == http.MethodGet && subpath == "/wechat-agent/messages":
+		s.adminPage(w, r, "wechat-agent-messages")
+	case r.Method == http.MethodGet && subpath == "/wechat-agent/messages/export":
+		s.agentWeChatMessagesExport(w, r)
+	case r.Method == http.MethodPost && subpath == "/wechat-agent/channels":
+		s.agentWeChatChannelSubmit(w, r)
+	case r.Method == http.MethodPost && subpath == "/ai/channels/wechat":
+		s.agentWeChatChannelSubmit(w, r)
 	case r.Method == http.MethodGet && strings.HasPrefix(subpath, "/ai/files/"):
 		s.aiFileDownload(w, r)
 	case r.Method == http.MethodGet && subpath == "/users":
@@ -138,12 +164,24 @@ func (s *adminServer) adminRoute(w http.ResponseWriter, r *http.Request) {
 		s.adminUserToggleSubmit(w, r)
 	case r.Method == http.MethodPost && subpath == "/users/delete":
 		s.adminUserDeleteSubmit(w, r)
+	case r.Method == http.MethodPost && subpath == "/users/sessions/revoke":
+		s.adminSessionRevokeSubmit(w, r)
 	case r.Method == http.MethodGet && subpath == "/settings":
 		s.adminPage(w, r, "settings")
 	case r.Method == http.MethodPost && subpath == "/settings/system":
 		s.settingsSystemSubmit(w, r)
 	case r.Method == http.MethodPost && subpath == "/settings/storage":
 		s.settingsStorageSubmit(w, r)
+	case r.Method == http.MethodPost && subpath == "/settings/ai":
+		s.settingsAISubmit(w, r)
+	case r.Method == http.MethodPost && subpath == "/settings/security":
+		s.settingsSecuritySubmit(w, r)
+	case r.Method == http.MethodPost && subpath == "/settings/notifications":
+		s.settingsNotificationsSubmit(w, r)
+	case r.Method == http.MethodPost && subpath == "/settings/notifications/test":
+		s.settingsNotificationTestSubmit(w, r)
+	case r.Method == http.MethodPost && subpath == "/settings/tasks":
+		s.backgroundTaskSettingsSubmit(w, r)
 	case r.Method == http.MethodGet && subpath == "/files":
 		s.adminPage(w, r, "files")
 	case r.Method == http.MethodPost && subpath == "/files/upload":
@@ -154,6 +192,24 @@ func (s *adminServer) adminRoute(w http.ResponseWriter, r *http.Request) {
 		s.fileServe(w, r, false)
 	case r.Method == http.MethodGet && strings.HasPrefix(subpath, "/files/download/"):
 		s.fileServe(w, r, true)
+	case r.Method == http.MethodGet && subpath == "/tasks":
+		s.adminPage(w, r, "tasks")
+	case r.Method == http.MethodPost && subpath == "/tasks/enqueue":
+		s.backgroundTaskEnqueueSubmit(w, r)
+	case r.Method == http.MethodPost && subpath == "/tasks/settings":
+		s.backgroundTaskSettingsSubmit(w, r)
+	case r.Method == http.MethodPost && subpath == "/tasks/run":
+		s.backgroundTaskRunSubmit(w, r)
+	case r.Method == http.MethodPost && subpath == "/tasks/run-all":
+		s.backgroundTaskRunAllSubmit(w, r)
+	case r.Method == http.MethodPost && subpath == "/tasks/retry":
+		s.backgroundTaskRetrySubmit(w, r)
+	case r.Method == http.MethodPost && subpath == "/tasks/cancel":
+		s.backgroundTaskCancelSubmit(w, r)
+	case r.Method == http.MethodGet && subpath == "/notifications":
+		s.adminPage(w, r, "notifications")
+	case r.Method == http.MethodGet && subpath == "/audit/export":
+		s.auditExport(w, r)
 	case r.Method == http.MethodGet && subpath == "/audit":
 		s.adminPage(w, r, "audit")
 	default:
@@ -185,7 +241,15 @@ func (s *adminServer) home(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	homeHandler().ServeHTTP(w, r)
+	data := publicHomeDataFromState(state)
+	if s.debugMode() {
+		debugPassword := s.debugLoginPassword(state)
+		data.AdminLoginPath = s.adminEntryForState(state) + "/login"
+		data.DebugLoginEnabled = debugPassword != ""
+		data.DebugUsername = state.AdminUser
+		data.DebugPassword = debugPassword
+	}
+	renderPublicHome(w, data)
 }
 
 func (s *adminServer) entry(w http.ResponseWriter, r *http.Request) {
@@ -294,18 +358,23 @@ func (s *adminServer) installSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	state = installState{
-		Initialized:  true,
-		SiteName:     data.SiteName,
-		AdminEntry:   adminEntry,
-		AdminUser:    data.Username,
-		Database:     data.Database.sanitized(),
-		AI:           data.AI.sanitized(),
-		System:       defaultSystemConfig(),
-		Storage:      defaultStorageConfig(),
-		Access:       defaultAccessConfig(),
-		PasswordSalt: salt,
-		PasswordHash: hash,
-		InstalledAt:  time.Now().UTC(),
+		Initialized:        true,
+		SiteName:           data.SiteName,
+		AdminEntry:         adminEntry,
+		AdminUser:          data.Username,
+		DebugLoginPassword: "",
+		Database:           data.Database.sanitized(),
+		AI:                 data.AI.sanitized(),
+		System:             defaultSystemConfig(),
+		Storage:            defaultStorageConfig(),
+		TaskWorker:         defaultTaskWorkerConfig(),
+		Access:             defaultAccessConfig(),
+		PasswordSalt:       salt,
+		PasswordHash:       hash,
+		InstalledAt:        time.Now().UTC(),
+	}
+	if s.debugMode() {
+		state.DebugLoginPassword = password
 	}
 	if err := s.store.Save(state); err != nil {
 		http.Error(w, "保存初始化状态失败", http.StatusInternalServerError)
@@ -403,10 +472,13 @@ func (s *adminServer) loginPage(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, entry+"/workspace", http.StatusFound)
 		return
 	}
+	debugPassword := s.debugLoginPassword(state)
 	s.renderLogin(w, http.StatusOK, loginPageData{
-		Action:   entry + "/login",
-		Username: state.AdminUser,
-		Success:  r.URL.Query().Get("installed") == "1",
+		Action:       entry + "/login",
+		Username:     state.AdminUser,
+		Password:     debugPassword,
+		DebugPrefill: debugPassword != "",
+		Success:      r.URL.Query().Get("installed") == "1",
 	})
 }
 
@@ -423,16 +495,41 @@ func (s *adminServer) loginSubmit(w http.ResponseWriter, r *http.Request) {
 	entry := s.adminEntryForState(state)
 
 	if err := r.ParseForm(); err != nil {
+		debugPassword := s.debugLoginPassword(state)
 		s.renderLogin(w, http.StatusBadRequest, loginPageData{
-			Action: entry + "/login",
-			Error:  "登录请求格式不正确，请重新提交。",
+			Action:       entry + "/login",
+			Username:     state.AdminUser,
+			Password:     debugPassword,
+			DebugPrefill: debugPassword != "",
+			Error:        "登录请求格式不正确，请重新提交。",
 		})
 		return
 	}
 
 	username := strings.TrimSpace(r.FormValue("username"))
 	password := r.FormValue("password")
+	security := state.Security.normalized()
+	if s.loginLocked(state, username, requestClientIP(r), time.Now().UTC()) {
+		debugPassword := s.debugLoginPassword(state)
+		s.recordAuditEvent(r, state, auditEventInput{
+			Category:   "login",
+			Action:     "登录锁定",
+			Actor:      username,
+			Detail:     "失败次数超过阈值，临时拒绝登录",
+			StatusCode: http.StatusTooManyRequests,
+		})
+		s.notifyAdminEvent(r, state, state.Notifications.normalized().EventLoginFailures, "login_lockout", "后台登录保护已触发", "账号 "+displayNotificationValue(username, "未知账号")+" / IP "+displayNotificationValue(requestClientIP(r), "未知 IP")+" 在登录保护窗口内失败过多，系统已临时拒绝登录。")
+		s.renderLogin(w, http.StatusTooManyRequests, loginPageData{
+			Action:       entry + "/login",
+			Username:     username,
+			Password:     debugPassword,
+			DebugPrefill: debugPassword != "",
+			Error:        "登录失败次数过多，请稍后再试。",
+		})
+		return
+	}
 	if !state.credentialsMatch(username, password) {
+		debugPassword := s.debugLoginPassword(state)
 		s.recordAuditEvent(r, state, auditEventInput{
 			Category:   "login",
 			Action:     "登录失败",
@@ -441,26 +538,50 @@ func (s *adminServer) loginSubmit(w http.ResponseWriter, r *http.Request) {
 			StatusCode: http.StatusUnauthorized,
 		})
 		s.renderLogin(w, http.StatusUnauthorized, loginPageData{
-			Action:   entry + "/login",
-			Username: username,
-			Error:    "账号或密码错误，请检查初始化时创建的管理员账号。",
+			Action:       entry + "/login",
+			Username:     username,
+			Password:     debugPassword,
+			DebugPrefill: debugPassword != "",
+			Error:        "账号或密码错误，请检查初始化时创建的管理员账号。",
 		})
 		return
 	}
-	if updatedState, changed := state.withAdminLogin(username, time.Now().UTC()); changed {
-		if err := s.store.Save(updatedState); err == nil {
-			state = updatedState
+	updatedState, changed := state.withAdminLogin(username, time.Now().UTC())
+	if changed {
+		state = updatedState
+	}
+	if s.debugMode() && strings.TrimSpace(state.DebugLoginPassword) == "" {
+		state.DebugLoginPassword = password
+		changed = true
+	}
+	if changed {
+		if err := s.store.Save(state); err != nil {
+			slog.Warn("save admin login state failed", "error", err)
 		}
 	}
 
+	sessionTTL := security.sessionTTL()
+	now := time.Now()
+	expiresAt := now.Add(sessionTTL)
+	sessionID := newAdminSessionID()
+	sessionToken := s.createSessionToken(username, sessionID, expiresAt)
+	_ = s.store.AppendAdminSession(adminSessionRecord{
+		ID:        sessionID,
+		Username:  username,
+		IP:        requestClientIP(r),
+		UserAgent: truncateAuditText(r.UserAgent(), 220),
+		Status:    "active",
+		CreatedAt: now.UTC(),
+		ExpiresAt: expiresAt.UTC(),
+	})
 	http.SetCookie(w, &http.Cookie{
 		Name:     adminSessionCookie,
-		Value:    s.createSessionToken(username, time.Now().Add(adminSessionTTL)),
+		Value:    sessionToken,
 		Path:     entry,
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
-		Expires:  time.Now().Add(adminSessionTTL),
-		MaxAge:   int(adminSessionTTL.Seconds()),
+		Expires:  expiresAt,
+		MaxAge:   int(sessionTTL.Seconds()),
 	})
 	s.recordAuditEvent(r, state, auditEventInput{
 		Category:   "login",
@@ -475,13 +596,20 @@ func (s *adminServer) loginSubmit(w http.ResponseWriter, r *http.Request) {
 func (s *adminServer) logout(w http.ResponseWriter, r *http.Request) {
 	entry := s.adminEntryForRequest(r)
 	if state, err := s.store.Load(); err == nil && state.Initialized {
+		actor := s.sessionUsername(r)
+		if actor == "" {
+			actor = state.AdminUser
+		}
 		s.recordAuditEvent(r, state, auditEventInput{
 			Category:   "login",
 			Action:     "退出登录",
-			Actor:      state.AdminUser,
+			Actor:      actor,
 			Detail:     "管理员退出后台会话",
 			StatusCode: http.StatusFound,
 		})
+	}
+	if cookie, err := r.Cookie(adminSessionCookie); err == nil {
+		s.revokeSessionToken(cookie.Value)
 	}
 	http.SetCookie(w, &http.Cookie{
 		Name:     adminSessionCookie,
@@ -513,7 +641,7 @@ func (s *adminServer) adminPage(w http.ResponseWriter, r *http.Request, active s
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	_ = adminWorkspaceTemplate.Execute(w, s.adminPageData(state, entry, active, r.URL.Query(), s.sessionUsername(r)))
+	_ = adminWorkspaceTemplate.Execute(w, s.adminPageData(state, entry, active, r.URL.Query(), s.sessionUsername(r), s.sessionID(r), requestPublicBaseURL(r)))
 }
 
 func (s *adminServer) settingsSystemSubmit(w http.ResponseWriter, r *http.Request) {
@@ -532,16 +660,18 @@ func (s *adminServer) settingsSystemSubmit(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	before := systemSettingSnapshot(state.SiteName, state.System)
 	state.SiteName = siteName
 	state.System = systemConfigFromForm(r).normalized()
 	if err := s.store.Save(state); err != nil {
 		http.Redirect(w, r, entry+"/settings?error="+url.QueryEscape("保存系统设置失败："+err.Error()), http.StatusFound)
 		return
 	}
+	s.recordSettingChange(r, state, "system", "保存基础信息", "更新站点名称、公共首页展示、默认语言或时区", before, systemSettingSnapshot(state.SiteName, state.System))
 	s.recordAuditEvent(r, state, auditEventInput{
 		Category:   "operation",
 		Action:     "保存基础信息",
-		Detail:     "更新站点名称、默认语言或时区",
+		Detail:     "更新站点名称、公共首页展示、默认语言或时区",
 		StatusCode: http.StatusFound,
 	})
 	http.Redirect(w, r, entry+"/settings?saved=system", http.StatusFound)
@@ -557,13 +687,16 @@ func (s *adminServer) settingsStorageSubmit(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	before := state.Storage.normalized()
 	storage := storageConfigFromForm(r).normalized()
 	if err := validateStorageConfig(storage); err != nil {
+		s.notifyAdminEvent(r, state, state.Notifications.normalized().EventStorageWarning, "storage_warning", "存储设置校验未通过", err.Error())
 		http.Redirect(w, r, entry+"/settings?error="+url.QueryEscape(err.Error()), http.StatusFound)
 		return
 	}
 	if storage.IsLocal() {
 		if err := os.MkdirAll(storage.LocalPath, 0o755); err != nil {
+			s.notifyAdminEvent(r, state, state.Notifications.normalized().EventStorageWarning, "storage_warning", "本地存储目录创建失败", "目录 "+storage.LocalPath+" 创建失败："+err.Error())
 			http.Redirect(w, r, entry+"/settings?error="+url.QueryEscape("创建本地存储目录失败："+err.Error()), http.StatusFound)
 			return
 		}
@@ -574,6 +707,7 @@ func (s *adminServer) settingsStorageSubmit(w http.ResponseWriter, r *http.Reque
 		http.Redirect(w, r, entry+"/settings?error="+url.QueryEscape("保存存储设置失败："+err.Error()), http.StatusFound)
 		return
 	}
+	s.recordSettingChange(r, state, "storage", "保存存储设置", "更新上传目录、扩展名、文件大小限制或导出保留策略", before, storage)
 	s.recordAuditEvent(r, state, auditEventInput{
 		Category:   "operation",
 		Action:     "保存存储设置",
@@ -581,6 +715,279 @@ func (s *adminServer) settingsStorageSubmit(w http.ResponseWriter, r *http.Reque
 		StatusCode: http.StatusFound,
 	})
 	http.Redirect(w, r, entry+"/settings?saved=storage", http.StatusFound)
+}
+
+func (s *adminServer) settingsAISubmit(w http.ResponseWriter, r *http.Request) {
+	state, entry, ok := s.authenticatedAdminState(w, r)
+	if !ok {
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Redirect(w, r, entry+"/settings?error="+url.QueryEscape("AI 设置请求格式不正确"), http.StatusFound)
+		return
+	}
+
+	before := redactedAISettingSnapshot(state.AI)
+	ai := aiConfigFromForm(r).sanitized()
+	if ai.Provider == "bailian" && strings.TrimSpace(ai.APIKey) == "" {
+		ai.APIKey = strings.TrimSpace(state.AI.APIKey)
+	}
+	if ai.Provider == "disabled" {
+		ai.APIKey = ""
+	}
+	check := checkAIConfig(r.Context(), ai)
+	if !check.OK {
+		http.Redirect(w, r, entry+"/settings?error="+url.QueryEscape("AI 配置检查未通过："+check.Message), http.StatusFound)
+		return
+	}
+
+	state.AI = ai
+	if err := s.store.Save(state); err != nil {
+		http.Redirect(w, r, entry+"/settings?error="+url.QueryEscape("保存 AI 设置失败："+err.Error()), http.StatusFound)
+		return
+	}
+	s.recordSettingChange(r, state, "ai", "保存 AI 设置", "更新 AI 服务商、Base URL 或默认模型", before, redactedAISettingSnapshot(state.AI))
+	s.recordAuditEvent(r, state, auditEventInput{
+		Category:   "operation",
+		Action:     "保存 AI 设置",
+		Detail:     "更新 AI 服务商、Base URL 或默认模型",
+		StatusCode: http.StatusFound,
+	})
+	http.Redirect(w, r, entry+"/settings?saved=ai", http.StatusFound)
+}
+
+func (s *adminServer) settingsSecuritySubmit(w http.ResponseWriter, r *http.Request) {
+	state, entry, ok := s.authenticatedAdminState(w, r)
+	if !ok {
+		return
+	}
+	currentUser := s.sessionUsername(r)
+	if currentUser == "" {
+		currentUser = state.AdminUser
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Redirect(w, r, entry+"/settings?error="+url.QueryEscape("安全设置请求格式不正确"), http.StatusFound)
+		return
+	}
+
+	action := strings.TrimSpace(r.FormValue("security_action"))
+	if action == "" && strings.TrimSpace(r.FormValue("current_password")) == "" && strings.TrimSpace(r.FormValue("new_password")) == "" {
+		action = "policy"
+	}
+	if action == "policy" {
+		before := state.Security.normalized()
+		security := securityConfigFromForm(r).normalized()
+		if err := validateSecurityConfig(security); err != nil {
+			http.Redirect(w, r, entry+"/settings?error="+url.QueryEscape(err.Error()), http.StatusFound)
+			return
+		}
+		state.Security = security
+		if err := s.store.Save(state); err != nil {
+			http.Redirect(w, r, entry+"/settings?error="+url.QueryEscape("保存登录保护失败："+err.Error()), http.StatusFound)
+			return
+		}
+		s.recordSettingChange(r, state, "security", "保存登录保护", "更新会话有效期、失败阈值和锁定窗口", before, security)
+		s.recordAuditEvent(r, state, auditEventInput{
+			Category:   "operation",
+			Action:     "保存登录保护",
+			Actor:      currentUser,
+			Detail:     "更新会话有效期、失败阈值和锁定窗口",
+			StatusCode: http.StatusFound,
+		})
+		http.Redirect(w, r, entry+"/settings?saved=security", http.StatusFound)
+		return
+	}
+
+	currentPassword := r.FormValue("current_password")
+	newPassword := r.FormValue("new_password")
+	confirmation := r.FormValue("new_password_confirmation")
+	if !state.credentialsMatch(currentUser, currentPassword) {
+		http.Redirect(w, r, entry+"/settings?error="+url.QueryEscape("当前密码不正确"), http.StatusFound)
+		return
+	}
+	if len(newPassword) < 6 {
+		http.Redirect(w, r, entry+"/settings?error="+url.QueryEscape("新密码长度至少 6 位"), http.StatusFound)
+		return
+	}
+	if newPassword != confirmation {
+		http.Redirect(w, r, entry+"/settings?error="+url.QueryEscape("两次输入的新密码不一致"), http.StatusFound)
+		return
+	}
+
+	salt, hash, err := hashPassword(newPassword)
+	if err != nil {
+		http.Redirect(w, r, entry+"/settings?error="+url.QueryEscape("生成新密码失败："+err.Error()), http.StatusFound)
+		return
+	}
+	if strings.EqualFold(currentUser, state.AdminUser) {
+		state.PasswordSalt = salt
+		state.PasswordHash = hash
+		if s.debugMode() {
+			state.DebugLoginPassword = newPassword
+		}
+	} else {
+		access := state.Access.normalized(state)
+		index := findAdminAccountIndex(access.Users, currentUser)
+		if index < 0 {
+			http.Redirect(w, r, entry+"/settings?error="+url.QueryEscape("当前管理员不存在"), http.StatusFound)
+			return
+		}
+		access.Users[index].PasswordSalt = salt
+		access.Users[index].PasswordHash = hash
+		access.Users[index].UpdatedAt = time.Now().UTC()
+		state.Access = access.withoutBootstrap(state)
+	}
+	if err := s.store.Save(state); err != nil {
+		http.Redirect(w, r, entry+"/settings?error="+url.QueryEscape("保存安全设置失败："+err.Error()), http.StatusFound)
+		return
+	}
+	s.recordSettingChange(r, state, "security", "修改管理员密码", "当前管理员更新登录密码", map[string]string{"password": "redacted"}, map[string]string{"password": "changed"})
+	s.recordAuditEvent(r, state, auditEventInput{
+		Category:   "operation",
+		Action:     "修改管理员密码",
+		Actor:      currentUser,
+		Detail:     "当前管理员更新登录密码",
+		StatusCode: http.StatusFound,
+	})
+	http.Redirect(w, r, entry+"/settings?saved=security", http.StatusFound)
+}
+
+func (s *adminServer) settingsNotificationsSubmit(w http.ResponseWriter, r *http.Request) {
+	state, entry, ok := s.authenticatedAdminState(w, r)
+	if !ok {
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Redirect(w, r, entry+"/settings?error="+url.QueryEscape("通知设置请求格式不正确"), http.StatusFound)
+		return
+	}
+
+	before := redactedNotificationSettingSnapshot(state.Notifications)
+	notifications := notificationConfigFromForm(r).normalized()
+	if notifications.Channel == "feishu" && strings.TrimSpace(notifications.FeishuSecret) == "" {
+		notifications.FeishuSecret = strings.TrimSpace(state.Notifications.FeishuSecret)
+	}
+	if notifications.Channel != "feishu" {
+		notifications.FeishuSecret = ""
+	}
+	if err := validateNotificationConfig(notifications); err != nil {
+		http.Redirect(w, r, entry+"/settings?error="+url.QueryEscape(err.Error()), http.StatusFound)
+		return
+	}
+	state.Notifications = notifications
+	if err := s.store.Save(state); err != nil {
+		http.Redirect(w, r, entry+"/settings?error="+url.QueryEscape("保存通知设置失败："+err.Error()), http.StatusFound)
+		return
+	}
+	s.recordSettingChange(r, state, "notifications", "保存通知设置", "更新后台通知通道、接收人与触发事件", before, redactedNotificationSettingSnapshot(state.Notifications))
+	s.recordAuditEvent(r, state, auditEventInput{
+		Category:   "operation",
+		Action:     "保存通知设置",
+		Detail:     "更新后台通知通道、接收人与触发事件",
+		StatusCode: http.StatusFound,
+	})
+	http.Redirect(w, r, entry+"/settings?saved=notifications", http.StatusFound)
+}
+
+func (s *adminServer) settingsNotificationTestSubmit(w http.ResponseWriter, r *http.Request) {
+	state, entry, ok := s.authenticatedAdminState(w, r)
+	if !ok {
+		return
+	}
+
+	result, err := s.deliverAdminNotification(r.Context(), state, "notification_test", "Moyi Admin 测试通知", "后台通知通道测试成功。如果你收到了这条消息，说明当前通知配置可用。")
+	if err != nil {
+		s.recordAuditEvent(r, state, auditEventInput{
+			Category:   "operation",
+			Action:     "测试通知",
+			Detail:     "测试通知发送失败：" + err.Error(),
+			StatusCode: http.StatusFound,
+		})
+		http.Redirect(w, r, entry+"/settings?error="+url.QueryEscape("测试通知失败："+err.Error()), http.StatusFound)
+		return
+	}
+	s.recordAuditEvent(r, state, auditEventInput{
+		Category:   "operation",
+		Action:     "测试通知",
+		Detail:     result.Message,
+		StatusCode: http.StatusFound,
+	})
+	http.Redirect(w, r, entry+"/settings?saved=notification_test", http.StatusFound)
+}
+
+func (s *adminServer) recordSettingChange(r *http.Request, state installState, category string, action string, summary string, before any, after any) {
+	actor := s.sessionUsername(r)
+	if actor == "" {
+		actor = state.AdminUser
+	}
+	_ = s.store.AppendSettingChange(adminSettingChangeRecord{
+		Timestamp:  time.Now().UTC(),
+		Category:   strings.TrimSpace(category),
+		Action:     strings.TrimSpace(action),
+		Actor:      actor,
+		Summary:    truncateAuditText(summary, 300),
+		BeforeJSON: settingChangeJSON(before),
+		AfterJSON:  settingChangeJSON(after),
+	})
+}
+
+func settingChangeJSON(value any) string {
+	if value == nil {
+		return "{}"
+	}
+	data, err := json.Marshal(value)
+	if err != nil {
+		return "{}"
+	}
+	return string(data)
+}
+
+func systemSettingSnapshot(siteName string, system systemConfig) map[string]string {
+	system = system.normalized()
+	return map[string]string{
+		"site_name":          strings.TrimSpace(siteName),
+		"timezone":           system.Timezone,
+		"locale":             system.Locale,
+		"admin_tagline":      system.AdminTagline,
+		"public_tagline":     system.PublicTagline,
+		"public_headline":    system.PublicHeadline,
+		"public_description": system.PublicDescription,
+	}
+}
+
+func redactedAISettingSnapshot(ai aiConfig) map[string]string {
+	ai = ai.sanitized()
+	return map[string]string{
+		"provider":       ai.Provider,
+		"base_url":       ai.BaseURL,
+		"chat_model":     ai.ChatModel,
+		"api_key_masked": ai.maskedAPIKey(),
+	}
+}
+
+func redactedNotificationSettingSnapshot(config notificationConfig) map[string]any {
+	config = config.normalized()
+	return map[string]any{
+		"enabled":               config.Enabled,
+		"channel":               config.Channel,
+		"receiver":              config.Receiver,
+		"target_masked":         redactedNotificationSettingTarget(config),
+		"feishu_secret_set":     config.Channel == "feishu" && strings.TrimSpace(config.FeishuSecret) != "",
+		"event_login_failures":  config.EventLoginFailures,
+		"event_ai_errors":       config.EventAIErrors,
+		"event_storage_warning": config.EventStorageWarning,
+	}
+}
+
+func redactedNotificationSettingTarget(config notificationConfig) string {
+	config = config.normalized()
+	if config.Channel != "webhook" && config.Channel != "feishu" {
+		return notificationChannelLabel(config.Channel)
+	}
+	if strings.TrimSpace(config.WebhookURL) == "" {
+		return notificationChannelLabel(config.Channel) + " 未配置"
+	}
+	return notificationChannelLabel(config.Channel) + " 已配置"
 }
 
 func (s *adminServer) dataSourceSaveSubmit(w http.ResponseWriter, r *http.Request) {
@@ -629,16 +1036,25 @@ func (s *adminServer) dataSourceTestSubmit(w http.ResponseWriter, r *http.Reques
 	}
 
 	result := checkDataSourceConfig(state.DataSources[index])
+	checkedAt := time.Now().UTC()
 	state.DataSources[index].Status = "unavailable"
 	if result.OK {
 		state.DataSources[index].Status = "available"
 	}
 	state.DataSources[index].LastMessage = result.Message
 	state.DataSources[index].SchemaSummary = strings.Join(result.Checks, "；")
-	state.DataSources[index].LastCheckedAt = time.Now().UTC()
+	state.DataSources[index].LastCheckedAt = checkedAt
 	if err := s.store.Save(state); err != nil {
 		http.Redirect(w, r, entry+"/data-sources?error="+url.QueryEscape("保存数据源测试结果失败："+err.Error()), http.StatusFound)
 		return
+	}
+	if result.OK {
+		if snapshot, ok := newSchemaSnapshotRecord(state.DataSources[index], result, checkedAt); ok {
+			if err := s.store.AppendSchemaSnapshot(snapshot); err != nil {
+				http.Redirect(w, r, entry+"/data-sources?error="+url.QueryEscape("保存结构快照失败："+err.Error()), http.StatusFound)
+				return
+			}
+		}
 	}
 	s.recordAuditEvent(r, state, auditEventInput{
 		Category:   "operation",
@@ -824,6 +1240,38 @@ func (s *adminServer) adminUserDeleteSubmit(w http.ResponseWriter, r *http.Reque
 	http.Redirect(w, r, entry+"/users?saved=delete", http.StatusFound)
 }
 
+func (s *adminServer) adminSessionRevokeSubmit(w http.ResponseWriter, r *http.Request) {
+	state, entry, ok := s.authenticatedAdminState(w, r)
+	if !ok {
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Redirect(w, r, entry+"/users?error="+url.QueryEscape("会话请求格式不正确"), http.StatusFound)
+		return
+	}
+	sessionID := strings.TrimSpace(r.FormValue("session_id"))
+	if sessionID == "" {
+		http.Redirect(w, r, entry+"/users?error="+url.QueryEscape("会话不存在"), http.StatusFound)
+		return
+	}
+	if sessionID == s.sessionID(r) {
+		http.Redirect(w, r, entry+"/users?error="+url.QueryEscape("不能在这里下线当前会话，请使用右上角退出登录"), http.StatusFound)
+		return
+	}
+	if err := s.store.RevokeAdminSession(sessionID, time.Now().UTC()); err != nil {
+		http.Redirect(w, r, entry+"/users?error="+url.QueryEscape("下线会话失败："+err.Error()), http.StatusFound)
+		return
+	}
+	s.recordAuditEvent(r, state, auditEventInput{
+		Category:   "operation",
+		Action:     "下线后台会话",
+		Actor:      s.sessionUsername(r),
+		Detail:     "强制下线会话：" + truncateAuditText(sessionID, 80),
+		StatusCode: http.StatusFound,
+	})
+	http.Redirect(w, r, entry+"/users?saved=session", http.StatusFound)
+}
+
 func (s *adminServer) fileUploadSubmit(w http.ResponseWriter, r *http.Request) {
 	state, entry, ok := s.authenticatedAdminState(w, r)
 	if !ok {
@@ -831,15 +1279,18 @@ func (s *adminServer) fileUploadSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 	storage := state.Storage.normalized()
 	if err := validateStorageConfig(storage); err != nil {
+		s.notifyAdminEvent(r, state, state.Notifications.normalized().EventStorageWarning, "storage_warning", "文件上传被存储配置拦截", err.Error())
 		http.Redirect(w, r, entry+"/files?error="+url.QueryEscape(err.Error()), http.StatusFound)
 		return
 	}
 	root, err := storageLocalRoot(storage)
 	if err != nil {
+		s.notifyAdminEvent(r, state, state.Notifications.normalized().EventStorageWarning, "storage_warning", "存储目录不可用", err.Error())
 		http.Redirect(w, r, entry+"/files?error="+url.QueryEscape("存储目录不可用："+err.Error()), http.StatusFound)
 		return
 	}
 	if err := os.MkdirAll(root, 0o755); err != nil {
+		s.notifyAdminEvent(r, state, state.Notifications.normalized().EventStorageWarning, "storage_warning", "创建存储目录失败", "目录 "+root+" 创建失败："+err.Error())
 		http.Redirect(w, r, entry+"/files?error="+url.QueryEscape("创建存储目录失败："+err.Error()), http.StatusFound)
 		return
 	}
@@ -847,6 +1298,7 @@ func (s *adminServer) fileUploadSubmit(w http.ResponseWriter, r *http.Request) {
 	maxBytes := int64(storage.MaxFileSizeMB) * 1024 * 1024
 	r.Body = http.MaxBytesReader(w, r.Body, maxBytes*10+1024*1024)
 	if err := r.ParseMultipartForm(32 << 20); err != nil {
+		s.notifyAdminEvent(r, state, state.Notifications.normalized().EventStorageWarning, "storage_warning", "读取上传文件失败", err.Error())
 		http.Redirect(w, r, entry+"/files?error="+url.QueryEscape("读取上传文件失败："+err.Error()), http.StatusFound)
 		return
 	}
@@ -860,14 +1312,17 @@ func (s *adminServer) fileUploadSubmit(w http.ResponseWriter, r *http.Request) {
 	uploaded := 0
 	for _, header := range files {
 		if header.Size > maxBytes {
+			s.notifyAdminEvent(r, state, state.Notifications.normalized().EventStorageWarning, "storage_warning", "文件超过上传大小限制", "文件 "+header.Filename+" 超过 "+strconv.Itoa(storage.MaxFileSizeMB)+" MB 限制。")
 			http.Redirect(w, r, entry+"/files?error="+url.QueryEscape("文件超过大小限制："+header.Filename), http.StatusFound)
 			return
 		}
 		if !storageExtensionAllowed(storage, header.Filename) {
+			s.notifyAdminEvent(r, state, state.Notifications.normalized().EventStorageWarning, "storage_warning", "不支持的文件扩展名", "文件 "+header.Filename+" 的扩展名 "+filepath.Ext(header.Filename)+" 未在允许列表中。")
 			http.Redirect(w, r, entry+"/files?error="+url.QueryEscape("不支持的文件扩展名："+filepath.Ext(header.Filename)), http.StatusFound)
 			return
 		}
 		if err := saveUploadedFile(root, header.Filename, header.Open, maxBytes); err != nil {
+			s.notifyAdminEvent(r, state, state.Notifications.normalized().EventStorageWarning, "storage_warning", "保存上传文件失败", "文件 "+header.Filename+" 保存失败："+err.Error())
 			http.Redirect(w, r, entry+"/files?error="+url.QueryEscape("保存文件失败："+err.Error()), http.StatusFound)
 			return
 		}
@@ -963,6 +1418,357 @@ func (s *adminServer) fileServe(w http.ResponseWriter, r *http.Request, download
 	http.ServeFile(w, r, target)
 }
 
+func (s *adminServer) backgroundTaskEnqueueSubmit(w http.ResponseWriter, r *http.Request) {
+	state, entry, ok := s.authenticatedAdminState(w, r)
+	if !ok {
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Redirect(w, r, entry+"/tasks?error="+url.QueryEscape("任务请求格式不正确"), http.StatusFound)
+		return
+	}
+	taskType := strings.TrimSpace(r.FormValue("task_type"))
+	task, err := newBackgroundTaskRecord(taskType, s.sessionUsername(r))
+	if err != nil {
+		http.Redirect(w, r, entry+"/tasks?error="+url.QueryEscape(err.Error()), http.StatusFound)
+		return
+	}
+	if err := s.store.EnqueueBackgroundTask(task); err != nil {
+		http.Redirect(w, r, entry+"/tasks?error="+url.QueryEscape("任务入队失败："+err.Error()), http.StatusFound)
+		return
+	}
+	s.appendBackgroundTaskLog(task, "info", "queued", "任务已加入 "+task.Queue+" 队列")
+	s.recordAuditEvent(r, state, auditEventInput{
+		Category:   "task",
+		Action:     "创建后台任务",
+		Actor:      s.sessionUsername(r),
+		Detail:     task.Name + " 已加入 " + task.Queue + " 队列",
+		StatusCode: http.StatusFound,
+	})
+	http.Redirect(w, r, entry+"/tasks?saved=enqueue", http.StatusFound)
+}
+
+func (s *adminServer) backgroundTaskSettingsSubmit(w http.ResponseWriter, r *http.Request) {
+	state, entry, ok := s.authenticatedAdminState(w, r)
+	if !ok {
+		return
+	}
+	redirectPath := entry + "/tasks"
+	successQuery := "saved=settings"
+	if strings.Contains(r.URL.Path, "/settings/tasks") {
+		redirectPath = entry + "/settings"
+		successQuery = "saved=task_worker"
+	}
+	redirectError := func(message string) {
+		http.Redirect(w, r, redirectPath+"?error="+url.QueryEscape(message), http.StatusFound)
+	}
+	if err := r.ParseForm(); err != nil {
+		redirectError("任务设置请求格式不正确")
+		return
+	}
+	before := state.TaskWorker.normalized()
+	config := taskWorkerConfigFromForm(r).normalized()
+	if err := validateTaskWorkerConfig(config); err != nil {
+		redirectError(err.Error())
+		return
+	}
+	state.TaskWorker = config
+	if err := s.store.Save(state); err != nil {
+		redirectError("保存任务设置失败：" + err.Error())
+		return
+	}
+	s.recordSettingChange(r, state, "task", "保存任务设置", "更新后台任务自动执行与定时调度策略", before, config)
+	s.recordAuditEvent(r, state, auditEventInput{
+		Category:   "task",
+		Action:     "保存任务设置",
+		Actor:      s.sessionUsername(r),
+		Detail:     "更新后台任务自动执行与定时调度策略",
+		StatusCode: http.StatusFound,
+	})
+	http.Redirect(w, r, redirectPath+"?"+successQuery, http.StatusFound)
+}
+
+func (s *adminServer) backgroundTaskRunSubmit(w http.ResponseWriter, r *http.Request) {
+	state, entry, ok := s.authenticatedAdminState(w, r)
+	if !ok {
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Redirect(w, r, entry+"/tasks?error="+url.QueryEscape("任务执行请求格式不正确"), http.StatusFound)
+		return
+	}
+	taskID := strings.TrimSpace(r.FormValue("task_id"))
+	task, err := s.runnableBackgroundTask(taskID)
+	if err != nil {
+		http.Redirect(w, r, entry+"/tasks?error="+url.QueryEscape(err.Error()), http.StatusFound)
+		return
+	}
+	task = s.runBackgroundTask(r.Context(), state, task)
+	if err := s.store.UpdateBackgroundTask(task); err != nil {
+		http.Redirect(w, r, entry+"/tasks?error="+url.QueryEscape("保存任务结果失败："+err.Error()), http.StatusFound)
+		return
+	}
+	statusCode := http.StatusFound
+	if task.Status == "failed" {
+		statusCode = http.StatusInternalServerError
+	}
+	s.recordAuditEvent(r, state, auditEventInput{
+		Category:   "task",
+		Action:     "执行后台任务",
+		Actor:      s.sessionUsername(r),
+		Detail:     task.Name + "：" + backgroundTaskStatusLabel(task.Status),
+		StatusCode: statusCode,
+	})
+	if task.Status == "failed" {
+		http.Redirect(w, r, entry+"/tasks?error="+url.QueryEscape("任务执行失败："+task.LastError), http.StatusFound)
+		return
+	}
+	http.Redirect(w, r, entry+"/tasks?saved=run", http.StatusFound)
+}
+
+func (s *adminServer) backgroundTaskRunAllSubmit(w http.ResponseWriter, r *http.Request) {
+	state, entry, ok := s.authenticatedAdminState(w, r)
+	if !ok {
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Redirect(w, r, entry+"/tasks?error="+url.QueryEscape("批量执行请求格式不正确"), http.StatusFound)
+		return
+	}
+	limit := 20
+	completed := 0
+	failed := 0
+	for completed+failed < limit {
+		task, err := s.runnableBackgroundTask("")
+		if err != nil && (errors.Is(err, sql.ErrNoRows) || strings.Contains(err.Error(), "暂无可执行")) {
+			break
+		}
+		if err != nil {
+			http.Redirect(w, r, entry+"/tasks?error="+url.QueryEscape("读取待执行任务失败："+err.Error()), http.StatusFound)
+			return
+		}
+		task = s.runBackgroundTask(r.Context(), state, task)
+		if err := s.store.UpdateBackgroundTask(task); err != nil {
+			http.Redirect(w, r, entry+"/tasks?error="+url.QueryEscape("保存任务结果失败："+err.Error()), http.StatusFound)
+			return
+		}
+		if task.Status == "succeeded" {
+			completed++
+		} else {
+			failed++
+		}
+	}
+	s.recordAuditEvent(r, state, auditEventInput{
+		Category:   "task",
+		Action:     "批量执行后台任务",
+		Actor:      s.sessionUsername(r),
+		Detail:     "批量执行完成 " + strconv.Itoa(completed) + " 个，失败/待重试 " + strconv.Itoa(failed) + " 个",
+		StatusCode: http.StatusFound,
+	})
+	http.Redirect(w, r, entry+"/tasks?saved=run_all&count="+strconv.Itoa(completed)+"&failed="+strconv.Itoa(failed), http.StatusFound)
+}
+
+func (s *adminServer) backgroundTaskRetrySubmit(w http.ResponseWriter, r *http.Request) {
+	state, entry, ok := s.authenticatedAdminState(w, r)
+	if !ok {
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Redirect(w, r, entry+"/tasks?error="+url.QueryEscape("任务重试请求格式不正确"), http.StatusFound)
+		return
+	}
+	taskID := strings.TrimSpace(r.FormValue("task_id"))
+	if taskID == "" {
+		http.Redirect(w, r, entry+"/tasks?error="+url.QueryEscape("缺少任务 ID"), http.StatusFound)
+		return
+	}
+	task, err := s.store.BackgroundTaskByID(taskID)
+	if errors.Is(err, sql.ErrNoRows) {
+		http.Redirect(w, r, entry+"/tasks?error="+url.QueryEscape("任务不存在"), http.StatusFound)
+		return
+	}
+	if err != nil {
+		http.Redirect(w, r, entry+"/tasks?error="+url.QueryEscape("读取任务失败："+err.Error()), http.StatusFound)
+		return
+	}
+	task.Status = "pending"
+	task.AvailableAt = time.Now().UTC()
+	task.StartedAt = time.Time{}
+	task.FinishedAt = time.Time{}
+	task.LastError = ""
+	task.UpdatedAt = time.Now().UTC()
+	if err := s.store.UpdateBackgroundTask(task); err != nil {
+		http.Redirect(w, r, entry+"/tasks?error="+url.QueryEscape("任务重试失败："+err.Error()), http.StatusFound)
+		return
+	}
+	s.appendBackgroundTaskLog(task, "info", "retry", "任务已被管理员重新放回待执行队列")
+	s.recordAuditEvent(r, state, auditEventInput{
+		Category:   "task",
+		Action:     "重试后台任务",
+		Actor:      s.sessionUsername(r),
+		Detail:     task.Name + " 已重新进入 pending 状态",
+		StatusCode: http.StatusFound,
+	})
+	http.Redirect(w, r, entry+"/tasks?saved=retry", http.StatusFound)
+}
+
+func (s *adminServer) backgroundTaskCancelSubmit(w http.ResponseWriter, r *http.Request) {
+	state, entry, ok := s.authenticatedAdminState(w, r)
+	if !ok {
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Redirect(w, r, entry+"/tasks?error="+url.QueryEscape("任务取消请求格式不正确"), http.StatusFound)
+		return
+	}
+	taskID := strings.TrimSpace(r.FormValue("task_id"))
+	if taskID == "" {
+		http.Redirect(w, r, entry+"/tasks?error="+url.QueryEscape("缺少任务 ID"), http.StatusFound)
+		return
+	}
+	task, err := s.store.BackgroundTaskByID(taskID)
+	if errors.Is(err, sql.ErrNoRows) {
+		http.Redirect(w, r, entry+"/tasks?error="+url.QueryEscape("任务不存在"), http.StatusFound)
+		return
+	}
+	if err != nil {
+		http.Redirect(w, r, entry+"/tasks?error="+url.QueryEscape("读取任务失败："+err.Error()), http.StatusFound)
+		return
+	}
+	status := strings.ToLower(strings.TrimSpace(task.Status))
+	if status != "pending" && status != "retry" {
+		http.Redirect(w, r, entry+"/tasks?error="+url.QueryEscape("只有待执行或等待重试的任务可以取消"), http.StatusFound)
+		return
+	}
+	now := time.Now().UTC()
+	task.Status = "canceled"
+	task.Result = "管理员取消任务"
+	task.LastError = ""
+	task.FinishedAt = now
+	task.UpdatedAt = now
+	if err := s.store.UpdateBackgroundTask(task); err != nil {
+		http.Redirect(w, r, entry+"/tasks?error="+url.QueryEscape("取消任务失败："+err.Error()), http.StatusFound)
+		return
+	}
+	s.appendBackgroundTaskLog(task, "warn", "canceled", "任务已被管理员取消")
+	s.recordAuditEvent(r, state, auditEventInput{
+		Category:   "task",
+		Action:     "取消后台任务",
+		Actor:      s.sessionUsername(r),
+		Detail:     task.Name + " 已取消",
+		StatusCode: http.StatusFound,
+	})
+	http.Redirect(w, r, entry+"/tasks?saved=cancel", http.StatusFound)
+}
+
+func (s *adminServer) auditExport(w http.ResponseWriter, r *http.Request) {
+	state, _, ok := s.authenticatedAdminState(w, r)
+	if !ok {
+		return
+	}
+	filter := auditFilterFromQuery(r.URL.Query())
+	events := filterAuditEvents(s.listAuditEvents(2000), filter)
+	s.recordAuditEvent(r, state, auditEventInput{
+		Category:   "operation",
+		Action:     "导出审计日志",
+		Detail:     "导出审计日志 " + strconv.Itoa(len(events)) + " 条",
+		StatusCode: http.StatusOK,
+	})
+
+	filename := "moyi-audit-" + time.Now().Format("20060102-150405") + ".csv"
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
+	w.WriteHeader(http.StatusOK)
+	writer := csv.NewWriter(w)
+	_ = writer.Write([]string{"时间", "分类", "操作", "管理员", "详情", "方法", "路径", "IP", "状态", "耗时"})
+	for _, event := range events {
+		_ = writer.Write([]string{event.Time, event.Category, event.Action, event.Actor, event.Detail, event.Method, event.Path, event.IP, event.Status, event.Duration})
+	}
+	writer.Flush()
+}
+
+func (s *adminServer) extensionsExport(w http.ResponseWriter, r *http.Request) {
+	state, _, ok := s.authenticatedAdminState(w, r)
+	if !ok {
+		return
+	}
+	models := buildResourceModels(state)
+	tools := buildResourceTools(models)
+	plugins := buildPluginExtensions(state, models, tools)
+	total := len(plugins) + len(models) + len(tools)
+	s.recordAuditEvent(r, state, auditEventInput{
+		Category:   "operation",
+		Action:     "导出能力扩展清单",
+		Detail:     "导出插件、资源模型和工具清单 " + strconv.Itoa(total) + " 条",
+		StatusCode: http.StatusOK,
+	})
+
+	filename := "moyi-extensions-" + time.Now().Format("20060102-150405") + ".csv"
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
+	w.WriteHeader(http.StatusOK)
+	writer := csv.NewWriter(w)
+	_ = writer.Write([]string{"类别", "标识", "名称", "来源", "动作/资源", "状态", "说明"})
+	for _, plugin := range plugins {
+		_ = writer.Write([]string{"插件扩展包", plugin.Key, plugin.Name, plugin.Kind + " / " + plugin.Version, plugin.Resources + " / " + plugin.Tools, plugin.Status, plugin.Description})
+	}
+	for _, model := range models {
+		_ = writer.Write([]string{"资源模型", model.Key, model.Name, model.Plugin + " / " + model.Source, model.Actions, model.Status, model.Description + "；" + model.FieldsSummary})
+	}
+	for _, tool := range tools {
+		_ = writer.Write([]string{"资源工具", tool.Name, tool.Resource, tool.Plugin, tool.Action + " / " + tool.Permission, tool.Status, tool.Boundary})
+	}
+	writer.Flush()
+}
+
+func (s *adminServer) agentWeChatMessagesExport(w http.ResponseWriter, r *http.Request) {
+	state, _, ok := s.authenticatedAdminState(w, r)
+	if !ok {
+		return
+	}
+	channelKey := normalizeAgentWeChatChannelKey(r.URL.Query().Get("channel"))
+	records := s.listAgentWeChatMessagesPage(channelKey, 5000, 0)
+	detail := "导出微信 Agent 聊天记录 " + strconv.Itoa(len(records)) + " 条"
+	if channelKey != "" {
+		detail += "，通道 " + channelKey
+	}
+	s.recordAuditEvent(r, state, auditEventInput{
+		Category:   "operation",
+		Action:     "导出微信聊天记录",
+		Detail:     detail,
+		StatusCode: http.StatusOK,
+	})
+
+	filename := "moyi-wechat-agent-messages-" + time.Now().Format("20060102-150405") + ".csv"
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
+	w.WriteHeader(http.StatusOK)
+	writer := csv.NewWriter(w)
+	_ = writer.Write([]string{"收到时间", "回复时间", "通道", "通道名称", "消息ID", "会话ID", "运行ID", "发送人", "接收人", "用户消息", "AI回复", "文件", "状态", "错误", "工具数", "文件数", "耗时ms"})
+	for _, record := range records {
+		_ = writer.Write([]string{
+			formatAdminTime(record.ReceivedAt),
+			formatAdminTime(record.RepliedAt),
+			record.ChannelKey,
+			record.ChannelName,
+			record.MessageID,
+			record.SessionID,
+			record.RunID,
+			record.FromUserID,
+			record.ToUserID,
+			record.InboundText,
+			record.ReplyText,
+			adminAgentWeChatFileSummary(record.Files),
+			agentRunStatusText(record.Status),
+			record.Error,
+			strconv.Itoa(record.ToolCount),
+			strconv.Itoa(record.FileCount),
+			strconv.FormatInt(record.DurationMS, 10),
+		})
+	}
+	writer.Flush()
+}
+
 func (s *adminServer) authenticatedAdminState(w http.ResponseWriter, r *http.Request) (installState, string, bool) {
 	state, err := s.store.Load()
 	if err != nil {
@@ -981,19 +1787,24 @@ func (s *adminServer) authenticatedAdminState(w http.ResponseWriter, r *http.Req
 	return state, entry, true
 }
 
-func (s *adminServer) adminPageData(state installState, entry string, active string, query url.Values, currentUser string) adminPageData {
+func (s *adminServer) adminPageData(state installState, entry string, active string, query url.Values, currentUser string, currentSessionID string, requestBase string) adminPageData {
 	if active == "" {
 		active = "dashboard"
 	}
 	titles := map[string][2]string{
-		"dashboard":    {"工作台", "系统运行概览、迁移进度与关键入口"},
-		"foundation":   {"基础服务", "旧系统基础设施对照、迁移状态与下一步"},
-		"data-sources": {"数据源", "元数据连接、业务库接入与结构探测"},
-		"ai":           {"AI 智能体", "模型服务、工具边界与执行能力"},
-		"users":        {"用户权限", "管理员账号、角色与访问边界"},
-		"settings":     {"系统设置", "安装状态、安全入口与运行参数"},
-		"files":        {"文件管理", "上传文件、存储目录、预览下载与清理"},
-		"audit":        {"审计日志", "初始化、登录与关键操作记录"},
+		"dashboard":             {"工作台", "系统运行概览、迁移进度与关键入口"},
+		"foundation":            {"基础服务", "旧系统基础设施对照、迁移状态与下一步"},
+		"data-sources":          {"数据源", "元数据连接、业务库接入与结构探测"},
+		"extensions":            {"能力扩展", "插件、资源模型与 AI 工具生成"},
+		"ai":                    {"AI 智能体", "模型服务、工具边界与执行能力"},
+		"wechat-agent":          {"微信 Agent 通道", "微信对话入口、二维码绑定、授权数据表与消息状态"},
+		"wechat-agent-messages": {"微信聊天记录", "微信 Agent 的用户消息、AI 回复、文件回复和发送状态归档"},
+		"users":                 {"用户权限", "管理员账号、角色与访问边界"},
+		"settings":              {"系统设置", "安装状态、安全入口与运行参数"},
+		"files":                 {"文件管理", "上传文件、存储目录、预览下载与清理"},
+		"tasks":                 {"后台任务", "异步队列、手动执行、失败重试和任务结果"},
+		"notifications":         {"通知事件", "Webhook / 飞书机器人发送记录、事件状态和失败原因"},
+		"audit":                 {"审计日志", "初始化、登录与关键操作记录"},
 	}
 	title := titles[active]
 	if title[0] == "" {
@@ -1010,11 +1821,25 @@ func (s *adminServer) adminPageData(state installState, entry string, active str
 	installedAt := formatAdminTime(state.InstalledAt)
 	system := state.System.normalized()
 	storage := state.Storage.normalized()
+	security := state.Security.normalized()
+	notifications := state.Notifications.normalized()
+	taskWorker := state.TaskWorker.normalized()
+	agentChannels := state.AgentChannels.normalized()
 	if strings.TrimSpace(currentUser) == "" {
 		currentUser = state.AdminUser
 	}
+	auditFilter := auditFilterFromQuery(query)
 	auditEvents := s.listAuditEvents(120)
-	if len(auditEvents) == 0 {
+	if active == "audit" {
+		auditEvents = filterAuditEvents(s.listAuditEvents(500), auditFilter)
+	}
+	notificationRecords := s.listNotificationDeliveries(120)
+	taskRecords := s.listBackgroundTasks(120)
+	taskLogRecords := s.listBackgroundTaskLogs(160)
+	resourceModels := buildResourceModels(state)
+	resourceTools := buildResourceTools(resourceModels)
+	pluginExtensions := buildPluginExtensions(state, resourceModels, resourceTools)
+	if len(auditEvents) == 0 && !auditFilter.active() {
 		auditEvents = []adminAuditEvent{
 			{Time: installedAt, Category: "system", Action: "系统初始化", Actor: state.AdminUser, Detail: "创建站点、管理员与后台随机入口", Meta: state.AdminUser, Status: "200", StatusClass: "is-ready"},
 			{Time: "当前会话", Category: "operation", Action: "后台访问", Actor: state.AdminUser, Detail: "进入管理控制台", Meta: state.AdminUser, Status: "200", StatusClass: "is-ready"},
@@ -1029,6 +1854,7 @@ func (s *adminServer) adminPageData(state installState, entry string, active str
 		Subtitle:      title[1],
 		SiteName:      state.SiteName,
 		Username:      currentUser,
+		AdminTagline:  system.AdminTagline,
 		AdminEntry:    entry,
 		InstalledAt:   installedAt,
 		Database:      state.Database.DisplayName(),
@@ -1040,10 +1866,16 @@ func (s *adminServer) adminPageData(state installState, entry string, active str
 		AIStatusClass: aiStatusClass,
 	}
 	data.SettingsNotice, data.SettingsNoticeClass = settingsNoticeFromQuery(query)
+	data.AgentNotice, data.AgentNoticeClass = agentNoticeFromQuery(query)
 	data.UserNotice, data.UserNoticeClass = userNoticeFromQuery(query)
 	data.DataSourceNotice, data.DataSourceNoticeClass = dataSourceNoticeFromQuery(query)
 	data.FileNotice, data.FileNoticeClass = fileNoticeFromQuery(query)
+	data.TaskNotice, data.TaskNoticeClass = taskNoticeFromQuery(query)
 	data.NavItems = buildAdminNav(entry, active)
+	data.ExtensionMetrics = buildExtensionMetrics(pluginExtensions, resourceModels, resourceTools)
+	data.PluginExtensions = pluginExtensions
+	data.ResourceModels = resourceModels
+	data.ResourceTools = resourceTools
 	data.Metrics = []adminMetric{
 		{Label: "系统状态", Value: "已初始化", Detail: "安装时间 " + installedAt, Status: "is-ready"},
 		{Label: "元数据数据库", Value: state.Database.DisplayName(), Detail: state.Database.DisplayTarget(), Status: "is-ready"},
@@ -1066,9 +1898,21 @@ func (s *adminServer) adminPageData(state installState, entry string, active str
 		{Name: "安全边界", Boundary: "拒绝写入、多语句、注释与危险关键字", Status: "已启用", StatusClass: "is-ready"},
 		{Name: "导出与记忆", Boundary: "表格导出、运行记录、会话和工具结果落入元数据表", Status: "已接入", StatusClass: "is-ready"},
 	}
+	data.AgentWeChatChannel = buildAdminAgentWeChatChannel(agentChannels.WeChat, entry, requestBase)
+	data.AgentWeChatChannels = buildAdminAgentWeChatChannels(agentChannels, entry, requestBase)
+	if active == "wechat-agent" {
+		wechatMessages := buildAdminAgentWeChatMessageRowsByChannel(s.listAgentWeChatMessages(500))
+		for i := range data.AgentWeChatChannels {
+			data.AgentWeChatChannels[i].ChatMessages = wechatMessages[data.AgentWeChatChannels[i].Key]
+		}
+	}
+	if active == "wechat-agent-messages" {
+		data.AgentWeChatMessagePage = s.buildAdminAgentWeChatMessagePage(query, entry, agentChannels)
+	}
 	data.AgentRuns = buildAdminAgentRunRows(s.listAgentRuns(12))
 	data.UserSaveAction = entry + "/users/save"
 	data.AdminUsers = buildAdminUserRows(state, entry)
+	data.AdminSessions = buildAdminSessionRows(s.listAdminSessions(40), entry, currentSessionID)
 	data.AdminRoles = buildAdminRoleRows(state)
 	data.AdminMenus = buildAdminMenuRows(state)
 	data.AdminPermissions = buildAdminPermissionRows(state)
@@ -1077,15 +1921,25 @@ func (s *adminServer) adminPageData(state installState, entry string, active str
 		{Key: "后台入口", Value: entry},
 		{Key: "数据库", Value: state.Database.DisplayName() + " / " + state.Database.DisplayTarget()},
 		{Key: "AI 服务", Value: state.AI.DisplayName() + " / " + state.AI.DisplayModel()},
+		{Key: "会话有效期", Value: strconv.Itoa(security.SessionTTLHours) + " 小时"},
+		{Key: "登录保护", Value: strconv.Itoa(security.LoginMaxAttempts) + " 次失败 / " + strconv.Itoa(security.LoginLockMinutes) + " 分钟"},
+		{Key: "后台副标题", Value: system.AdminTagline},
+		{Key: "首页副标题", Value: system.PublicTagline},
+		{Key: "通知通道", Value: notifications.DisplayName()},
+		{Key: "后台任务", Value: taskWorker.StatusText()},
 		{Key: "时区", Value: system.Timezone},
 		{Key: "语言", Value: system.Locale},
 		{Key: "存储", Value: storage.DisplayName() + " / " + storage.LocalPath},
 	}
 	data.SystemSettings = adminSystemSettings{
-		Action:   entry + "/settings/system",
-		SiteName: state.SiteName,
-		Timezone: system.Timezone,
-		Locale:   system.Locale,
+		Action:            entry + "/settings/system",
+		SiteName:          state.SiteName,
+		Timezone:          system.Timezone,
+		Locale:            system.Locale,
+		AdminTagline:      system.AdminTagline,
+		PublicTagline:     system.PublicTagline,
+		PublicHeadline:    system.PublicHeadline,
+		PublicDescription: system.PublicDescription,
 	}
 	data.StorageSettings = adminStorageSettings{
 		Action:             entry + "/settings/storage",
@@ -1100,11 +1954,65 @@ func (s *adminServer) adminPageData(state installState, entry string, active str
 		PathStatusClass:    storagePathStatusClass(storage.LocalPath),
 		AllowedDescription: storageAllowedDescription(storage.AllowedExtensions),
 	}
+	ai := state.AI.sanitized()
+	data.AISettings = adminAISettings{
+		Action:       entry + "/settings/ai",
+		Provider:     ai.Provider,
+		BaseURL:      ai.BaseURL,
+		ChatModel:    ai.ChatModel,
+		MaskedAPIKey: ai.maskedAPIKey(),
+	}
+	data.SecuritySettings = adminSecuritySettings{
+		Action:           entry + "/settings/security",
+		Username:         currentUser,
+		Entry:            entry,
+		SessionTTLHours:  security.SessionTTLHours,
+		LoginMaxAttempts: security.LoginMaxAttempts,
+		LoginLockMinutes: security.LoginLockMinutes,
+	}
+	data.NotificationSettings = adminNotificationSettings{
+		Action:              entry + "/settings/notifications",
+		TestAction:          entry + "/settings/notifications/test",
+		Enabled:             notifications.Enabled,
+		Channel:             notifications.Channel,
+		ChannelName:         notifications.ChannelName(),
+		Receiver:            notifications.Receiver,
+		WebhookURL:          notifications.WebhookURL,
+		FeishuSecretMasked:  maskSecretValue(notifications.FeishuSecret),
+		EventLoginFailures:  notifications.EventLoginFailures,
+		EventAIErrors:       notifications.EventAIErrors,
+		EventStorageWarning: notifications.EventStorageWarning,
+	}
+	data.SettingChanges = buildAdminSettingChangeRows(s.listSettingChanges(12))
 	data.FileUploadAction = entry + "/files/upload"
 	data.FileRows = listAdminFiles(storage, entry, 200)
 	data.FileStorageSummary = storage.DisplayName() + " / " + storage.LocalPath
 	data.FileAllowedSummary = storageAllowedDescription(storage.AllowedExtensions) + "，单文件上限 " + strconv.Itoa(storage.MaxFileSizeMB) + " MB"
-	data.FoundationServices = buildFoundationServices(state, len(auditEvents), len(data.FileRows))
+	data.TaskEnqueueAction = entry + "/tasks/enqueue"
+	data.TaskRunAction = entry + "/tasks/run"
+	data.TaskRunAllAction = entry + "/tasks/run-all"
+	data.TaskWorkerSettings = adminTaskWorkerSettings{
+		Action:                 entry + "/tasks/settings",
+		Enabled:                taskWorker.Enabled,
+		IntervalSeconds:        taskWorker.IntervalSeconds,
+		BatchSize:              taskWorker.BatchSize,
+		ScheduleHealthEnabled:  taskWorker.ScheduleHealthEnabled,
+		ScheduleHealthMinutes:  taskWorker.ScheduleHealthMinutes,
+		ScheduleCleanupEnabled: taskWorker.ScheduleCleanupEnabled,
+		ScheduleCleanupMinutes: taskWorker.ScheduleCleanupMinutes,
+		StatusText:             taskWorker.StatusText(),
+	}
+	data.TaskTypeOptions = backgroundTaskTypeOptions()
+	data.TaskRows = buildAdminBackgroundTaskRows(taskRecords, entry)
+	data.TaskLogRows = buildAdminBackgroundTaskLogRows(taskLogRecords)
+	data.TaskMetrics = buildBackgroundTaskMetrics(taskRecords)
+	data.FoundationServices = buildFoundationServices(state, len(auditEvents), len(data.FileRows), len(taskRecords))
+	data.NotificationRows = buildAdminNotificationDeliveryRows(notificationRecords)
+	data.NotificationMetrics = buildNotificationMetrics(notificationRecords)
+	auditFilter.Action = entry + "/audit"
+	auditFilter.ExportAction = entry + "/audit/export"
+	auditFilter.ExportURL = auditExportURL(auditFilter)
+	data.AuditFilter = auditFilter
 	data.AuditEvents = auditEvents
 	data.AuditMetrics = buildAuditMetrics(auditEvents)
 	return data
@@ -1115,10 +2023,15 @@ func buildAdminNav(entry string, active string) []adminNavItem {
 		{Key: "dashboard", Label: "工作台", Href: entry + "/workspace"},
 		{Key: "foundation", Label: "基础服务", Href: entry + "/foundation"},
 		{Key: "data-sources", Label: "数据源", Href: entry + "/data-sources"},
+		{Key: "extensions", Label: "能力扩展", Href: entry + "/extensions"},
 		{Key: "ai", Label: "AI 智能体", Href: entry + "/ai"},
+		{Key: "wechat-agent", Label: "微信 Agent", Href: entry + "/wechat-agent"},
+		{Key: "wechat-agent-messages", Label: "微信记录", Href: entry + "/wechat-agent/messages"},
 		{Key: "users", Label: "用户权限", Href: entry + "/users"},
 		{Key: "settings", Label: "系统设置", Href: entry + "/settings"},
 		{Key: "files", Label: "文件管理", Href: entry + "/files"},
+		{Key: "tasks", Label: "后台任务", Href: entry + "/tasks"},
+		{Key: "notifications", Label: "通知事件", Href: entry + "/notifications"},
 		{Key: "audit", Label: "审计日志", Href: entry + "/audit"},
 	}
 	for i := range items {
@@ -1127,19 +2040,20 @@ func buildAdminNav(entry string, active string) []adminNavItem {
 	return items
 }
 
-func buildFoundationServices(state installState, auditCount int, fileCount int) []adminFoundationService {
+func buildFoundationServices(state installState, auditCount int, fileCount int, taskCount int) []adminFoundationService {
 	storage := state.Storage.normalized()
 	return []adminFoundationService{
 		{Name: "初始化安装", Legacy: "InstallController / install 视图", Current: "首页安装向导、数据库检查、AI 配置检查、元数据表创建", Status: "已迁移", StatusClass: "is-ready", Next: "补安装向导重置保护"},
-		{Name: "隐藏后台入口", Legacy: "AdminEntryMiddleware", Current: "初始化时随机生成 " + state.AdminEntry, Status: "已迁移", StatusClass: "is-ready", Next: "保留入口轮换能力"},
-		{Name: "管理员认证", Legacy: "AuthController / AdminAuthMiddleware", Current: "超级管理员登录、会话 Cookie、退出登录", Status: "已迁移", StatusClass: "is-ready", Next: "补管理员密码修改"},
-		{Name: "系统设置", Legacy: "SiteController / AdminConfig", Current: "站点名称、语言、时区、运行参数", Status: "已接入", StatusClass: "is-ready", Next: "扩展站点主题和安全策略"},
+		{Name: "隐藏后台入口", Legacy: "AdminEntryMiddleware", Current: "初始化时随机生成 " + state.AdminEntry, Status: "已迁移", StatusClass: "is-ready", Next: "保持初始化随机入口，不做自动轮换"},
+		{Name: "管理员认证", Legacy: "AuthController / AdminAuthMiddleware", Current: "超级管理员登录、会话记录、强制下线、改密、失败锁定", Status: "已迁移", StatusClass: "is-ready", Next: "补设备标记与登录地展示"},
+		{Name: "系统设置", Legacy: "SiteController / AdminConfig", Current: "站点资料、首页展示、语言、时区、AI、存储、安全与通知策略", Status: "已接入", StatusClass: "is-ready", Next: "补设置分组与变更历史"},
 		{Name: "存储与文件", Legacy: "UploadFileController / StorageEngine", Current: storage.DisplayName() + "，当前文件 " + strconv.Itoa(fileCount) + " 个", Status: "已接入", StatusClass: "is-ready", Next: "补 S3/OSS 驱动与文件审查"},
-		{Name: "运行审计", Legacy: "LoginLog / OperationLog / InterceptLog / ErrorStatistic", Current: "SQLite 审计表，当前 " + strconv.Itoa(auditCount) + " 条", Status: "已接入", StatusClass: "is-ready", Next: "补审计筛选与导出"},
-		{Name: "数据源连接", Legacy: "DatabaseConnectionController", Current: "连接登记、基础测试、SQLite 结构扫描、智能体只读读取", Status: "已接入", StatusClass: "is-ready", Next: "补 MySQL/PostgreSQL 表注释扫描"},
+		{Name: "运行审计", Legacy: "LoginLog / OperationLog / InterceptLog / ErrorStatistic", Current: "SQLite 审计表、通知发送记录、筛选与 CSV 导出，当前审计 " + strconv.Itoa(auditCount) + " 条", Status: "已接入", StatusClass: "is-ready", Next: "补审计详情页"},
+		{Name: "后台任务", Legacy: "AsyncQueue / QueueHandleListener", Current: "SQLite 队列表、常驻 Worker、定时体检/清理、重试与取消，当前任务 " + strconv.Itoa(taskCount) + " 个", Status: "已接入", StatusClass: "is-ready", Next: "补任务依赖、失败策略和详情页"},
+		{Name: "数据源连接", Legacy: "DatabaseConnectionController", Current: "连接登记、真实登录检查、SQLite/MySQL/PostgreSQL 结构与注释扫描、智能体只读读取", Status: "已接入", StatusClass: "is-ready", Next: "补 Schema 快照与变更对比"},
 		{Name: "用户角色权限", Legacy: "User / Role / Permission / Menu", Current: "管理员账号、角色、菜单、权限清单持久化", Status: "本次补齐", StatusClass: "is-ready", Next: "补细粒度权限拦截"},
-		{Name: "插件扩展", Legacy: "AddonController / Addons*Service", Current: "旧系统归档参考", Status: "待规划", StatusClass: "is-muted", Next: "先定 Go 端扩展包规范"},
-		{Name: "CRUD 生成", Legacy: "CrudGenerator / UniversalCrud", Current: "不走传统 CRUD，转向 Agent 工具生成查询/导出", Status: "重构中", StatusClass: "is-progress", Next: "补 Agent 工具注册与数据权限"},
+		{Name: "插件扩展", Legacy: "AddonController / Addons*Service", Current: "Go 端扩展包规范、资源模型注册表、后台能力扩展页", Status: "本次接入", StatusClass: "is-progress", Next: "补插件配置、启停和版本迁移"},
+		{Name: "CRUD 生成", Legacy: "CrudGenerator / UniversalCrud", Current: "资源模型驱动 AI 工具生成，替代传统表单 CRUD", Status: "本次接入", StatusClass: "is-progress", Next: "继续接入真实业务表导出和多表查询"},
 	}
 }
 
@@ -1157,6 +2071,759 @@ func buildAuditMetrics(events []adminAuditEvent) []adminMetric {
 		{Label: "登录日志", Value: strconv.Itoa(counts["login"]), Detail: "成功与失败登录", Status: auditMetricStatus(counts["login"])},
 		{Label: "文件操作", Value: strconv.Itoa(counts["file"]), Detail: "上传与删除", Status: auditMetricStatus(counts["file"])},
 		{Label: "智能体调用", Value: strconv.Itoa(counts["ai"]), Detail: "后台 AI 对话", Status: auditMetricStatus(counts["ai"])},
+	}
+}
+
+func buildNotificationMetrics(records []adminNotificationDeliveryRecord) []adminMetric {
+	sent := 0
+	failed := 0
+	events := map[string]bool{}
+	for _, record := range records {
+		if strings.TrimSpace(record.Event) != "" {
+			events[record.Event] = true
+		}
+		switch strings.ToLower(strings.TrimSpace(record.Status)) {
+		case "sent":
+			sent++
+		case "failed":
+			failed++
+		}
+	}
+	failureStatus := "is-ready"
+	if failed > 0 {
+		failureStatus = "is-warning"
+	}
+	return []adminMetric{
+		{Label: "通知记录", Value: strconv.Itoa(len(records)), Detail: "最近发送", Status: "is-ready"},
+		{Label: "发送成功", Value: strconv.Itoa(sent), Detail: "通道已接收", Status: auditMetricStatus(sent)},
+		{Label: "发送失败", Value: strconv.Itoa(failed), Detail: "需要检查通道", Status: failureStatus},
+		{Label: "事件类型", Value: strconv.Itoa(len(events)), Detail: "已触发类型", Status: auditMetricStatus(len(events))},
+	}
+}
+
+func buildBackgroundTaskMetrics(records []adminBackgroundTaskRecord) []adminMetric {
+	pending := 0
+	running := 0
+	failed := 0
+	succeeded := 0
+	canceled := 0
+	for _, record := range records {
+		switch strings.ToLower(strings.TrimSpace(record.Status)) {
+		case "pending", "retry":
+			pending++
+		case "running":
+			running++
+		case "failed":
+			failed++
+		case "succeeded":
+			succeeded++
+		case "canceled":
+			canceled++
+		}
+	}
+	failureStatus := "is-ready"
+	if failed > 0 {
+		failureStatus = "is-warning"
+	}
+	return []adminMetric{
+		{Label: "任务总数", Value: strconv.Itoa(len(records)), Detail: "最近任务记录", Status: auditMetricStatus(len(records))},
+		{Label: "待执行", Value: strconv.Itoa(pending), Detail: "pending / retry", Status: auditMetricStatus(pending)},
+		{Label: "执行中", Value: strconv.Itoa(running), Detail: "当前运行", Status: auditMetricStatus(running)},
+		{Label: "失败", Value: strconv.Itoa(failed), Detail: "可重试任务", Status: failureStatus},
+		{Label: "已完成", Value: strconv.Itoa(succeeded), Detail: "成功结束", Status: auditMetricStatus(succeeded)},
+		{Label: "已取消", Value: strconv.Itoa(canceled), Detail: "管理员取消", Status: auditMetricStatus(canceled)},
+	}
+}
+
+func buildAdminBackgroundTaskRows(records []adminBackgroundTaskRecord, entry string) []adminBackgroundTaskRow {
+	rows := make([]adminBackgroundTaskRow, 0, len(records))
+	now := time.Now().UTC()
+	for _, record := range records {
+		status := strings.ToLower(strings.TrimSpace(record.Status))
+		canRun := (status == "pending" || status == "retry") && (record.AvailableAt.IsZero() || !record.AvailableAt.After(now))
+		canRetry := status == "failed" || status == "retry"
+		canCancel := status == "pending" || status == "retry"
+		startedAt := ""
+		if !record.StartedAt.IsZero() {
+			startedAt = formatAdminTime(record.StartedAt)
+		}
+		finishedAt := ""
+		if !record.FinishedAt.IsZero() {
+			finishedAt = formatAdminTime(record.FinishedAt)
+		}
+		rows = append(rows, adminBackgroundTaskRow{
+			ID:           record.ID,
+			IDShort:      shortTaskID(record.ID),
+			Name:         record.Name,
+			Type:         record.Type,
+			TypeName:     backgroundTaskTypeName(record.Type),
+			Queue:        displayNotificationValue(record.Queue, "default"),
+			Status:       backgroundTaskStatusLabel(record.Status),
+			StatusClass:  backgroundTaskStatusClass(record.Status),
+			Attempts:     strconv.Itoa(record.Attempts) + "/" + strconv.Itoa(record.MaxAttempts),
+			CreatedBy:    displayNotificationValue(record.CreatedBy, "system"),
+			CreatedAt:    formatAdminTime(record.CreatedAt),
+			AvailableAt:  formatAdminTime(record.AvailableAt),
+			StartedAt:    startedAt,
+			FinishedAt:   finishedAt,
+			Result:       truncateAuditText(record.Result, 140),
+			LastError:    truncateAuditText(record.LastError, 140),
+			RunAction:    entry + "/tasks/run",
+			RetryAction:  entry + "/tasks/retry",
+			CancelAction: entry + "/tasks/cancel",
+			CanRun:       canRun,
+			CanRetry:     canRetry,
+			CanCancel:    canCancel,
+		})
+	}
+	return rows
+}
+
+func buildAdminBackgroundTaskLogRows(records []adminBackgroundTaskLogRecord) []adminBackgroundTaskLogRow {
+	rows := make([]adminBackgroundTaskLogRow, 0, len(records))
+	for _, record := range records {
+		rows = append(rows, adminBackgroundTaskLogRow{
+			Time:        formatAdminTime(record.Timestamp),
+			TaskID:      record.TaskID,
+			TaskIDShort: shortTaskID(record.TaskID),
+			Level:       backgroundTaskLogLevelLabel(record.Level),
+			LevelClass:  backgroundTaskLogLevelClass(record.Level),
+			Event:       backgroundTaskEventLabel(record.Event),
+			Status:      backgroundTaskStatusLabel(record.Status),
+			Attempt:     record.Attempt,
+			Message:     truncateAuditText(record.Message, 180),
+		})
+	}
+	return rows
+}
+
+func backgroundTaskTypeOptions() []adminTaskTypeOption {
+	return []adminTaskTypeOption{
+		{Type: "system_health_check", Name: "系统体检", Description: "检查初始化状态、存储目录、数据源登记和 AI 配置"},
+		{Type: "storage_cleanup", Name: "AI 导出清理", Description: "按存储设置的保留天数清理过期智能体导出文件"},
+		{Type: "notification_test", Name: "测试通知", Description: "通过当前通知通道发送一条后台测试通知"},
+	}
+}
+
+func backgroundTaskTypeName(taskType string) string {
+	for _, option := range backgroundTaskTypeOptions() {
+		if option.Type == strings.TrimSpace(taskType) {
+			return option.Name
+		}
+	}
+	if strings.TrimSpace(taskType) == "" {
+		return "未知任务"
+	}
+	return taskType
+}
+
+func backgroundTaskStatusLabel(status string) string {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "pending":
+		return "待执行"
+	case "retry":
+		return "等待重试"
+	case "running":
+		return "执行中"
+	case "succeeded":
+		return "已完成"
+	case "failed":
+		return "失败"
+	case "canceled":
+		return "已取消"
+	default:
+		return "未知"
+	}
+}
+
+func backgroundTaskStatusClass(status string) string {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "pending", "retry":
+		return "is-progress"
+	case "running":
+		return "is-secure"
+	case "succeeded":
+		return "is-ready"
+	case "failed":
+		return "is-warning"
+	case "canceled":
+		return "is-muted"
+	default:
+		return "is-muted"
+	}
+}
+
+func backgroundTaskLogLevelLabel(level string) string {
+	switch strings.ToLower(strings.TrimSpace(level)) {
+	case "error":
+		return "错误"
+	case "warn", "warning":
+		return "警告"
+	default:
+		return "信息"
+	}
+}
+
+func backgroundTaskLogLevelClass(level string) string {
+	switch strings.ToLower(strings.TrimSpace(level)) {
+	case "error":
+		return "is-warning"
+	case "warn", "warning":
+		return "is-progress"
+	default:
+		return "is-ready"
+	}
+}
+
+func backgroundTaskEventLabel(event string) string {
+	switch strings.TrimSpace(event) {
+	case "queued":
+		return "入队"
+	case "started":
+		return "开始执行"
+	case "succeeded":
+		return "执行成功"
+	case "failed":
+		return "执行失败"
+	case "retry_scheduled":
+		return "安排重试"
+	case "retry":
+		return "重新入队"
+	case "canceled":
+		return "取消"
+	default:
+		return displayNotificationValue(event, "任务事件")
+	}
+}
+
+func shortTaskID(id string) string {
+	id = strings.TrimSpace(id)
+	if len(id) <= 18 {
+		return id
+	}
+	return id[:9] + "..." + id[len(id)-6:]
+}
+
+func newBackgroundTaskRecord(taskType string, actor string) (adminBackgroundTaskRecord, error) {
+	taskType = strings.TrimSpace(taskType)
+	var option adminTaskTypeOption
+	for _, candidate := range backgroundTaskTypeOptions() {
+		if candidate.Type == taskType {
+			option = candidate
+			break
+		}
+	}
+	if option.Type == "" {
+		return adminBackgroundTaskRecord{}, errors.New("请选择有效的任务类型")
+	}
+	now := time.Now().UTC()
+	return adminBackgroundTaskRecord{
+		ID:          newBackgroundTaskID(),
+		Name:        option.Name,
+		Type:        option.Type,
+		Queue:       "default",
+		Status:      "pending",
+		Priority:    backgroundTaskDefaultPriority(option.Type),
+		MaxAttempts: 3,
+		PayloadJSON: backgroundTaskPayloadJSON("admin_console", option.Description),
+		CreatedBy:   displayNotificationValue(actor, "system"),
+		CreatedAt:   now,
+		AvailableAt: now,
+		UpdatedAt:   now,
+	}, nil
+}
+
+func backgroundTaskPayloadJSON(source string, description string) string {
+	payload, _ := json.Marshal(map[string]string{
+		"created_from": strings.TrimSpace(source),
+		"description":  strings.TrimSpace(description),
+	})
+	return string(payload)
+}
+
+func newBackgroundTaskID() string {
+	bytes := make([]byte, 12)
+	if _, err := rand.Read(bytes); err != nil {
+		return "task_" + strconv.FormatInt(time.Now().UnixNano(), 36)
+	}
+	return "task_" + hex.EncodeToString(bytes)
+}
+
+func backgroundTaskDefaultPriority(taskType string) int {
+	switch strings.TrimSpace(taskType) {
+	case "system_health_check":
+		return 20
+	case "notification_test":
+		return 10
+	default:
+		return 0
+	}
+}
+
+func (s *adminServer) runnableBackgroundTask(taskID string) (adminBackgroundTaskRecord, error) {
+	now := time.Now().UTC()
+	var task adminBackgroundTaskRecord
+	var err error
+	if strings.TrimSpace(taskID) == "" {
+		task, err = s.store.NextRunnableBackgroundTask(now)
+		if errors.Is(err, sql.ErrNoRows) {
+			return adminBackgroundTaskRecord{}, errors.New("暂无可执行的后台任务")
+		}
+	} else {
+		task, err = s.store.BackgroundTaskByID(taskID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return adminBackgroundTaskRecord{}, errors.New("任务不存在")
+		}
+	}
+	if err != nil {
+		return adminBackgroundTaskRecord{}, err
+	}
+	status := strings.ToLower(strings.TrimSpace(task.Status))
+	if status != "pending" && status != "retry" {
+		return adminBackgroundTaskRecord{}, errors.New("任务当前状态不能执行：" + backgroundTaskStatusLabel(task.Status))
+	}
+	if !task.AvailableAt.IsZero() && task.AvailableAt.After(now) {
+		return adminBackgroundTaskRecord{}, errors.New("任务尚未到可执行时间：" + formatAdminTime(task.AvailableAt))
+	}
+	return task, nil
+}
+
+func (s *adminServer) runBackgroundTask(ctx context.Context, state installState, task adminBackgroundTaskRecord) adminBackgroundTaskRecord {
+	s.taskMu.Lock()
+	defer s.taskMu.Unlock()
+	return s.executeBackgroundTask(ctx, state, task)
+}
+
+func (s *adminServer) executeBackgroundTask(ctx context.Context, state installState, task adminBackgroundTaskRecord) adminBackgroundTaskRecord {
+	if task.MaxAttempts <= 0 {
+		task.MaxAttempts = 3
+	}
+	now := time.Now().UTC()
+	task.Status = "running"
+	task.Attempts++
+	task.StartedAt = now
+	task.FinishedAt = time.Time{}
+	task.LastError = ""
+	task.UpdatedAt = now
+	_ = s.store.UpdateBackgroundTask(task)
+	s.appendBackgroundTaskLog(task, "info", "started", "任务开始执行")
+
+	result, err := s.performBackgroundTask(ctx, state, task)
+	finishedAt := time.Now().UTC()
+	task.FinishedAt = finishedAt
+	task.UpdatedAt = finishedAt
+	task.Result = truncateAuditText(result, 1500)
+	if err != nil {
+		task.LastError = truncateAuditText(err.Error(), 1000)
+		if task.Attempts < task.MaxAttempts {
+			task.Status = "retry"
+			task.AvailableAt = finishedAt.Add(time.Duration(task.Attempts) * time.Minute)
+			s.appendBackgroundTaskLog(task, "warn", "retry_scheduled", "任务执行失败，已安排重试："+task.LastError)
+		} else {
+			task.Status = "failed"
+			task.AvailableAt = finishedAt
+			s.appendBackgroundTaskLog(task, "error", "failed", "任务执行失败："+task.LastError)
+		}
+		return task
+	}
+	task.Status = "succeeded"
+	task.LastError = ""
+	task.AvailableAt = finishedAt
+	s.appendBackgroundTaskLog(task, "info", "succeeded", displayNotificationValue(task.Result, "任务执行成功"))
+	return task
+}
+
+func (s *adminServer) appendBackgroundTaskLog(task adminBackgroundTaskRecord, level string, event string, message string) {
+	record := adminBackgroundTaskLogRecord{
+		TaskID:    task.ID,
+		Timestamp: time.Now().UTC(),
+		Level:     strings.ToLower(strings.TrimSpace(level)),
+		Event:     strings.TrimSpace(event),
+		Message:   truncateAuditText(message, 1000),
+		Status:    task.Status,
+		Attempt:   task.Attempts,
+	}
+	if record.Level == "" {
+		record.Level = "info"
+	}
+	if record.Event == "" {
+		record.Event = "task_event"
+	}
+	if record.Message == "" {
+		record.Message = backgroundTaskStatusLabel(task.Status)
+	}
+	_ = s.store.AppendBackgroundTaskLog(record)
+}
+
+type backgroundTaskWorkerResult struct {
+	Enqueued  int
+	Completed int
+	Failed    int
+}
+
+func (s *adminServer) startBackgroundTaskWorker() {
+	go func() {
+		timer := time.NewTimer(2 * time.Second)
+		defer timer.Stop()
+		for {
+			<-timer.C
+			_, interval := s.runBackgroundTaskWorkerOnce(context.Background(), time.Now().UTC())
+			if interval < 5*time.Second {
+				interval = 5 * time.Second
+			}
+			timer.Reset(interval)
+		}
+	}()
+}
+
+func (s *adminServer) runBackgroundTaskWorkerOnce(ctx context.Context, now time.Time) (backgroundTaskWorkerResult, time.Duration) {
+	state, err := s.store.Load()
+	if err != nil || !state.Initialized {
+		return backgroundTaskWorkerResult{}, 30 * time.Second
+	}
+	config := state.TaskWorker.normalized()
+	interval := config.workerInterval()
+	if !config.Enabled {
+		return backgroundTaskWorkerResult{}, interval
+	}
+	result := backgroundTaskWorkerResult{}
+	result.Enqueued = s.enqueueScheduledBackgroundTasks(state, config, now)
+	completed, failed := s.runReadyBackgroundTasks(ctx, state, config.BatchSize)
+	result.Completed = completed
+	result.Failed = failed
+	return result, interval
+}
+
+func (s *adminServer) enqueueScheduledBackgroundTasks(state installState, config taskWorkerConfig, now time.Time) int {
+	enqueued := 0
+	if config.ScheduleHealthEnabled && s.enqueueScheduledBackgroundTask("system_health_check", config.ScheduleHealthMinutes, now) {
+		enqueued++
+	}
+	if config.ScheduleCleanupEnabled && s.enqueueScheduledBackgroundTask("storage_cleanup", config.ScheduleCleanupMinutes, now) {
+		enqueued++
+	}
+	return enqueued
+}
+
+func (s *adminServer) enqueueScheduledBackgroundTask(taskType string, intervalMinutes int, now time.Time) bool {
+	if intervalMinutes <= 0 {
+		return false
+	}
+	since := now.Add(-time.Duration(intervalMinutes) * time.Minute)
+	exists, err := s.store.BackgroundTaskExistsSince(taskType, since)
+	if err != nil || exists {
+		return false
+	}
+	task, err := newBackgroundTaskRecord(taskType, "scheduler")
+	if err != nil {
+		return false
+	}
+	task.PayloadJSON = backgroundTaskPayloadJSON("scheduler", backgroundTaskTypeName(taskType))
+	task.CreatedAt = now
+	task.AvailableAt = now
+	task.UpdatedAt = now
+	if err := s.store.EnqueueBackgroundTask(task); err != nil {
+		return false
+	}
+	s.appendBackgroundTaskLog(task, "info", "queued", "定时调度已加入任务队列")
+	return true
+}
+
+func (s *adminServer) runReadyBackgroundTasks(ctx context.Context, state installState, batchSize int) (int, int) {
+	if batchSize <= 0 {
+		batchSize = defaultTaskWorkerConfig().BatchSize
+	}
+	completed := 0
+	failed := 0
+	for completed+failed < batchSize {
+		task, err := s.runnableBackgroundTask("")
+		if err != nil {
+			return completed, failed
+		}
+		task = s.runBackgroundTask(ctx, state, task)
+		if err := s.store.UpdateBackgroundTask(task); err != nil {
+			failed++
+			continue
+		}
+		if task.Status == "succeeded" {
+			completed++
+		} else {
+			failed++
+		}
+	}
+	return completed, failed
+}
+
+func (s *adminServer) performBackgroundTask(ctx context.Context, state installState, task adminBackgroundTaskRecord) (string, error) {
+	switch strings.TrimSpace(task.Type) {
+	case "system_health_check":
+		return s.performSystemHealthTask(state)
+	case "storage_cleanup":
+		return s.cleanupAgentExportFiles(state)
+	case "notification_test":
+		ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		defer cancel()
+		result, err := s.deliverAdminNotification(ctx, state, "notification_test", "Moyi Admin 后台任务测试通知", "后台任务队列已成功执行测试通知任务。")
+		if err != nil {
+			return result.Message, err
+		}
+		return result.Message, nil
+	default:
+		return "", errors.New("未知后台任务类型：" + task.Type)
+	}
+}
+
+func (s *adminServer) performSystemHealthTask(state installState) (string, error) {
+	messages := []string{"初始化状态：已完成", "后台入口：" + s.adminEntryForState(state)}
+	storage := state.Storage.normalized()
+	if err := validateStorageConfig(storage); err != nil {
+		return strings.Join(messages, "；"), err
+	}
+	root, err := storageLocalRoot(storage)
+	if err != nil {
+		return strings.Join(messages, "；"), err
+	}
+	if info, err := os.Stat(root); err != nil {
+		return strings.Join(messages, "；"), errors.New("存储目录不可用：" + err.Error())
+	} else if !info.IsDir() {
+		return strings.Join(messages, "；"), errors.New("存储路径不是目录：" + root)
+	}
+	messages = append(messages, "存储目录：可用")
+	messages = append(messages, "数据源："+strconv.Itoa(len(state.DataSources))+" 个")
+	if state.AI.IsDisabled() {
+		messages = append(messages, "AI：未启用")
+	} else {
+		messages = append(messages, "AI："+state.AI.DisplayName()+" / "+state.AI.DisplayModel())
+	}
+	messages = append(messages, "管理员账号："+strconv.Itoa(len(state.Access.normalized(state).Users))+" 个")
+	return strings.Join(messages, "；"), nil
+}
+
+func (s *adminServer) cleanupAgentExportFiles(state installState) (string, error) {
+	retentionDays := state.Storage.normalized().AgentExportRetentionDays
+	if retentionDays <= 0 {
+		retentionDays = defaultStorageConfig().AgentExportRetentionDays
+	}
+	dir := s.agentExportDir()
+	entries, err := os.ReadDir(dir)
+	if os.IsNotExist(err) {
+		return "导出目录不存在，无需清理：" + dir, nil
+	}
+	if err != nil {
+		return "", err
+	}
+	cutoff := time.Now().Add(-time.Duration(retentionDays) * 24 * time.Hour)
+	removed := 0
+	skipped := 0
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if !strings.HasPrefix(name, "moyi-agent-export-") {
+			skipped++
+			continue
+		}
+		if _, ok := agentExportContentType(name); !ok {
+			skipped++
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			skipped++
+			continue
+		}
+		if info.ModTime().After(cutoff) {
+			skipped++
+			continue
+		}
+		if err := os.Remove(filepath.Join(dir, name)); err != nil {
+			return "已清理 " + strconv.Itoa(removed) + " 个文件", err
+		}
+		removed++
+	}
+	return "已按 " + strconv.Itoa(retentionDays) + " 天保留策略清理 AI 导出文件 " + strconv.Itoa(removed) + " 个，跳过 " + strconv.Itoa(skipped) + " 个。", nil
+}
+
+func auditFilterFromQuery(query url.Values) adminAuditFilter {
+	return adminAuditFilter{
+		Category: strings.ToLower(strings.TrimSpace(query.Get("category"))),
+		Status:   strings.ToLower(strings.TrimSpace(query.Get("status"))),
+		Keyword:  strings.TrimSpace(query.Get("keyword")),
+	}
+}
+
+func (f adminAuditFilter) active() bool {
+	return f.Category != "" || f.Status != "" || f.Keyword != ""
+}
+
+func auditExportURL(filter adminAuditFilter) string {
+	if filter.ExportAction == "" {
+		return ""
+	}
+	values := url.Values{}
+	if filter.Category != "" {
+		values.Set("category", filter.Category)
+	}
+	if filter.Status != "" {
+		values.Set("status", filter.Status)
+	}
+	if filter.Keyword != "" {
+		values.Set("keyword", filter.Keyword)
+	}
+	if len(values) == 0 {
+		return filter.ExportAction
+	}
+	return filter.ExportAction + "?" + values.Encode()
+}
+
+func filterAuditEvents(events []adminAuditEvent, filter adminAuditFilter) []adminAuditEvent {
+	if !filter.active() {
+		return events
+	}
+	filtered := make([]adminAuditEvent, 0, len(events))
+	for _, event := range events {
+		if auditEventMatchesFilter(event, filter) {
+			filtered = append(filtered, event)
+		}
+	}
+	return filtered
+}
+
+func auditEventMatchesFilter(event adminAuditEvent, filter adminAuditFilter) bool {
+	if filter.Category != "" && strings.ToLower(strings.TrimSpace(event.Category)) != filter.Category {
+		return false
+	}
+	if filter.Status != "" && !auditStatusMatches(event.Status, filter.Status) {
+		return false
+	}
+	keyword := strings.ToLower(strings.TrimSpace(filter.Keyword))
+	if keyword == "" {
+		return true
+	}
+	haystack := strings.ToLower(strings.Join([]string{
+		event.Time,
+		event.Category,
+		event.Action,
+		event.Actor,
+		event.Detail,
+		event.Method,
+		event.Path,
+		event.IP,
+		event.Status,
+		event.Duration,
+	}, " "))
+	return strings.Contains(haystack, keyword)
+}
+
+func auditStatusMatches(status string, filter string) bool {
+	code, err := strconv.Atoi(strings.TrimSpace(status))
+	if err == nil {
+		switch filter {
+		case "success":
+			return code >= 200 && code < 400
+		case "warning":
+			return code >= 400 && code < 500
+		case "error":
+			return code >= 500
+		default:
+			expected, expectedErr := strconv.Atoi(filter)
+			return expectedErr == nil && code == expected
+		}
+	}
+	return filter == strings.ToLower(strings.TrimSpace(status))
+}
+
+func buildAdminNotificationDeliveryRows(records []adminNotificationDeliveryRecord) []adminNotificationDeliveryRow {
+	rows := make([]adminNotificationDeliveryRow, 0, len(records))
+	for _, record := range records {
+		rows = append(rows, adminNotificationDeliveryRow{
+			Time:        formatAdminTime(record.Timestamp),
+			Event:       record.Event,
+			Title:       record.Title,
+			Receiver:    displayNotificationValue(record.Receiver, "-"),
+			Channel:     notificationChannelLabel(record.Channel),
+			Target:      displayNotificationValue(record.Target, "-"),
+			Message:     record.Message,
+			Status:      notificationDeliveryStatusLabel(record.Status, record.StatusCode),
+			StatusClass: notificationDeliveryStatusClass(record.Status),
+			Error:       record.Error,
+		})
+	}
+	return rows
+}
+
+func notificationChannelLabel(channel string) string {
+	switch strings.ToLower(strings.TrimSpace(channel)) {
+	case "webhook":
+		return "Webhook"
+	case "feishu":
+		return "飞书机器人"
+	case "disabled", "":
+		return "暂不启用"
+	default:
+		return channel
+	}
+}
+
+func notificationDeliveryStatusLabel(status string, statusCode int) string {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "sent":
+		if statusCode > 0 {
+			return "成功 " + strconv.Itoa(statusCode)
+		}
+		return "成功"
+	case "failed":
+		if statusCode > 0 {
+			return "失败 " + strconv.Itoa(statusCode)
+		}
+		return "失败"
+	default:
+		return "未知"
+	}
+}
+
+func notificationDeliveryStatusClass(status string) string {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "sent":
+		return "is-ready"
+	case "failed":
+		return "is-warning"
+	default:
+		return "is-muted"
+	}
+}
+
+func buildAdminSettingChangeRows(records []adminSettingChangeRecord) []adminSettingChangeRow {
+	rows := make([]adminSettingChangeRow, 0, len(records))
+	for _, record := range records {
+		rows = append(rows, adminSettingChangeRow{
+			Time:     formatAdminTime(record.Timestamp),
+			Category: settingChangeCategoryLabel(record.Category),
+			Action:   record.Action,
+			Actor:    displayNotificationValue(record.Actor, "system"),
+			Summary:  displayNotificationValue(record.Summary, "-"),
+		})
+	}
+	return rows
+}
+
+func settingChangeCategoryLabel(category string) string {
+	switch strings.ToLower(strings.TrimSpace(category)) {
+	case "system":
+		return "基础信息"
+	case "storage":
+		return "存储"
+	case "ai":
+		return "AI"
+	case "security":
+		return "安全"
+	case "notifications":
+		return "通知"
+	case "task":
+		return "后台任务"
+	default:
+		return displayNotificationValue(category, "设置")
 	}
 }
 
@@ -1184,6 +2851,193 @@ func buildAdminAgentRunRows(records []agentRunRecord) []adminAgentRunRow {
 		})
 	}
 	return rows
+}
+
+const adminAgentWeChatMessagesPageSize = 20
+
+func (s *adminServer) buildAdminAgentWeChatMessagePage(query url.Values, entry string, channels agentChannelConfig) adminAgentWeChatMessagePage {
+	action := entry + "/wechat-agent/messages"
+	channelKey := normalizeAgentWeChatChannelKey(query.Get("channel"))
+	page := parseAdminPositiveInt(query.Get("page"), 1)
+	if page < 1 {
+		page = 1
+	}
+	total := s.countAgentWeChatMessages(channelKey)
+	totalPages := 1
+	if total > 0 {
+		totalPages = (total + adminAgentWeChatMessagesPageSize - 1) / adminAgentWeChatMessagesPageSize
+	}
+	if page > totalPages {
+		page = totalPages
+	}
+	offset := (page - 1) * adminAgentWeChatMessagesPageSize
+	records := s.listAgentWeChatMessagesPage(channelKey, adminAgentWeChatMessagesPageSize, offset)
+	rows := buildAdminAgentWeChatMessageRows(records, 0, 0)
+	showingFrom := 0
+	showingTo := 0
+	if total > 0 && len(rows) > 0 {
+		showingFrom = offset + 1
+		showingTo = offset + len(rows)
+	}
+	result := adminAgentWeChatMessagePage{
+		Action:         action,
+		ResetURL:       action,
+		ExportURL:      adminAgentWeChatMessagesExportURL(entry+"/wechat-agent/messages/export", channelKey),
+		ChannelKey:     channelKey,
+		ChannelOptions: buildAdminAgentWeChatChannelOptions(channels, channelKey),
+		Rows:           rows,
+		Page:           page,
+		PageSize:       adminAgentWeChatMessagesPageSize,
+		Total:          total,
+		TotalPages:     totalPages,
+		ShowingFrom:    showingFrom,
+		ShowingTo:      showingTo,
+		RangeText:      "暂无记录",
+		PageText:       fmt.Sprintf("第 %d / %d 页", page, totalPages),
+	}
+	if total > 0 {
+		result.RangeText = fmt.Sprintf("%d-%d / %d 条", showingFrom, showingTo, total)
+	}
+	if page > 1 {
+		result.HasPrev = true
+		result.PrevURL = adminAgentWeChatMessagesURL(action, channelKey, page-1)
+	}
+	if page < totalPages {
+		result.HasNext = true
+		result.NextURL = adminAgentWeChatMessagesURL(action, channelKey, page+1)
+	}
+	return result
+}
+
+func parseAdminPositiveInt(value string, fallback int) int {
+	parsed, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil || parsed <= 0 {
+		return fallback
+	}
+	return parsed
+}
+
+func adminAgentWeChatMessagesURL(action string, channelKey string, page int) string {
+	values := url.Values{}
+	if normalizedKey := normalizeAgentWeChatChannelKey(channelKey); normalizedKey != "" {
+		values.Set("channel", normalizedKey)
+	}
+	if page > 1 {
+		values.Set("page", strconv.Itoa(page))
+	}
+	if encoded := values.Encode(); encoded != "" {
+		return action + "?" + encoded
+	}
+	return action
+}
+
+func adminAgentWeChatMessagesExportURL(action string, channelKey string) string {
+	values := url.Values{}
+	if normalizedKey := normalizeAgentWeChatChannelKey(channelKey); normalizedKey != "" {
+		values.Set("channel", normalizedKey)
+	}
+	if encoded := values.Encode(); encoded != "" {
+		return action + "?" + encoded
+	}
+	return action
+}
+
+func buildAdminAgentWeChatChannelOptions(channels agentChannelConfig, selected string) []adminAgentWeChatChannelOption {
+	channels = channels.normalized()
+	selected = normalizeAgentWeChatChannelKey(selected)
+	options := make([]adminAgentWeChatChannelOption, 0, len(channels.WeChats))
+	for _, channel := range channels.WeChats {
+		key := normalizeAgentWeChatChannelKey(channel.Key)
+		if key == "" {
+			continue
+		}
+		label := strings.TrimSpace(channel.DisplayName)
+		if label == "" {
+			label = key
+		}
+		options = append(options, adminAgentWeChatChannelOption{
+			Key:      key,
+			Label:    label,
+			Selected: key == selected,
+		})
+	}
+	return options
+}
+
+func buildAdminAgentWeChatMessageRowsByChannel(records []agentWeChatMessageRecord) map[string][]adminAgentWeChatMessageRow {
+	rows := map[string][]adminAgentWeChatMessageRow{}
+	for _, record := range records {
+		key := normalizeAgentWeChatChannelKey(record.ChannelKey)
+		if key == "" {
+			key = "wechat"
+		}
+		if len(rows[key]) >= 50 {
+			continue
+		}
+		rows[key] = append(rows[key], buildAdminAgentWeChatMessageRow(record, 140, 180))
+	}
+	return rows
+}
+
+func buildAdminAgentWeChatMessageRows(records []agentWeChatMessageRecord, inboundLimit int, replyLimit int) []adminAgentWeChatMessageRow {
+	rows := make([]adminAgentWeChatMessageRow, 0, len(records))
+	for _, record := range records {
+		rows = append(rows, buildAdminAgentWeChatMessageRow(record, inboundLimit, replyLimit))
+	}
+	return rows
+}
+
+func buildAdminAgentWeChatMessageRow(record agentWeChatMessageRecord, inboundLimit int, replyLimit int) adminAgentWeChatMessageRow {
+	channelName := strings.TrimSpace(record.ChannelName)
+	if channelName == "" {
+		channelName = normalizeAgentWeChatChannelKey(record.ChannelKey)
+	}
+	inboundText := displayFallback(record.InboundText, "-")
+	replyText := displayFallback(record.ReplyText, "-")
+	if inboundLimit > 0 {
+		inboundText = truncateAuditText(record.InboundText, inboundLimit)
+	}
+	if replyLimit > 0 {
+		replyText = truncateAuditText(record.ReplyText, replyLimit)
+	}
+	return adminAgentWeChatMessageRow{
+		ChannelKey:   displayFallback(normalizeAgentWeChatChannelKey(record.ChannelKey), "-"),
+		ChannelName:  displayFallback(channelName, "-"),
+		Provider:     displayFallback(record.Provider, "-"),
+		ReceivedAt:   formatAdminTime(record.ReceivedAt),
+		RepliedAt:    formatAdminTime(record.RepliedAt),
+		SessionID:    displayFallback(record.SessionID, "-"),
+		RunID:        displayFallback(record.RunID, "-"),
+		MessageID:    displayFallback(record.MessageID, "-"),
+		FromUserID:   displayFallback(record.FromUserID, "-"),
+		ToUserID:     displayFallback(record.ToUserID, "-"),
+		InboundText:  inboundText,
+		ReplyText:    replyText,
+		FileSummary:  adminAgentWeChatFileSummary(record.Files),
+		Status:       agentRunStatusText(record.Status),
+		StatusClass:  agentRunStatusClass(record.Status),
+		Error:        truncateAuditText(record.Error, 240),
+		DurationText: strconv.FormatInt(record.DurationMS, 10) + " ms",
+	}
+}
+
+func adminAgentWeChatFileSummary(files []agentFileResult) string {
+	if len(files) == 0 {
+		return "-"
+	}
+	names := make([]string, 0, len(files))
+	for _, file := range files {
+		if strings.TrimSpace(file.Name) != "" {
+			names = append(names, file.Name)
+		}
+	}
+	if len(names) == 0 {
+		return strconv.Itoa(len(files)) + " 个文件"
+	}
+	if len(names) > 2 {
+		return strings.Join(names[:2], "、") + " 等 " + strconv.Itoa(len(names)) + " 个文件"
+	}
+	return strings.Join(names, "、")
 }
 
 func agentRunStatusText(status string) string {
@@ -1253,9 +3107,30 @@ func (s *adminServer) renderLogin(w http.ResponseWriter, statusCode int, data lo
 	if data.Action == "" {
 		data.Action = s.basePath + "/login"
 	}
+	if !data.DebugPrefill {
+		data.Password = ""
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(statusCode)
 	_ = adminLoginTemplate.Execute(w, data)
+}
+
+func (s *adminServer) debugMode() bool {
+	env := strings.ToLower(strings.TrimSpace(s.env))
+	return env == "" || env == "development" || env == "dev" || env == "local" || env == "debug" || env == "test"
+}
+
+func (s *adminServer) debugLoginPassword(state installState) string {
+	if !s.debugMode() {
+		return ""
+	}
+	if password := strings.TrimSpace(state.DebugLoginPassword); password != "" {
+		return password
+	}
+	if strings.TrimSpace(s.password) != "" && state.credentialsMatch(state.AdminUser, s.password) {
+		return s.password
+	}
+	return ""
 }
 
 func (s *adminServer) isInstalled() bool {
@@ -1271,20 +3146,41 @@ func (s *adminServer) isAuthenticated(r *http.Request) bool {
 	return s.validateSessionToken(cookie.Value)
 }
 
-func (s *adminServer) createSessionToken(username string, expiresAt time.Time) string {
+func (s *adminServer) loginLocked(state installState, username string, ip string, now time.Time) bool {
+	security := state.Security.normalized()
+	if security.LoginMaxAttempts <= 0 || security.LoginLockMinutes <= 0 {
+		return false
+	}
+	since := now.Add(-time.Duration(security.LoginLockMinutes) * time.Minute)
+	attempts, err := s.store.CountFailedLoginAttempts(username, ip, since)
+	if err != nil {
+		return false
+	}
+	return attempts >= security.LoginMaxAttempts
+}
+
+func (s *adminServer) createSessionToken(username string, sessionID string, expiresAt time.Time) string {
 	expires := strconv.FormatInt(expiresAt.Unix(), 10)
-	payload := username + "|" + expires
+	payload := username + "|" + expires + "|" + sessionID
 	signature := s.sign(payload)
 	return payload + "|" + signature
 }
 
 func (s *adminServer) validateSessionToken(token string) bool {
 	parts := strings.Split(token, "|")
-	if len(parts) != 3 {
+	if len(parts) != 3 && len(parts) != 4 {
 		return false
 	}
 
-	username, expires, signature := parts[0], parts[1], parts[2]
+	username, expires := parts[0], parts[1]
+	sessionID := ""
+	signature := ""
+	if len(parts) == 4 {
+		sessionID = parts[2]
+		signature = parts[3]
+	} else {
+		signature = parts[2]
+	}
 	state, err := s.store.Load()
 	if err != nil || !state.Initialized {
 		return false
@@ -1299,8 +3195,19 @@ func (s *adminServer) validateSessionToken(token string) bool {
 		return false
 	}
 
-	expected := s.sign(username + "|" + expires)
-	return subtle.ConstantTimeCompare([]byte(signature), []byte(expected)) == 1
+	payload := username + "|" + expires
+	if sessionID != "" {
+		payload += "|" + sessionID
+	}
+	expected := s.sign(payload)
+	if subtle.ConstantTimeCompare([]byte(signature), []byte(expected)) != 1 {
+		return false
+	}
+	if sessionID == "" {
+		return true
+	}
+	active, err := s.store.AdminSessionActive(sessionID, username, time.Now().UTC())
+	return err == nil && active
 }
 
 func (s *adminServer) sessionUsername(r *http.Request) string {
@@ -1309,10 +3216,33 @@ func (s *adminServer) sessionUsername(r *http.Request) string {
 		return ""
 	}
 	parts := strings.Split(cookie.Value, "|")
-	if len(parts) != 3 || !s.validateSessionToken(cookie.Value) {
+	if (len(parts) != 3 && len(parts) != 4) || !s.validateSessionToken(cookie.Value) {
 		return ""
 	}
 	return parts[0]
+}
+
+func (s *adminServer) sessionID(r *http.Request) string {
+	cookie, err := r.Cookie(adminSessionCookie)
+	if err != nil {
+		return ""
+	}
+	if !s.validateSessionToken(cookie.Value) {
+		return ""
+	}
+	parts := strings.Split(cookie.Value, "|")
+	if len(parts) != 4 {
+		return ""
+	}
+	return parts[2]
+}
+
+func (s *adminServer) revokeSessionToken(token string) {
+	parts := strings.Split(token, "|")
+	if len(parts) != 4 || !s.validateSessionToken(token) {
+		return
+	}
+	_ = s.store.RevokeAdminSession(parts[2], time.Now().UTC())
 }
 
 func (s *adminServer) sign(payload string) string {
@@ -1373,11 +3303,21 @@ func generateAdminEntry() (string, error) {
 	return "/moyi-" + hex.EncodeToString(bytes) + "-admin", nil
 }
 
+func newAdminSessionID() string {
+	bytes := make([]byte, 16)
+	if _, err := rand.Read(bytes); err != nil {
+		return strconv.FormatInt(time.Now().UnixNano(), 36)
+	}
+	return "sess_" + hex.EncodeToString(bytes)
+}
+
 type loginPageData struct {
-	Action   string
-	Username string
-	Error    string
-	Success  bool
+	Action       string
+	Username     string
+	Password     string
+	DebugPrefill bool
+	Error        string
+	Success      bool
 }
 
 type installPageData struct {
@@ -1402,52 +3342,80 @@ type installedPageData struct {
 }
 
 type adminPageData struct {
-	BasePath              string
-	LogoutAction          string
-	Active                string
-	Title                 string
-	Subtitle              string
-	SiteName              string
-	Username              string
-	AdminEntry            string
-	InstalledAt           string
-	Database              string
-	DatabaseDSN           string
-	AIProvider            string
-	AIModel               string
-	AITarget              string
-	AIStatus              string
-	AIStatusClass         string
-	UserNotice            string
-	UserNoticeClass       string
-	UserSaveAction        string
-	DataSourceNotice      string
-	DataSourceNoticeClass string
-	DataSourceSaveAction  string
-	SettingsNotice        string
-	SettingsNoticeClass   string
-	FileNotice            string
-	FileNoticeClass       string
-	NavItems              []adminNavItem
-	Metrics               []adminMetric
-	Tasks                 []adminTask
-	FoundationServices    []adminFoundationService
-	DataSources           []adminDataSource
-	AgentCapabilities     []adminCapability
-	AgentRuns             []adminAgentRunRow
-	AdminUsers            []adminUserRow
-	AdminRoles            []adminRoleRow
-	AdminMenus            []adminMenuRow
-	AdminPermissions      []adminPermissionRow
-	Settings              []adminSettingRow
-	SystemSettings        adminSystemSettings
-	StorageSettings       adminStorageSettings
-	FileRows              []adminFileRow
-	FileUploadAction      string
-	FileStorageSummary    string
-	FileAllowedSummary    string
-	AuditMetrics          []adminMetric
-	AuditEvents           []adminAuditEvent
+	BasePath               string
+	LogoutAction           string
+	Active                 string
+	Title                  string
+	Subtitle               string
+	SiteName               string
+	Username               string
+	AdminTagline           string
+	AdminEntry             string
+	InstalledAt            string
+	Database               string
+	DatabaseDSN            string
+	AIProvider             string
+	AIModel                string
+	AITarget               string
+	AIStatus               string
+	AIStatusClass          string
+	AgentNotice            string
+	AgentNoticeClass       string
+	UserNotice             string
+	UserNoticeClass        string
+	UserSaveAction         string
+	DataSourceNotice       string
+	DataSourceNoticeClass  string
+	DataSourceSaveAction   string
+	SettingsNotice         string
+	SettingsNoticeClass    string
+	FileNotice             string
+	FileNoticeClass        string
+	TaskNotice             string
+	TaskNoticeClass        string
+	TaskEnqueueAction      string
+	TaskRunAction          string
+	TaskRunAllAction       string
+	NavItems               []adminNavItem
+	Metrics                []adminMetric
+	Tasks                  []adminTask
+	FoundationServices     []adminFoundationService
+	ExtensionMetrics       []adminMetric
+	PluginExtensions       []adminPluginExtension
+	ResourceModels         []adminResourceModel
+	ResourceTools          []adminResourceTool
+	DataSources            []adminDataSource
+	AgentCapabilities      []adminCapability
+	AgentWeChatChannel     adminAgentWeChatChannel
+	AgentWeChatChannels    []adminAgentWeChatChannel
+	AgentWeChatMessagePage adminAgentWeChatMessagePage
+	AgentRuns              []adminAgentRunRow
+	AdminUsers             []adminUserRow
+	AdminSessions          []adminSessionRow
+	AdminRoles             []adminRoleRow
+	AdminMenus             []adminMenuRow
+	AdminPermissions       []adminPermissionRow
+	Settings               []adminSettingRow
+	SystemSettings         adminSystemSettings
+	StorageSettings        adminStorageSettings
+	AISettings             adminAISettings
+	SecuritySettings       adminSecuritySettings
+	NotificationSettings   adminNotificationSettings
+	SettingChanges         []adminSettingChangeRow
+	TaskWorkerSettings     adminTaskWorkerSettings
+	FileRows               []adminFileRow
+	FileUploadAction       string
+	FileStorageSummary     string
+	FileAllowedSummary     string
+	TaskMetrics            []adminMetric
+	TaskRows               []adminBackgroundTaskRow
+	TaskLogRows            []adminBackgroundTaskLogRow
+	TaskTypeOptions        []adminTaskTypeOption
+	NotificationMetrics    []adminMetric
+	NotificationRows       []adminNotificationDeliveryRow
+	AuditFilter            adminAuditFilter
+	AuditMetrics           []adminMetric
+	AuditEvents            []adminAuditEvent
 }
 
 type adminNavItem struct {
@@ -1469,6 +3437,12 @@ type adminTask struct {
 	Owner       string
 	Status      string
 	StatusClass string
+}
+
+type adminTaskTypeOption struct {
+	Type        string
+	Name        string
+	Description string
 }
 
 type adminFoundationService struct {
@@ -1502,6 +3476,89 @@ type adminCapability struct {
 	StatusClass string
 }
 
+type adminAgentWeChatChannel struct {
+	Key             string
+	Action          string
+	Enabled         bool
+	StatusText      string
+	StatusClass     string
+	BindCode        string
+	BindSession     string
+	BindExpiresAt   string
+	HasQRCode       bool
+	QRImageURL      template.URL
+	QRPayload       string
+	TokenMasked     string
+	DisplayName     string
+	DataScope       string
+	AllowedTables   string
+	AllowedSummary  string
+	BaseURL         string
+	BotType         string
+	LoginMessage    string
+	AccountID       string
+	OpenClawUserID  string
+	BoundUser       string
+	BoundAt         string
+	LastMessageAt   string
+	LastHeartbeatAt string
+	LastOutboundAt  string
+	LastError       string
+	PairEndpoint    string
+	BindEndpoint    string
+	SessionEndpoint string
+	MessageEndpoint string
+	MeEndpoint      string
+	ChatMessages    []adminAgentWeChatMessageRow
+}
+
+type adminAgentWeChatMessageRow struct {
+	ChannelKey   string
+	ChannelName  string
+	Provider     string
+	ReceivedAt   string
+	RepliedAt    string
+	SessionID    string
+	RunID        string
+	MessageID    string
+	FromUserID   string
+	ToUserID     string
+	InboundText  string
+	ReplyText    string
+	FileSummary  string
+	Status       string
+	StatusClass  string
+	Error        string
+	DurationText string
+}
+
+type adminAgentWeChatMessagePage struct {
+	Action         string
+	ResetURL       string
+	ExportURL      string
+	ChannelKey     string
+	ChannelOptions []adminAgentWeChatChannelOption
+	Rows           []adminAgentWeChatMessageRow
+	Page           int
+	PageSize       int
+	Total          int
+	TotalPages     int
+	ShowingFrom    int
+	ShowingTo      int
+	RangeText      string
+	PageText       string
+	HasPrev        bool
+	HasNext        bool
+	PrevURL        string
+	NextURL        string
+}
+
+type adminAgentWeChatChannelOption struct {
+	Key      string
+	Label    string
+	Selected bool
+}
+
 type adminUserRow struct {
 	Username     string
 	DisplayName  string
@@ -1515,6 +3572,31 @@ type adminUserRow struct {
 	ToggleLabel  string
 	ToggleAction string
 	DeleteAction string
+}
+
+type adminSessionRecord struct {
+	ID        string    `json:"id"`
+	Username  string    `json:"username"`
+	IP        string    `json:"ip,omitempty"`
+	UserAgent string    `json:"user_agent,omitempty"`
+	Status    string    `json:"status"`
+	CreatedAt time.Time `json:"created_at"`
+	ExpiresAt time.Time `json:"expires_at"`
+	RevokedAt time.Time `json:"revoked_at,omitempty"`
+}
+
+type adminSessionRow struct {
+	ID           string
+	IDShort      string
+	Username     string
+	IP           string
+	UserAgent    string
+	CreatedAt    string
+	ExpiresAt    string
+	Status       string
+	StatusClass  string
+	CanRevoke    bool
+	RevokeAction string
 }
 
 type adminRoleRow struct {
@@ -1565,10 +3647,14 @@ type adminSettingRow struct {
 }
 
 type adminSystemSettings struct {
-	Action   string
-	SiteName string
-	Timezone string
-	Locale   string
+	Action            string
+	SiteName          string
+	Timezone          string
+	Locale            string
+	AdminTagline      string
+	PublicTagline     string
+	PublicHeadline    string
+	PublicDescription string
 }
 
 type adminStorageSettings struct {
@@ -1583,6 +3669,49 @@ type adminStorageSettings struct {
 	PathStatus         string
 	PathStatusClass    string
 	AllowedDescription string
+}
+
+type adminAISettings struct {
+	Action       string
+	Provider     string
+	BaseURL      string
+	ChatModel    string
+	MaskedAPIKey string
+}
+
+type adminSecuritySettings struct {
+	Action           string
+	Username         string
+	Entry            string
+	SessionTTLHours  int
+	LoginMaxAttempts int
+	LoginLockMinutes int
+}
+
+type adminNotificationSettings struct {
+	Action              string
+	TestAction          string
+	Enabled             bool
+	Channel             string
+	ChannelName         string
+	Receiver            string
+	WebhookURL          string
+	FeishuSecretMasked  string
+	EventLoginFailures  bool
+	EventAIErrors       bool
+	EventStorageWarning bool
+}
+
+type adminTaskWorkerSettings struct {
+	Action                 string
+	Enabled                bool
+	IntervalSeconds        int
+	BatchSize              int
+	ScheduleHealthEnabled  bool
+	ScheduleHealthMinutes  int
+	ScheduleCleanupEnabled bool
+	ScheduleCleanupMinutes int
+	StatusText             string
 }
 
 type adminFileRow struct {
@@ -1613,6 +3742,15 @@ type adminAuditEvent struct {
 	Duration    string
 }
 
+type adminAuditFilter struct {
+	Action       string
+	ExportAction string
+	ExportURL    string
+	Category     string
+	Status       string
+	Keyword      string
+}
+
 type adminAuditRecord struct {
 	Timestamp  time.Time `json:"timestamp"`
 	Category   string    `json:"category"`
@@ -1627,6 +3765,134 @@ type adminAuditRecord struct {
 	DurationMS int64     `json:"duration_ms,omitempty"`
 }
 
+type adminNotificationDeliveryRecord struct {
+	ID         int64     `json:"id,omitempty"`
+	Timestamp  time.Time `json:"timestamp"`
+	Event      string    `json:"event"`
+	Title      string    `json:"title"`
+	Receiver   string    `json:"receiver"`
+	Channel    string    `json:"channel"`
+	Target     string    `json:"target"`
+	Message    string    `json:"message"`
+	Status     string    `json:"status"`
+	StatusCode int       `json:"status_code,omitempty"`
+	Error      string    `json:"error,omitempty"`
+}
+
+type adminBackgroundTaskRecord struct {
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	Type        string    `json:"type"`
+	Queue       string    `json:"queue"`
+	Status      string    `json:"status"`
+	Priority    int       `json:"priority"`
+	Attempts    int       `json:"attempts"`
+	MaxAttempts int       `json:"max_attempts"`
+	PayloadJSON string    `json:"payload_json,omitempty"`
+	Result      string    `json:"result,omitempty"`
+	LastError   string    `json:"last_error,omitempty"`
+	CreatedBy   string    `json:"created_by,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+	AvailableAt time.Time `json:"available_at"`
+	StartedAt   time.Time `json:"started_at,omitempty"`
+	FinishedAt  time.Time `json:"finished_at,omitempty"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+type adminBackgroundTaskLogRecord struct {
+	ID        int64     `json:"id"`
+	TaskID    string    `json:"task_id"`
+	Timestamp time.Time `json:"timestamp"`
+	Level     string    `json:"level"`
+	Event     string    `json:"event"`
+	Message   string    `json:"message"`
+	Status    string    `json:"status"`
+	Attempt   int       `json:"attempt"`
+}
+
+type adminSchemaSnapshotRecord struct {
+	ID             int64     `json:"id,omitempty"`
+	DataSourceName string    `json:"data_source_name"`
+	Driver         string    `json:"driver"`
+	Target         string    `json:"target"`
+	Summary        string    `json:"summary"`
+	TableCount     int       `json:"table_count"`
+	ColumnCount    int       `json:"column_count"`
+	SchemaHash     string    `json:"schema_hash"`
+	ChecksJSON     string    `json:"checks_json,omitempty"`
+	SchemaJSON     string    `json:"schema_json,omitempty"`
+	CapturedAt     time.Time `json:"captured_at"`
+}
+
+type adminSettingChangeRecord struct {
+	ID         int64     `json:"id,omitempty"`
+	Timestamp  time.Time `json:"timestamp"`
+	Category   string    `json:"category"`
+	Action     string    `json:"action"`
+	Actor      string    `json:"actor"`
+	Summary    string    `json:"summary"`
+	BeforeJSON string    `json:"before_json,omitempty"`
+	AfterJSON  string    `json:"after_json,omitempty"`
+}
+
+type adminSettingChangeRow struct {
+	Time     string
+	Category string
+	Action   string
+	Actor    string
+	Summary  string
+}
+
+type adminBackgroundTaskRow struct {
+	ID           string
+	IDShort      string
+	Name         string
+	Type         string
+	TypeName     string
+	Queue        string
+	Status       string
+	StatusClass  string
+	Attempts     string
+	CreatedBy    string
+	CreatedAt    string
+	AvailableAt  string
+	StartedAt    string
+	FinishedAt   string
+	Result       string
+	LastError    string
+	RunAction    string
+	RetryAction  string
+	CancelAction string
+	CanRun       bool
+	CanRetry     bool
+	CanCancel    bool
+}
+
+type adminBackgroundTaskLogRow struct {
+	Time        string
+	TaskID      string
+	TaskIDShort string
+	Level       string
+	LevelClass  string
+	Event       string
+	Status      string
+	Attempt     int
+	Message     string
+}
+
+type adminNotificationDeliveryRow struct {
+	Time        string
+	Event       string
+	Title       string
+	Receiver    string
+	Channel     string
+	Target      string
+	Message     string
+	Status      string
+	StatusClass string
+	Error       string
+}
+
 type auditEventInput struct {
 	Category   string
 	Action     string
@@ -1637,24 +3903,33 @@ type auditEventInput struct {
 }
 
 type installState struct {
-	Initialized  bool               `json:"initialized"`
-	SiteName     string             `json:"site_name"`
-	AdminEntry   string             `json:"admin_entry"`
-	AdminUser    string             `json:"admin_user"`
-	Database     databaseConfig     `json:"database"`
-	AI           aiConfig           `json:"ai"`
-	System       systemConfig       `json:"system,omitempty"`
-	Storage      storageConfig      `json:"storage,omitempty"`
-	DataSources  []dataSourceConfig `json:"data_sources,omitempty"`
-	Access       accessConfig       `json:"access,omitempty"`
-	PasswordSalt string             `json:"password_salt"`
-	PasswordHash string             `json:"password_hash"`
-	InstalledAt  time.Time          `json:"installed_at"`
+	Initialized        bool               `json:"initialized"`
+	SiteName           string             `json:"site_name"`
+	AdminEntry         string             `json:"admin_entry"`
+	AdminUser          string             `json:"admin_user"`
+	DebugLoginPassword string             `json:"debug_login_password,omitempty"`
+	Database           databaseConfig     `json:"database"`
+	AI                 aiConfig           `json:"ai"`
+	System             systemConfig       `json:"system,omitempty"`
+	Storage            storageConfig      `json:"storage,omitempty"`
+	Security           securityConfig     `json:"security,omitempty"`
+	Notifications      notificationConfig `json:"notifications,omitempty"`
+	TaskWorker         taskWorkerConfig   `json:"task_worker,omitempty"`
+	AgentChannels      agentChannelConfig `json:"agent_channels,omitempty"`
+	DataSources        []dataSourceConfig `json:"data_sources,omitempty"`
+	Access             accessConfig       `json:"access,omitempty"`
+	PasswordSalt       string             `json:"password_salt"`
+	PasswordHash       string             `json:"password_hash"`
+	InstalledAt        time.Time          `json:"installed_at"`
 }
 
 type systemConfig struct {
-	Timezone string `json:"timezone,omitempty"`
-	Locale   string `json:"locale,omitempty"`
+	Timezone          string `json:"timezone,omitempty"`
+	Locale            string `json:"locale,omitempty"`
+	AdminTagline      string `json:"admin_tagline,omitempty"`
+	PublicTagline     string `json:"public_tagline,omitempty"`
+	PublicHeadline    string `json:"public_headline,omitempty"`
+	PublicDescription string `json:"public_description,omitempty"`
 }
 
 type storageConfig struct {
@@ -1664,6 +3939,72 @@ type storageConfig struct {
 	MaxFileSizeMB            int    `json:"max_file_size_mb,omitempty"`
 	AllowedExtensions        string `json:"allowed_extensions,omitempty"`
 	AgentExportRetentionDays int    `json:"agent_export_retention_days,omitempty"`
+}
+
+type securityConfig struct {
+	SessionTTLHours  int `json:"session_ttl_hours,omitempty"`
+	LoginMaxAttempts int `json:"login_max_attempts,omitempty"`
+	LoginLockMinutes int `json:"login_lock_minutes,omitempty"`
+}
+
+type notificationConfig struct {
+	Enabled             bool   `json:"enabled,omitempty"`
+	Channel             string `json:"channel,omitempty"`
+	Receiver            string `json:"receiver,omitempty"`
+	WebhookURL          string `json:"webhook_url,omitempty"`
+	FeishuSecret        string `json:"feishu_secret,omitempty"`
+	EventLoginFailures  bool   `json:"event_login_failures,omitempty"`
+	EventAIErrors       bool   `json:"event_ai_errors,omitempty"`
+	EventStorageWarning bool   `json:"event_storage_warning,omitempty"`
+}
+
+type taskWorkerConfig struct {
+	Enabled                bool `json:"enabled,omitempty"`
+	IntervalSeconds        int  `json:"interval_seconds,omitempty"`
+	BatchSize              int  `json:"batch_size,omitempty"`
+	ScheduleHealthEnabled  bool `json:"schedule_health_enabled,omitempty"`
+	ScheduleHealthMinutes  int  `json:"schedule_health_minutes,omitempty"`
+	ScheduleCleanupEnabled bool `json:"schedule_cleanup_enabled,omitempty"`
+	ScheduleCleanupMinutes int  `json:"schedule_cleanup_minutes,omitempty"`
+}
+
+type agentChannelConfig struct {
+	WeChat  agentWeChatChannelConfig   `json:"wechat,omitempty"`
+	WeChats []agentWeChatChannelConfig `json:"wechats,omitempty"`
+}
+
+type agentWeChatChannelConfig struct {
+	Key             string    `json:"key,omitempty"`
+	Enabled         bool      `json:"enabled,omitempty"`
+	Status          string    `json:"status,omitempty"`
+	BindCode        string    `json:"bind_code,omitempty"`
+	BindSession     string    `json:"bind_session,omitempty"`
+	BindExpiresAt   time.Time `json:"bind_expires_at,omitempty"`
+	BaseURL         string    `json:"base_url,omitempty"`
+	BotType         string    `json:"bot_type,omitempty"`
+	LoginQRCode     string    `json:"login_qrcode,omitempty"`
+	LoginSession    string    `json:"login_session,omitempty"`
+	QRPayload       string    `json:"qr_payload,omitempty"`
+	QRImageURL      string    `json:"qr_image_url,omitempty"`
+	LoginMessage    string    `json:"login_message,omitempty"`
+	ProviderToken   string    `json:"provider_token,omitempty"`
+	AccountID       string    `json:"account_id,omitempty"`
+	OpenClawUserID  string    `json:"openclaw_user_id,omitempty"`
+	SyncBuffer      string    `json:"sync_buffer,omitempty"`
+	Token           string    `json:"token,omitempty"`
+	DisplayName     string    `json:"display_name,omitempty"`
+	AgentHint       string    `json:"agent_hint,omitempty"`
+	DataScope       string    `json:"data_scope,omitempty"`
+	AllowedTables   []string  `json:"allowed_tables,omitempty"`
+	BoundUser       string    `json:"bound_user,omitempty"`
+	ClientInfo      string    `json:"client_info,omitempty"`
+	LastError       string    `json:"last_error,omitempty"`
+	CreatedAt       time.Time `json:"created_at,omitempty"`
+	UpdatedAt       time.Time `json:"updated_at,omitempty"`
+	BoundAt         time.Time `json:"bound_at,omitempty"`
+	LastMessageAt   time.Time `json:"last_message_at,omitempty"`
+	LastHeartbeatAt time.Time `json:"last_heartbeat_at,omitempty"`
+	LastOutboundAt  time.Time `json:"last_outbound_at,omitempty"`
 }
 
 type databaseConfig struct {
@@ -1758,15 +4099,23 @@ func defaultDatabaseConfig() databaseConfig {
 
 func defaultSystemConfig() systemConfig {
 	return systemConfig{
-		Timezone: "Asia/Shanghai",
-		Locale:   "zh-CN",
+		Timezone:          "Asia/Shanghai",
+		Locale:            "zh-CN",
+		AdminTagline:      "Go AI 管理台",
+		PublicTagline:     "Go + AI 重构进行中",
+		PublicHeadline:    "Moyi Admin 正在从传统 CRUD 后台，重构为 Go 驱动的 AI 数据工作台。",
+		PublicDescription: "这个页面用于公开展示项目方向、当前进展和下一阶段计划。后台管理入口会独立登录，后续承载数据源、智能查询、导出、报告和审计能力。",
 	}
 }
 
 func systemConfigFromForm(r *http.Request) systemConfig {
 	return systemConfig{
-		Timezone: strings.TrimSpace(r.FormValue("timezone")),
-		Locale:   strings.TrimSpace(r.FormValue("locale")),
+		Timezone:          strings.TrimSpace(r.FormValue("timezone")),
+		Locale:            strings.TrimSpace(r.FormValue("locale")),
+		AdminTagline:      strings.TrimSpace(r.FormValue("admin_tagline")),
+		PublicTagline:     strings.TrimSpace(r.FormValue("public_tagline")),
+		PublicHeadline:    strings.TrimSpace(r.FormValue("public_headline")),
+		PublicDescription: strings.TrimSpace(r.FormValue("public_description")),
 	}
 }
 
@@ -1778,6 +4127,76 @@ func defaultStorageConfig() storageConfig {
 		MaxFileSizeMB:            20,
 		AllowedExtensions:        ".jpg,.jpeg,.png,.gif,.webp,.pdf,.txt,.md,.csv,.xlsx,.json,.doc,.docx,.zip",
 		AgentExportRetentionDays: 7,
+	}
+}
+
+func defaultSecurityConfig() securityConfig {
+	return securityConfig{
+		SessionTTLHours:  int(adminSessionTTL / time.Hour),
+		LoginMaxAttempts: 5,
+		LoginLockMinutes: 15,
+	}
+}
+
+func defaultNotificationConfig() notificationConfig {
+	return notificationConfig{
+		Enabled:             false,
+		Channel:             "disabled",
+		EventLoginFailures:  true,
+		EventAIErrors:       true,
+		EventStorageWarning: true,
+	}
+}
+
+func defaultTaskWorkerConfig() taskWorkerConfig {
+	return taskWorkerConfig{
+		Enabled:                true,
+		IntervalSeconds:        30,
+		BatchSize:              3,
+		ScheduleHealthEnabled:  true,
+		ScheduleHealthMinutes:  60,
+		ScheduleCleanupEnabled: true,
+		ScheduleCleanupMinutes: 24 * 60,
+	}
+}
+
+func securityConfigFromForm(r *http.Request) securityConfig {
+	sessionTTLHours, _ := strconv.Atoi(strings.TrimSpace(r.FormValue("session_ttl_hours")))
+	loginMaxAttempts, _ := strconv.Atoi(strings.TrimSpace(r.FormValue("login_max_attempts")))
+	loginLockMinutes, _ := strconv.Atoi(strings.TrimSpace(r.FormValue("login_lock_minutes")))
+	return securityConfig{
+		SessionTTLHours:  sessionTTLHours,
+		LoginMaxAttempts: loginMaxAttempts,
+		LoginLockMinutes: loginLockMinutes,
+	}
+}
+
+func notificationConfigFromForm(r *http.Request) notificationConfig {
+	return notificationConfig{
+		Enabled:             r.FormValue("notification_enabled") == "1",
+		Channel:             strings.TrimSpace(r.FormValue("notification_channel")),
+		Receiver:            strings.TrimSpace(r.FormValue("notification_receiver")),
+		WebhookURL:          strings.TrimSpace(r.FormValue("notification_webhook_url")),
+		FeishuSecret:        strings.TrimSpace(r.FormValue("notification_feishu_secret")),
+		EventLoginFailures:  r.FormValue("notification_event_login_failures") == "1",
+		EventAIErrors:       r.FormValue("notification_event_ai_errors") == "1",
+		EventStorageWarning: r.FormValue("notification_event_storage_warning") == "1",
+	}
+}
+
+func taskWorkerConfigFromForm(r *http.Request) taskWorkerConfig {
+	intervalSeconds, _ := strconv.Atoi(strings.TrimSpace(r.FormValue("task_worker_interval_seconds")))
+	batchSize, _ := strconv.Atoi(strings.TrimSpace(r.FormValue("task_worker_batch_size")))
+	healthMinutes, _ := strconv.Atoi(strings.TrimSpace(r.FormValue("task_schedule_health_minutes")))
+	cleanupMinutes, _ := strconv.Atoi(strings.TrimSpace(r.FormValue("task_schedule_cleanup_minutes")))
+	return taskWorkerConfig{
+		Enabled:                r.FormValue("task_worker_enabled") == "1",
+		IntervalSeconds:        intervalSeconds,
+		BatchSize:              batchSize,
+		ScheduleHealthEnabled:  r.FormValue("task_schedule_health_enabled") == "1",
+		ScheduleHealthMinutes:  healthMinutes,
+		ScheduleCleanupEnabled: r.FormValue("task_schedule_cleanup_enabled") == "1",
+		ScheduleCleanupMinutes: cleanupMinutes,
 	}
 }
 
@@ -1875,15 +4294,44 @@ func (a aiConfig) sanitized() aiConfig {
 }
 
 func (c systemConfig) normalized() systemConfig {
+	defaults := defaultSystemConfig()
 	c.Timezone = strings.TrimSpace(c.Timezone)
 	c.Locale = strings.TrimSpace(c.Locale)
 	if c.Timezone == "" {
-		c.Timezone = defaultSystemConfig().Timezone
+		c.Timezone = defaults.Timezone
 	}
 	if c.Locale == "" {
-		c.Locale = defaultSystemConfig().Locale
+		c.Locale = defaults.Locale
+	}
+	c.AdminTagline = normalizeSettingText(c.AdminTagline, 48)
+	if c.AdminTagline == "" {
+		c.AdminTagline = defaults.AdminTagline
+	}
+	c.PublicTagline = normalizeSettingText(c.PublicTagline, 80)
+	if c.PublicTagline == "" {
+		c.PublicTagline = defaults.PublicTagline
+	}
+	c.PublicHeadline = normalizeSettingText(c.PublicHeadline, 140)
+	if c.PublicHeadline == "" {
+		c.PublicHeadline = defaults.PublicHeadline
+	}
+	c.PublicDescription = normalizeSettingText(c.PublicDescription, 260)
+	if c.PublicDescription == "" {
+		c.PublicDescription = defaults.PublicDescription
 	}
 	return c
+}
+
+func normalizeSettingText(value string, maxRunes int) string {
+	value = strings.Join(strings.Fields(strings.TrimSpace(value)), " ")
+	if maxRunes <= 0 {
+		return value
+	}
+	runes := []rune(value)
+	if len(runes) > maxRunes {
+		return string(runes[:maxRunes])
+	}
+	return value
 }
 
 func (c storageConfig) normalized() storageConfig {
@@ -1927,6 +4375,448 @@ func (c storageConfig) DisplayName() string {
 		}
 		return c.Driver
 	}
+}
+
+func (c securityConfig) normalized() securityConfig {
+	defaults := defaultSecurityConfig()
+	if c.SessionTTLHours <= 0 {
+		c.SessionTTLHours = defaults.SessionTTLHours
+	}
+	if c.LoginMaxAttempts <= 0 {
+		c.LoginMaxAttempts = defaults.LoginMaxAttempts
+	}
+	if c.LoginLockMinutes <= 0 {
+		c.LoginLockMinutes = defaults.LoginLockMinutes
+	}
+	return c
+}
+
+func (c securityConfig) sessionTTL() time.Duration {
+	c = c.normalized()
+	return time.Duration(c.SessionTTLHours) * time.Hour
+}
+
+func validateSecurityConfig(security securityConfig) error {
+	security = security.normalized()
+	if security.SessionTTLHours < 1 || security.SessionTTLHours > 168 {
+		return errors.New("会话有效期需要在 1 到 168 小时之间")
+	}
+	if security.LoginMaxAttempts < 1 || security.LoginMaxAttempts > 20 {
+		return errors.New("登录失败阈值需要在 1 到 20 次之间")
+	}
+	if security.LoginLockMinutes < 1 || security.LoginLockMinutes > 1440 {
+		return errors.New("登录锁定窗口需要在 1 到 1440 分钟之间")
+	}
+	return nil
+}
+
+func (c notificationConfig) normalized() notificationConfig {
+	defaults := defaultNotificationConfig()
+	c.Channel = strings.ToLower(strings.TrimSpace(c.Channel))
+	c.Receiver = normalizeSettingText(c.Receiver, 120)
+	c.WebhookURL = strings.TrimSpace(c.WebhookURL)
+	c.FeishuSecret = strings.TrimSpace(c.FeishuSecret)
+	if c.Channel == "" {
+		c.Channel = defaults.Channel
+	}
+	if c.Channel != "disabled" && c.Channel != "webhook" && c.Channel != "feishu" {
+		c.Channel = defaults.Channel
+	}
+	if !c.Enabled {
+		c.Channel = "disabled"
+	}
+	if !c.EventLoginFailures && !c.EventAIErrors && !c.EventStorageWarning {
+		c.EventLoginFailures = defaults.EventLoginFailures
+		c.EventAIErrors = defaults.EventAIErrors
+		c.EventStorageWarning = defaults.EventStorageWarning
+	}
+	return c
+}
+
+func (c notificationConfig) ChannelName() string {
+	switch c.normalized().Channel {
+	case "webhook":
+		return "Webhook"
+	case "feishu":
+		return "飞书机器人"
+	default:
+		return "暂不启用"
+	}
+}
+
+func (c notificationConfig) DisplayName() string {
+	c = c.normalized()
+	if !c.Enabled || c.Channel == "disabled" {
+		return "暂不启用"
+	}
+	if c.Receiver != "" {
+		return c.ChannelName() + " / " + c.Receiver
+	}
+	return c.ChannelName()
+}
+
+func validateNotificationConfig(notifications notificationConfig) error {
+	notifications = notifications.normalized()
+	if !notifications.Enabled || notifications.Channel == "disabled" {
+		return nil
+	}
+	if notifications.Receiver == "" {
+		return errors.New("请输入通知接收人或备注")
+	}
+	if notifications.Channel == "webhook" || notifications.Channel == "feishu" {
+		if notifications.WebhookURL == "" {
+			return errors.New("请输入 " + notificationChannelLabel(notifications.Channel) + " Webhook 地址")
+		}
+		parsed, err := url.Parse(notifications.WebhookURL)
+		if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+			return errors.New(notificationChannelLabel(notifications.Channel) + " Webhook 地址不正确")
+		}
+		if parsed.Scheme != "https" && parsed.Scheme != "http" {
+			return errors.New(notificationChannelLabel(notifications.Channel) + " Webhook 地址只支持 http 或 https")
+		}
+	}
+	return nil
+}
+
+func (c taskWorkerConfig) normalized() taskWorkerConfig {
+	defaults := defaultTaskWorkerConfig()
+	if c.IntervalSeconds <= 0 {
+		c.IntervalSeconds = defaults.IntervalSeconds
+	}
+	if c.BatchSize <= 0 {
+		c.BatchSize = defaults.BatchSize
+	}
+	if c.ScheduleHealthMinutes <= 0 {
+		c.ScheduleHealthMinutes = defaults.ScheduleHealthMinutes
+	}
+	if c.ScheduleCleanupMinutes <= 0 {
+		c.ScheduleCleanupMinutes = defaults.ScheduleCleanupMinutes
+	}
+	return c
+}
+
+func (c taskWorkerConfig) workerInterval() time.Duration {
+	c = c.normalized()
+	return time.Duration(c.IntervalSeconds) * time.Second
+}
+
+func (c taskWorkerConfig) StatusText() string {
+	c = c.normalized()
+	if !c.Enabled {
+		return "自动执行已关闭"
+	}
+	return "每 " + strconv.Itoa(c.IntervalSeconds) + " 秒扫描，单轮最多 " + strconv.Itoa(c.BatchSize) + " 个"
+}
+
+func validateTaskWorkerConfig(config taskWorkerConfig) error {
+	config = config.normalized()
+	if config.IntervalSeconds < 5 || config.IntervalSeconds > 3600 {
+		return errors.New("Worker 扫描间隔需要在 5 到 3600 秒之间")
+	}
+	if config.BatchSize < 1 || config.BatchSize > 50 {
+		return errors.New("单轮执行数量需要在 1 到 50 个之间")
+	}
+	if config.ScheduleHealthMinutes < 5 || config.ScheduleHealthMinutes > 10080 {
+		return errors.New("系统体检定时间隔需要在 5 到 10080 分钟之间")
+	}
+	if config.ScheduleCleanupMinutes < 5 || config.ScheduleCleanupMinutes > 10080 {
+		return errors.New("导出清理定时间隔需要在 5 到 10080 分钟之间")
+	}
+	return nil
+}
+
+type notificationPayload struct {
+	Event     string `json:"event"`
+	Title     string `json:"title"`
+	Message   string `json:"message"`
+	SiteName  string `json:"site_name"`
+	Receiver  string `json:"receiver,omitempty"`
+	Timestamp string `json:"timestamp"`
+}
+
+type notificationSendResult struct {
+	Event      string
+	Title      string
+	Receiver   string
+	Channel    string
+	Target     string
+	Message    string
+	StatusCode int
+}
+
+var notificationHTTPClient = &http.Client{Timeout: 6 * time.Second}
+
+func sendTestNotification(ctx context.Context, state installState) (notificationSendResult, error) {
+	return sendEventNotification(ctx, state, "notification_test", "Moyi Admin 测试通知", "后台通知通道测试成功。如果你收到了这条消息，说明当前通知配置可用。")
+}
+
+func (s *adminServer) deliverAdminNotification(ctx context.Context, state installState, event string, title string, message string) (notificationSendResult, error) {
+	result, err := sendEventNotification(ctx, state, event, title, message)
+	status := "sent"
+	errorText := ""
+	if err != nil {
+		status = "failed"
+		errorText = err.Error()
+	}
+	record := adminNotificationDeliveryRecord{
+		Timestamp:  time.Now().UTC(),
+		Event:      result.Event,
+		Title:      result.Title,
+		Receiver:   result.Receiver,
+		Channel:    result.Channel,
+		Target:     result.Target,
+		Message:    truncateAuditText(message, 500),
+		Status:     status,
+		StatusCode: result.StatusCode,
+		Error:      truncateAuditText(errorText, 500),
+	}
+	if record.Event == "" {
+		record.Event = strings.TrimSpace(event)
+	}
+	if record.Title == "" {
+		record.Title = strings.TrimSpace(title)
+	}
+	_ = s.store.AppendNotificationDelivery(record)
+	return result, err
+}
+
+func (s *adminServer) notifyAdminEvent(r *http.Request, state installState, enabled bool, event string, title string, message string) {
+	if !enabled {
+		return
+	}
+	result, err := s.deliverAdminNotification(r.Context(), state, event, title, message)
+	if err != nil {
+		s.recordAuditEvent(r, state, auditEventInput{
+			Category:   "operation",
+			Action:     "事件通知失败",
+			Detail:     title + "：" + err.Error(),
+			StatusCode: http.StatusOK,
+		})
+		return
+	}
+	s.recordAuditEvent(r, state, auditEventInput{
+		Category:   "operation",
+		Action:     "发送事件通知",
+		Detail:     result.Message,
+		StatusCode: http.StatusOK,
+	})
+}
+
+func sendEventNotification(ctx context.Context, state installState, event string, title string, message string) (notificationSendResult, error) {
+	notifications := state.Notifications.normalized()
+	payload := notificationPayload{
+		Event:     strings.TrimSpace(event),
+		Title:     strings.TrimSpace(title),
+		Message:   truncateAuditText(message, 500),
+		SiteName:  strings.TrimSpace(state.SiteName),
+		Receiver:  notifications.Receiver,
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+	}
+	if payload.Event == "" {
+		payload.Event = "admin_event"
+	}
+	if payload.Title == "" {
+		payload.Title = "Moyi Admin 事件通知"
+	}
+	if payload.SiteName == "" {
+		payload.SiteName = "Moyi Admin"
+	}
+	return sendNotification(ctx, notifications, payload)
+}
+
+func sendNotification(ctx context.Context, notifications notificationConfig, payload notificationPayload) (notificationSendResult, error) {
+	notifications = notifications.normalized()
+	result := notificationSendResult{
+		Event:    payload.Event,
+		Title:    payload.Title,
+		Receiver: notifications.Receiver,
+		Channel:  notifications.Channel,
+		Target:   maskNotificationTarget(notifications),
+	}
+	if err := validateNotificationConfig(notifications); err != nil {
+		return result, err
+	}
+	if !notifications.Enabled || notifications.Channel == "disabled" {
+		return result, errors.New("通知通道未启用")
+	}
+
+	switch notifications.Channel {
+	case "webhook":
+		body, err := json.Marshal(payload)
+		if err != nil {
+			return result, fmt.Errorf("构造通知内容失败：%w", err)
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, notifications.WebhookURL, bytes.NewReader(body))
+		if err != nil {
+			return result, fmt.Errorf("创建 Webhook 请求失败：%w", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("User-Agent", "moyi-admin-notifier/1.0")
+		resp, err := notificationHTTPClient.Do(req)
+		if err != nil {
+			return result, fmt.Errorf("请求 Webhook 失败：%w", err)
+		}
+		defer resp.Body.Close()
+		result.StatusCode = resp.StatusCode
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			message := strings.TrimSpace(string(respBody))
+			if message == "" {
+				message = http.StatusText(resp.StatusCode)
+			}
+			return result, fmt.Errorf("Webhook 返回 %d：%s", resp.StatusCode, message)
+		}
+		result.Message = payload.Title + " 已通过 Webhook 发送给 " + notifications.Receiver
+		return result, nil
+	case "feishu":
+		body, err := json.Marshal(buildFeishuNotificationPayload(notifications, payload))
+		if err != nil {
+			return result, fmt.Errorf("构造飞书机器人通知失败：%w", err)
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, notifications.WebhookURL, bytes.NewReader(body))
+		if err != nil {
+			return result, fmt.Errorf("创建飞书机器人请求失败：%w", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("User-Agent", "moyi-admin-notifier/1.0")
+		resp, err := notificationHTTPClient.Do(req)
+		if err != nil {
+			return result, fmt.Errorf("请求飞书机器人失败：%w", err)
+		}
+		defer resp.Body.Close()
+		result.StatusCode = resp.StatusCode
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			message := strings.TrimSpace(string(respBody))
+			if message == "" {
+				message = http.StatusText(resp.StatusCode)
+			}
+			return result, fmt.Errorf("飞书机器人返回 %d：%s", resp.StatusCode, message)
+		}
+		if message := feishuNotificationError(respBody); message != "" {
+			return result, errors.New(message)
+		}
+		result.Message = payload.Title + " 已通过飞书机器人发送给 " + notifications.Receiver
+		return result, nil
+	default:
+		return result, errors.New("暂不支持该通知通道")
+	}
+}
+
+func buildFeishuNotificationPayload(notifications notificationConfig, payload notificationPayload) map[string]any {
+	text := strings.Join([]string{
+		"【" + displayNotificationValue(payload.SiteName, "Moyi Admin") + "】" + displayNotificationValue(payload.Title, "事件通知"),
+		"事件：" + displayNotificationValue(payload.Event, "admin_event"),
+		"接收：" + displayNotificationValue(notifications.Receiver, "未设置"),
+		"时间：" + displayNotificationValue(payload.Timestamp, time.Now().UTC().Format(time.RFC3339)),
+		"",
+		displayNotificationValue(payload.Message, "系统事件已触发。"),
+	}, "\n")
+	body := map[string]any{
+		"msg_type": "text",
+		"content": map[string]string{
+			"text": text,
+		},
+	}
+	if strings.TrimSpace(notifications.FeishuSecret) != "" {
+		timestamp := strconv.FormatInt(time.Now().Unix(), 10)
+		body["timestamp"] = timestamp
+		body["sign"] = feishuRobotSign(timestamp, notifications.FeishuSecret)
+	}
+	return body
+}
+
+func feishuRobotSign(timestamp string, secret string) string {
+	stringToSign := timestamp + "\n" + strings.TrimSpace(secret)
+	mac := hmac.New(sha256.New, []byte(stringToSign))
+	return base64.StdEncoding.EncodeToString(mac.Sum(nil))
+}
+
+func feishuNotificationError(respBody []byte) string {
+	var parsed map[string]any
+	if err := json.Unmarshal(respBody, &parsed); err != nil {
+		return ""
+	}
+	for _, key := range []string{"code", "StatusCode"} {
+		value, ok := parsed[key]
+		if !ok {
+			continue
+		}
+		code, ok := numericJSONValue(value)
+		if !ok || code == 0 {
+			continue
+		}
+		message := displayNotificationValue(stringJSONValue(parsed["msg"]), stringJSONValue(parsed["StatusMessage"]))
+		if message == "" {
+			message = strings.TrimSpace(string(respBody))
+		}
+		return fmt.Sprintf("飞书机器人返回 %d：%s", int(code), message)
+	}
+	return ""
+}
+
+func numericJSONValue(value any) (float64, bool) {
+	switch v := value.(type) {
+	case float64:
+		return v, true
+	case int:
+		return float64(v), true
+	case string:
+		n, err := strconv.ParseFloat(strings.TrimSpace(v), 64)
+		return n, err == nil
+	default:
+		return 0, false
+	}
+}
+
+func stringJSONValue(value any) string {
+	if text, ok := value.(string); ok {
+		return strings.TrimSpace(text)
+	}
+	return ""
+}
+
+func maskNotificationTarget(notifications notificationConfig) string {
+	notifications = notifications.normalized()
+	switch notifications.Channel {
+	case "feishu":
+		return maskFeishuWebhookTarget(notifications.WebhookURL)
+	case "webhook":
+		parsed, err := url.Parse(notifications.WebhookURL)
+		if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+			return truncateAuditText(notifications.WebhookURL, 160)
+		}
+		parsed.User = nil
+		parsed.RawQuery = ""
+		parsed.Fragment = ""
+		return truncateAuditText(parsed.String(), 160)
+	default:
+		return notificationChannelLabel(notifications.Channel)
+	}
+}
+
+func maskFeishuWebhookTarget(rawURL string) string {
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return "飞书机器人 Webhook 已配置"
+	}
+	parts := strings.Split(strings.Trim(parsed.Path, "/"), "/")
+	if len(parts) > 0 {
+		parts[len(parts)-1] = "****"
+		parsed.Path = "/" + strings.Join(parts, "/")
+	}
+	parsed.User = nil
+	parsed.RawQuery = ""
+	parsed.Fragment = ""
+	return truncateAuditText(parsed.String(), 160)
+}
+
+func displayNotificationValue(value string, fallback string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return fallback
+	}
+	return value
 }
 
 func normalizeStorageExtensions(value string) string {
@@ -2027,17 +4917,25 @@ func defaultAccessConfig() accessConfig {
 			{Key: "dashboard", Label: "工作台", Path: "/workspace", Status: "enabled"},
 			{Key: "foundation", Label: "基础服务", Path: "/foundation", Status: "enabled"},
 			{Key: "data_sources", Label: "数据源", Path: "/data-sources", Status: "enabled"},
+			{Key: "extensions", Label: "能力扩展", Path: "/extensions", Status: "enabled"},
 			{Key: "ai", Label: "AI 智能体", Path: "/ai", Status: "enabled"},
+			{Key: "wechat_agent", Label: "微信 Agent", Path: "/wechat-agent", Status: "enabled"},
 			{Key: "users", Label: "用户权限", Path: "/users", Status: "enabled"},
 			{Key: "settings", Label: "系统设置", Path: "/settings", Status: "enabled"},
 			{Key: "files", Label: "文件管理", Path: "/files", Status: "enabled"},
+			{Key: "tasks", Label: "后台任务", Path: "/tasks", Status: "enabled"},
+			{Key: "notifications", Label: "通知事件", Path: "/notifications", Status: "enabled"},
 			{Key: "audit", Label: "审计日志", Path: "/audit", Status: "enabled"},
 		},
 		Permissions: []adminPermissionConfig{
 			{Key: "admin.users.manage", Subject: "admin_users", Permission: "manage", Boundary: "允许创建、禁用、删除非初始化管理员", Status: "enabled"},
+			{Key: "admin.sessions.manage", Subject: "admin_sessions", Permission: "revoke", Boundary: "允许查看后台登录会话并强制下线非当前会话", Status: "enabled"},
 			{Key: "admin.settings.manage", Subject: "admin_settings", Permission: "manage", Boundary: "允许维护站点、存储和运行参数", Status: "enabled"},
 			{Key: "admin.data_sources.manage", Subject: "data_sources", Permission: "manage", Boundary: "允许登记、测试和删除业务数据源", Status: "enabled"},
+			{Key: "admin.extensions.read", Subject: "plugin_extensions", Permission: "read", Boundary: "允许查看插件扩展、资源模型和生成工具", Status: "enabled"},
 			{Key: "admin.files.manage", Subject: "upload_files", Permission: "manage", Boundary: "允许上传、预览、下载和删除后台文件", Status: "enabled"},
+			{Key: "admin.tasks.manage", Subject: "background_tasks", Permission: "manage", Boundary: "允许创建、执行和重试后台任务", Status: "enabled"},
+			{Key: "agent.wechat.manage", Subject: "agent_wechat_channels", Permission: "manage", Boundary: "允许维护微信 Agent 通道、登录二维码和授权数据表", Status: "enabled"},
 			{Key: "agent.tables.read", Subject: "all_registered_tables", Permission: "read", Boundary: "允许读取所有已登记数据表和虚拟表", Status: "enabled"},
 			{Key: "agent.sql.select", Subject: "all_registered_tables", Permission: "select", Boundary: "仅允许 SELECT，拒绝写入、多语句和危险关键字", Status: "enabled"},
 			{Key: "agent.secrets.mask", Subject: "sensitive_fields", Permission: "mask", Boundary: "API Key、密码、盐值和哈希只允许脱敏展示", Status: "enabled"},
@@ -2054,10 +4952,14 @@ func (a accessConfig) normalized(state installState) accessConfig {
 	a.Menus = normalizeMenuConfigs(a.Menus)
 	if len(a.Menus) == 0 {
 		a.Menus = defaults.Menus
+	} else {
+		a.Menus = mergeDefaultMenuConfigs(a.Menus, defaults.Menus)
 	}
 	a.Permissions = normalizePermissionConfigs(a.Permissions)
 	if len(a.Permissions) == 0 {
 		a.Permissions = defaults.Permissions
+	} else {
+		a.Permissions = mergeDefaultPermissionConfigs(a.Permissions, defaults.Permissions)
 	}
 	a.Users = normalizeAdminAccounts(a.Users)
 	if state.AdminUser != "" {
@@ -2266,6 +5168,22 @@ func normalizeMenuConfigs(menus []adminMenuConfig) []adminMenuConfig {
 	return out
 }
 
+func mergeDefaultMenuConfigs(menus []adminMenuConfig, defaults []adminMenuConfig) []adminMenuConfig {
+	seen := map[string]bool{}
+	for _, menu := range menus {
+		seen[strings.ToLower(strings.TrimSpace(menu.Key))] = true
+	}
+	for _, menu := range defaults {
+		key := strings.ToLower(strings.TrimSpace(menu.Key))
+		if key == "" || seen[key] {
+			continue
+		}
+		menus = append(menus, menu)
+		seen[key] = true
+	}
+	return menus
+}
+
 func normalizePermissionConfigs(permissions []adminPermissionConfig) []adminPermissionConfig {
 	out := make([]adminPermissionConfig, 0, len(permissions))
 	seen := map[string]bool{}
@@ -2289,6 +5207,22 @@ func normalizePermissionConfigs(permissions []adminPermissionConfig) []adminPerm
 		out = append(out, permission)
 	}
 	return out
+}
+
+func mergeDefaultPermissionConfigs(permissions []adminPermissionConfig, defaults []adminPermissionConfig) []adminPermissionConfig {
+	seen := map[string]bool{}
+	for _, permission := range permissions {
+		seen[strings.ToLower(strings.TrimSpace(permission.Key))] = true
+	}
+	for _, permission := range defaults {
+		key := strings.ToLower(strings.TrimSpace(permission.Key))
+		if key == "" || seen[key] {
+			continue
+		}
+		permissions = append(permissions, permission)
+		seen[key] = true
+	}
+	return permissions
 }
 
 func accessStatusText(status string) string {
@@ -2344,6 +5278,66 @@ func buildAdminUserRows(state installState, entry string) []adminUserRow {
 		})
 	}
 	return rows
+}
+
+func buildAdminSessionRows(records []adminSessionRecord, entry string, currentSessionID string) []adminSessionRow {
+	rows := make([]adminSessionRow, 0, len(records))
+	now := time.Now().UTC()
+	for _, record := range records {
+		status := strings.ToLower(strings.TrimSpace(record.Status))
+		if status == "" {
+			status = "active"
+		}
+		if status == "active" && !record.ExpiresAt.IsZero() && !now.Before(record.ExpiresAt) {
+			status = "expired"
+		}
+		rows = append(rows, adminSessionRow{
+			ID:           record.ID,
+			IDShort:      shortSessionID(record.ID),
+			Username:     record.Username,
+			IP:           displayNotificationValue(record.IP, "-"),
+			UserAgent:    truncateAuditText(displayNotificationValue(record.UserAgent, "-"), 80),
+			CreatedAt:    formatAdminTime(record.CreatedAt),
+			ExpiresAt:    formatAdminTime(record.ExpiresAt),
+			Status:       adminSessionStatusText(status),
+			StatusClass:  adminSessionStatusClass(status),
+			CanRevoke:    status == "active" && record.ID != "" && record.ID != currentSessionID,
+			RevokeAction: entry + "/users/sessions/revoke",
+		})
+	}
+	return rows
+}
+
+func shortSessionID(id string) string {
+	id = strings.TrimSpace(id)
+	if len(id) <= 14 {
+		return id
+	}
+	return id[:9] + "..." + id[len(id)-4:]
+}
+
+func adminSessionStatusText(status string) string {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "active":
+		return "在线"
+	case "revoked":
+		return "已下线"
+	case "expired":
+		return "已过期"
+	default:
+		return "未知"
+	}
+}
+
+func adminSessionStatusClass(status string) string {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "active":
+		return "is-ready"
+	case "revoked", "expired":
+		return "is-muted"
+	default:
+		return "is-warning"
+	}
 }
 
 func buildAdminRoleRows(state installState) []adminRoleRow {
@@ -2404,6 +5398,8 @@ func userNoticeFromQuery(query url.Values) (string, string) {
 		return "管理员状态已更新。", "alert-success"
 	case "delete":
 		return "管理员账号已删除。", "alert-success"
+	case "session":
+		return "后台会话已下线。", "alert-success"
 	default:
 		return "", ""
 	}
@@ -2603,7 +5599,7 @@ func checkSQLiteDataSource(path string) databaseCheckResult {
 		if n >= 16 && string(header) != "SQLite format 3\x00" {
 			return databaseCheckResult{OK: false, Message: "文件不是有效 SQLite 数据库", Checks: []string{"路径：" + path}}
 		}
-		summary, schemaChecks, err := inspectSQLiteSchema(path)
+		inspection, err := inspectSQLiteSchema(path)
 		checks := []string{"文件：" + path, "大小：" + formatAdminFileSize(info.Size())}
 		if err != nil {
 			checks = append(checks, "结构扫描失败："+err.Error())
@@ -2613,11 +5609,12 @@ func checkSQLiteDataSource(path string) databaseCheckResult {
 				Checks:  checks,
 			}
 		}
-		checks = append(checks, schemaChecks...)
+		checks = append(checks, inspection.Checks...)
 		return databaseCheckResult{
-			OK:      true,
-			Message: "SQLite 文件可读取，" + summary + "。",
-			Checks:  checks,
+			OK:         true,
+			Message:    "SQLite 文件可读取，" + inspection.Summary + "。",
+			Checks:     checks,
+			Inspection: inspection,
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return databaseCheckResult{OK: false, Message: "SQLite 路径不可访问：" + err.Error(), Checks: []string{"路径：" + path}}
@@ -2636,22 +5633,22 @@ func checkSQLiteDataSource(path string) databaseCheckResult {
 	}
 }
 
-func inspectSQLiteSchema(path string) (string, []string, error) {
+func inspectSQLiteSchema(path string) (databaseSchemaInspection, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
-		return "", nil, err
+		return databaseSchemaInspection{}, err
 	}
 	defer db.Close()
 	if err := db.PingContext(ctx); err != nil {
-		return "", nil, err
+		return databaseSchemaInspection{}, err
 	}
 
 	rows, err := db.QueryContext(ctx, `SELECT name FROM sqlite_master WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%' ORDER BY name`)
 	if err != nil {
-		return "", nil, err
+		return databaseSchemaInspection{}, err
 	}
 	defer rows.Close()
 
@@ -2659,60 +5656,39 @@ func inspectSQLiteSchema(path string) (string, []string, error) {
 	for rows.Next() {
 		var name string
 		if err := rows.Scan(&name); err != nil {
-			return "", nil, err
+			return databaseSchemaInspection{}, err
 		}
 		if strings.TrimSpace(name) != "" {
 			tables = append(tables, name)
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return "", nil, err
-	}
-	if len(tables) == 0 {
-		return "未发现业务表", []string{"表数量：0", "字段数量：0"}, nil
+		return databaseSchemaInspection{}, err
 	}
 
-	totalColumns := 0
-	tableDetails := make([]string, 0, minInt(len(tables), 8))
+	inspectedTables := make([]inspectedDatabaseTable, 0, len(tables))
 	for _, table := range tables {
 		columns, err := inspectSQLiteTableColumns(ctx, db, table)
 		if err != nil {
-			return "", nil, err
+			return databaseSchemaInspection{}, err
 		}
-		totalColumns += len(columns)
-		if len(tableDetails) >= 8 {
-			continue
-		}
-		preview := columns
-		if len(preview) > 6 {
-			preview = preview[:6]
-		}
-		tableDetails = append(tableDetails, table+"("+strings.Join(preview, "、")+")")
+		inspectedTables = append(inspectedTables, inspectedDatabaseTable{
+			Name:    table,
+			Kind:    "table",
+			Columns: columns,
+		})
 	}
-
-	tablePreview := tables
-	if len(tablePreview) > 6 {
-		tablePreview = tablePreview[:6]
-	}
-	checks := []string{
-		"表数量：" + strconv.Itoa(len(tables)),
-		"字段数量：" + strconv.Itoa(totalColumns),
-		"表清单：" + strings.Join(tablePreview, "、"),
-	}
-	if len(tableDetails) > 0 {
-		checks = append(checks, "字段结构："+strings.Join(tableDetails, "；"))
-	}
-	return "发现 " + strconv.Itoa(len(tables)) + " 张表、" + strconv.Itoa(totalColumns) + " 个字段", checks, nil
+	return summarizeDatabaseSchema(inspectedTables), nil
 }
 
-func inspectSQLiteTableColumns(ctx context.Context, db *sql.DB, table string) ([]string, error) {
+func inspectSQLiteTableColumns(ctx context.Context, db *sql.DB, table string) ([]inspectedDatabaseColumn, error) {
 	rows, err := db.QueryContext(ctx, `PRAGMA table_info(`+quoteSQLiteIdentifier(table)+`)`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	columns := make([]string, 0)
+	columns := make([]inspectedDatabaseColumn, 0)
 	for rows.Next() {
 		var cid int
 		var name, columnType string
@@ -2722,15 +5698,13 @@ func inspectSQLiteTableColumns(ctx context.Context, db *sql.DB, table string) ([
 		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &pk); err != nil {
 			return nil, err
 		}
-		column := name
-		if strings.TrimSpace(columnType) != "" {
-			column += " " + strings.ToUpper(strings.TrimSpace(columnType))
+		column := inspectedDatabaseColumn{
+			Name:     strings.TrimSpace(name),
+			Type:     strings.ToUpper(strings.TrimSpace(columnType)),
+			Nullable: notNull == 0,
 		}
 		if pk > 0 {
-			column += " PK"
-		}
-		if notNull > 0 {
-			column += " NOT NULL"
+			column.Key = "PK"
 		}
 		columns = append(columns, column)
 	}
@@ -2749,21 +5723,540 @@ func minInt(left int, right int) int {
 }
 
 func checkNetworkDataSource(source dataSourceConfig) databaseCheckResult {
-	address := net.JoinHostPort(source.Host, source.Port)
-	conn, err := net.DialTimeout("tcp", address, 2*time.Second)
+	source = source.normalized()
+	return checkNetworkDatabase(networkDatabaseConfig{
+		Driver:        source.Driver,
+		DisplayName:   source.DisplayName(),
+		Host:          source.Host,
+		Port:          source.Port,
+		Database:      source.Database,
+		Username:      source.Username,
+		Password:      source.Password,
+		SSLMode:       source.SSLMode,
+		Purpose:       "业务数据源",
+		RequireSchema: true,
+	})
+}
+
+type networkDatabaseConfig struct {
+	Driver        string
+	DisplayName   string
+	Host          string
+	Port          string
+	Database      string
+	Username      string
+	Password      string
+	SSLMode       string
+	Purpose       string
+	RequireSchema bool
+}
+
+type databaseSchemaInspection struct {
+	Summary     string                   `json:"summary"`
+	Checks      []string                 `json:"checks"`
+	TableCount  int                      `json:"table_count"`
+	ColumnCount int                      `json:"column_count"`
+	Tables      []inspectedDatabaseTable `json:"tables,omitempty"`
+}
+
+type inspectedDatabaseTable struct {
+	Name    string                    `json:"name"`
+	Kind    string                    `json:"kind,omitempty"`
+	Comment string                    `json:"comment,omitempty"`
+	Columns []inspectedDatabaseColumn `json:"columns,omitempty"`
+	Indexes []string                  `json:"indexes,omitempty"`
+}
+
+type inspectedDatabaseColumn struct {
+	Name     string `json:"name"`
+	Type     string `json:"type,omitempty"`
+	Comment  string `json:"comment,omitempty"`
+	Nullable bool   `json:"nullable"`
+	Key      string `json:"key,omitempty"`
+}
+
+func checkNetworkDatabase(config networkDatabaseConfig) databaseCheckResult {
+	config.Driver = normalizeDatabaseDriver(config.Driver)
+	config.DisplayName = strings.TrimSpace(config.DisplayName)
+	if config.DisplayName == "" {
+		config.DisplayName = config.Driver
+	}
+	config.Purpose = strings.TrimSpace(config.Purpose)
+	if config.Purpose == "" {
+		config.Purpose = "数据库"
+	}
+	address := net.JoinHostPort(config.Host, config.Port)
+
+	db, err := openNetworkSQLDatabase(config)
 	if err != nil {
 		return databaseCheckResult{
 			OK:      false,
-			Message: "无法连接数据库端口：" + err.Error(),
-			Checks:  []string{"地址：" + address, "数据库：" + source.Database},
+			Message: config.DisplayName + " 驱动初始化失败：" + err.Error(),
+			Checks:  []string{"地址：" + address, "数据库：" + config.Database, "用途：" + config.Purpose},
 		}
 	}
-	_ = conn.Close()
-	return databaseCheckResult{
-		OK:      true,
-		Message: source.DisplayName() + " 端口可达，连接基础检查通过。",
-		Checks:  []string{"地址：" + address, "数据库：" + source.Database, "结构扫描：待接入 " + source.DisplayName() + " 驱动后读取真实表注释与字段注释"},
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+	db.SetConnMaxLifetime(30 * time.Second)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	if err := db.PingContext(ctx); err != nil {
+		return databaseCheckResult{
+			OK:      false,
+			Message: config.DisplayName + " 登录或数据库连接失败：" + err.Error(),
+			Checks:  []string{"地址：" + address, "数据库：" + config.Database, "用户：" + config.Username},
+		}
 	}
+
+	inspection, err := inspectNetworkDatabaseSchema(ctx, db, config.Driver)
+	if err != nil {
+		result := databaseCheckResult{
+			OK:      !config.RequireSchema,
+			Message: config.DisplayName + " 登录成功，但结构扫描失败：" + err.Error(),
+			Checks:  []string{"地址：" + address, "数据库：" + config.Database, "用户：" + config.Username, "结构扫描：失败"},
+		}
+		if config.RequireSchema {
+			result.Message = config.DisplayName + " 连接成功，但无法读取表结构：" + err.Error()
+		}
+		return result
+	}
+	checks := []string{"地址：" + address, "数据库：" + config.Database, "用户：" + config.Username, "用途：" + config.Purpose}
+	checks = append(checks, inspection.Checks...)
+	return databaseCheckResult{
+		OK:         true,
+		Message:    config.DisplayName + " 登录成功，" + inspection.Summary + "。",
+		Checks:     checks,
+		Inspection: inspection,
+	}
+}
+
+func normalizeDatabaseDriver(driver string) string {
+	driver = strings.ToLower(strings.TrimSpace(driver))
+	if driver == "postgresql" {
+		return "postgres"
+	}
+	return driver
+}
+
+func openNetworkSQLDatabase(config networkDatabaseConfig) (*sql.DB, error) {
+	switch normalizeDatabaseDriver(config.Driver) {
+	case "mysql":
+		mysqlConfig := mysql.NewConfig()
+		mysqlConfig.User = strings.TrimSpace(config.Username)
+		mysqlConfig.Passwd = config.Password
+		mysqlConfig.Net = "tcp"
+		mysqlConfig.Addr = net.JoinHostPort(strings.TrimSpace(config.Host), strings.TrimSpace(config.Port))
+		mysqlConfig.DBName = strings.TrimSpace(config.Database)
+		mysqlConfig.ParseTime = true
+		mysqlConfig.Timeout = 3 * time.Second
+		mysqlConfig.ReadTimeout = 5 * time.Second
+		mysqlConfig.WriteTimeout = 5 * time.Second
+		mysqlConfig.Params = map[string]string{"charset": "utf8mb4,utf8"}
+		switch strings.ToLower(strings.TrimSpace(config.SSLMode)) {
+		case "", "disable", "disabled", "false":
+		case "skip-verify", "skip_verify":
+			mysqlConfig.TLSConfig = "skip-verify"
+		default:
+			mysqlConfig.TLSConfig = "true"
+		}
+		return sql.Open("mysql", mysqlConfig.FormatDSN())
+	case "postgres":
+		return sql.Open("pgx", postgresConnectionString(config))
+	default:
+		return nil, errors.New("不支持的数据源驱动：" + config.Driver)
+	}
+}
+
+func postgresConnectionString(config networkDatabaseConfig) string {
+	u := url.URL{
+		Scheme: "postgres",
+		User:   url.UserPassword(strings.TrimSpace(config.Username), config.Password),
+		Host:   net.JoinHostPort(strings.TrimSpace(config.Host), strings.TrimSpace(config.Port)),
+		Path:   strings.TrimSpace(config.Database),
+	}
+	query := u.Query()
+	sslMode := strings.ToLower(strings.TrimSpace(config.SSLMode))
+	if sslMode == "" {
+		sslMode = "disable"
+	}
+	query.Set("sslmode", sslMode)
+	query.Set("connect_timeout", "3")
+	u.RawQuery = query.Encode()
+	return u.String()
+}
+
+func inspectNetworkDatabaseSchema(ctx context.Context, db *sql.DB, driver string) (databaseSchemaInspection, error) {
+	switch normalizeDatabaseDriver(driver) {
+	case "mysql":
+		return inspectMySQLSchema(ctx, db)
+	case "postgres":
+		return inspectPostgresSchema(ctx, db)
+	default:
+		return databaseSchemaInspection{}, errors.New("不支持结构扫描：" + driver)
+	}
+}
+
+func inspectMySQLSchema(ctx context.Context, db *sql.DB) (databaseSchemaInspection, error) {
+	tableRows, err := db.QueryContext(ctx, `SELECT TABLE_NAME, TABLE_TYPE, COALESCE(TABLE_COMMENT, '')
+		FROM information_schema.TABLES
+		WHERE TABLE_SCHEMA = DATABASE() AND TABLE_TYPE IN ('BASE TABLE', 'VIEW')
+		ORDER BY TABLE_NAME
+		LIMIT 80`)
+	if err != nil {
+		return databaseSchemaInspection{}, err
+	}
+	defer tableRows.Close()
+
+	tables := make([]inspectedDatabaseTable, 0)
+	tableIndex := map[string]int{}
+	for tableRows.Next() {
+		var table inspectedDatabaseTable
+		if err := tableRows.Scan(&table.Name, &table.Kind, &table.Comment); err != nil {
+			return databaseSchemaInspection{}, err
+		}
+		table.Name = strings.TrimSpace(table.Name)
+		if table.Name == "" {
+			continue
+		}
+		table.Comment = normalizeSchemaComment(table.Comment)
+		tableIndex[table.Name] = len(tables)
+		tables = append(tables, table)
+	}
+	if err := tableRows.Err(); err != nil {
+		return databaseSchemaInspection{}, err
+	}
+
+	columnRows, err := db.QueryContext(ctx, `SELECT TABLE_NAME, COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_KEY, COALESCE(COLUMN_COMMENT, '')
+		FROM information_schema.COLUMNS
+		WHERE TABLE_SCHEMA = DATABASE()
+		ORDER BY TABLE_NAME, ORDINAL_POSITION
+		LIMIT 1200`)
+	if err != nil {
+		return databaseSchemaInspection{}, err
+	}
+	defer columnRows.Close()
+	for columnRows.Next() {
+		var tableName, name, columnType, nullable, key, comment string
+		if err := columnRows.Scan(&tableName, &name, &columnType, &nullable, &key, &comment); err != nil {
+			return databaseSchemaInspection{}, err
+		}
+		index, ok := tableIndex[tableName]
+		if !ok {
+			continue
+		}
+		tables[index].Columns = append(tables[index].Columns, inspectedDatabaseColumn{
+			Name:     strings.TrimSpace(name),
+			Type:     strings.TrimSpace(columnType),
+			Nullable: strings.EqualFold(strings.TrimSpace(nullable), "YES"),
+			Key:      mysqlColumnKeyLabel(key),
+			Comment:  normalizeSchemaComment(comment),
+		})
+	}
+	if err := columnRows.Err(); err != nil {
+		return databaseSchemaInspection{}, err
+	}
+
+	indexRows, err := db.QueryContext(ctx, `SELECT TABLE_NAME, INDEX_NAME, NON_UNIQUE, GROUP_CONCAT(COLUMN_NAME ORDER BY SEQ_IN_INDEX SEPARATOR ',')
+		FROM information_schema.STATISTICS
+		WHERE TABLE_SCHEMA = DATABASE()
+		GROUP BY TABLE_NAME, INDEX_NAME, NON_UNIQUE
+		ORDER BY TABLE_NAME, INDEX_NAME
+		LIMIT 240`)
+	if err == nil {
+		defer indexRows.Close()
+		for indexRows.Next() {
+			var tableName, indexName, columns string
+			var nonUnique int
+			if err := indexRows.Scan(&tableName, &indexName, &nonUnique, &columns); err != nil {
+				return databaseSchemaInspection{}, err
+			}
+			index, ok := tableIndex[tableName]
+			if !ok || len(tables[index].Indexes) >= 4 {
+				continue
+			}
+			label := indexName + "(" + columns + ")"
+			if nonUnique == 0 && !strings.EqualFold(indexName, "PRIMARY") {
+				label += " UNIQUE"
+			}
+			tables[index].Indexes = append(tables[index].Indexes, label)
+		}
+		if err := indexRows.Err(); err != nil {
+			return databaseSchemaInspection{}, err
+		}
+	}
+
+	return summarizeDatabaseSchema(tables), nil
+}
+
+func inspectPostgresSchema(ctx context.Context, db *sql.DB) (databaseSchemaInspection, error) {
+	tableRows, err := db.QueryContext(ctx, `SELECT n.nspname, c.relname,
+			CASE c.relkind WHEN 'r' THEN 'BASE TABLE' WHEN 'p' THEN 'PARTITIONED TABLE' WHEN 'v' THEN 'VIEW' WHEN 'm' THEN 'MATERIALIZED VIEW' ELSE c.relkind::text END,
+			COALESCE(obj_description(c.oid, 'pg_class'), '')
+		FROM pg_class c
+		JOIN pg_namespace n ON n.oid = c.relnamespace
+		WHERE n.nspname NOT IN ('pg_catalog', 'information_schema') AND n.nspname NOT LIKE 'pg_toast%'
+			AND c.relkind IN ('r', 'p', 'v', 'm')
+		ORDER BY n.nspname, c.relname
+		LIMIT 80`)
+	if err != nil {
+		return databaseSchemaInspection{}, err
+	}
+	defer tableRows.Close()
+
+	tables := make([]inspectedDatabaseTable, 0)
+	tableIndex := map[string]int{}
+	for tableRows.Next() {
+		var schemaName, tableName string
+		var table inspectedDatabaseTable
+		if err := tableRows.Scan(&schemaName, &tableName, &table.Kind, &table.Comment); err != nil {
+			return databaseSchemaInspection{}, err
+		}
+		table.Name = qualifiedPostgresName(schemaName, tableName)
+		table.Comment = normalizeSchemaComment(table.Comment)
+		tableIndex[table.Name] = len(tables)
+		tables = append(tables, table)
+	}
+	if err := tableRows.Err(); err != nil {
+		return databaseSchemaInspection{}, err
+	}
+
+	pkColumns, err := postgresPrimaryKeyColumns(ctx, db)
+	if err != nil {
+		return databaseSchemaInspection{}, err
+	}
+	columnRows, err := db.QueryContext(ctx, `SELECT n.nspname, c.relname, a.attname, format_type(a.atttypid, a.atttypmod),
+			CASE WHEN a.attnotnull THEN 'NO' ELSE 'YES' END,
+			COALESCE(col_description(c.oid, a.attnum), '')
+		FROM pg_attribute a
+		JOIN pg_class c ON c.oid = a.attrelid
+		JOIN pg_namespace n ON n.oid = c.relnamespace
+		WHERE a.attnum > 0 AND NOT a.attisdropped
+			AND n.nspname NOT IN ('pg_catalog', 'information_schema') AND n.nspname NOT LIKE 'pg_toast%'
+			AND c.relkind IN ('r', 'p', 'v', 'm')
+		ORDER BY n.nspname, c.relname, a.attnum
+		LIMIT 1200`)
+	if err != nil {
+		return databaseSchemaInspection{}, err
+	}
+	defer columnRows.Close()
+	for columnRows.Next() {
+		var schemaName, tableName, name, columnType, nullable, comment string
+		if err := columnRows.Scan(&schemaName, &tableName, &name, &columnType, &nullable, &comment); err != nil {
+			return databaseSchemaInspection{}, err
+		}
+		qualified := qualifiedPostgresName(schemaName, tableName)
+		index, ok := tableIndex[qualified]
+		if !ok {
+			continue
+		}
+		key := ""
+		if pkColumns[qualified+"."+name] {
+			key = "PK"
+		}
+		tables[index].Columns = append(tables[index].Columns, inspectedDatabaseColumn{
+			Name:     strings.TrimSpace(name),
+			Type:     strings.TrimSpace(columnType),
+			Nullable: strings.EqualFold(nullable, "YES"),
+			Key:      key,
+			Comment:  normalizeSchemaComment(comment),
+		})
+	}
+	if err := columnRows.Err(); err != nil {
+		return databaseSchemaInspection{}, err
+	}
+
+	indexRows, err := db.QueryContext(ctx, `SELECT schemaname, tablename, indexname
+		FROM pg_indexes
+		WHERE schemaname NOT IN ('pg_catalog', 'information_schema') AND schemaname NOT LIKE 'pg_toast%'
+		ORDER BY schemaname, tablename, indexname
+		LIMIT 240`)
+	if err == nil {
+		defer indexRows.Close()
+		for indexRows.Next() {
+			var schemaName, tableName, indexName string
+			if err := indexRows.Scan(&schemaName, &tableName, &indexName); err != nil {
+				return databaseSchemaInspection{}, err
+			}
+			qualified := qualifiedPostgresName(schemaName, tableName)
+			index, ok := tableIndex[qualified]
+			if !ok || len(tables[index].Indexes) >= 4 {
+				continue
+			}
+			tables[index].Indexes = append(tables[index].Indexes, strings.TrimSpace(indexName))
+		}
+		if err := indexRows.Err(); err != nil {
+			return databaseSchemaInspection{}, err
+		}
+	}
+
+	return summarizeDatabaseSchema(tables), nil
+}
+
+func postgresPrimaryKeyColumns(ctx context.Context, db *sql.DB) (map[string]bool, error) {
+	rows, err := db.QueryContext(ctx, `SELECT n.nspname, c.relname, a.attname
+		FROM pg_index i
+		JOIN pg_class c ON c.oid = i.indrelid
+		JOIN pg_namespace n ON n.oid = c.relnamespace
+		JOIN unnest(i.indkey) WITH ORDINALITY AS keys(attnum, ord) ON true
+		JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum = keys.attnum
+		WHERE i.indisprimary
+			AND n.nspname NOT IN ('pg_catalog', 'information_schema') AND n.nspname NOT LIKE 'pg_toast%'`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	keys := map[string]bool{}
+	for rows.Next() {
+		var schemaName, tableName, columnName string
+		if err := rows.Scan(&schemaName, &tableName, &columnName); err != nil {
+			return nil, err
+		}
+		keys[qualifiedPostgresName(schemaName, tableName)+"."+columnName] = true
+	}
+	return keys, rows.Err()
+}
+
+func qualifiedPostgresName(schemaName string, tableName string) string {
+	schemaName = strings.TrimSpace(schemaName)
+	tableName = strings.TrimSpace(tableName)
+	if schemaName == "" || schemaName == "public" {
+		return tableName
+	}
+	return schemaName + "." + tableName
+}
+
+func mysqlColumnKeyLabel(key string) string {
+	switch strings.ToUpper(strings.TrimSpace(key)) {
+	case "PRI":
+		return "PK"
+	case "UNI":
+		return "UNIQUE"
+	case "MUL":
+		return "INDEX"
+	default:
+		return ""
+	}
+}
+
+func normalizeSchemaComment(comment string) string {
+	comment = strings.TrimSpace(comment)
+	comment = strings.ReplaceAll(comment, "\r", " ")
+	comment = strings.ReplaceAll(comment, "\n", " ")
+	return strings.Join(strings.Fields(comment), " ")
+}
+
+func summarizeDatabaseSchema(tables []inspectedDatabaseTable) databaseSchemaInspection {
+	totalColumns := 0
+	tablePreview := make([]string, 0, minInt(len(tables), 8))
+	columnPreview := make([]string, 0, minInt(len(tables), 8))
+	indexPreview := make([]string, 0, minInt(len(tables), 5))
+	for _, table := range tables {
+		totalColumns += len(table.Columns)
+		if len(tablePreview) < 8 {
+			tablePreview = append(tablePreview, schemaObjectLabel(table.Name, table.Comment))
+		}
+		if len(columnPreview) < 8 {
+			columns := make([]string, 0, minInt(len(table.Columns), 6))
+			for _, column := range table.Columns {
+				if len(columns) >= 6 {
+					break
+				}
+				columns = append(columns, schemaColumnLabel(column))
+			}
+			if len(columns) > 0 {
+				columnPreview = append(columnPreview, schemaObjectLabel(table.Name, table.Comment)+": "+strings.Join(columns, "、"))
+			}
+		}
+		if len(indexPreview) < 5 && len(table.Indexes) > 0 {
+			indexes := table.Indexes
+			if len(indexes) > 3 {
+				indexes = indexes[:3]
+			}
+			indexPreview = append(indexPreview, table.Name+": "+strings.Join(indexes, "、"))
+		}
+	}
+
+	checks := []string{
+		"表数量：" + strconv.Itoa(len(tables)),
+		"字段数量：" + strconv.Itoa(totalColumns),
+	}
+	if len(tablePreview) > 0 {
+		checks = append(checks, "表清单："+strings.Join(tablePreview, "、"))
+	}
+	if len(columnPreview) > 0 {
+		checks = append(checks, "字段结构："+strings.Join(columnPreview, "；"))
+	}
+	if len(indexPreview) > 0 {
+		checks = append(checks, "索引概览："+strings.Join(indexPreview, "；"))
+	}
+	summary := "未发现业务表"
+	if len(tables) > 0 {
+		summary = "发现 " + strconv.Itoa(len(tables)) + " 张表、" + strconv.Itoa(totalColumns) + " 个字段"
+	}
+	return databaseSchemaInspection{
+		Summary:     summary,
+		Checks:      checks,
+		TableCount:  len(tables),
+		ColumnCount: totalColumns,
+		Tables:      tables,
+	}
+}
+
+func newSchemaSnapshotRecord(source dataSourceConfig, result databaseCheckResult, capturedAt time.Time) (adminSchemaSnapshotRecord, bool) {
+	source = source.normalized()
+	inspection := result.Inspection
+	if strings.TrimSpace(source.Name) == "" || strings.TrimSpace(inspection.Summary) == "" {
+		return adminSchemaSnapshotRecord{}, false
+	}
+	checksJSON, err := json.Marshal(inspection.Checks)
+	if err != nil {
+		return adminSchemaSnapshotRecord{}, false
+	}
+	schemaJSON, err := json.Marshal(inspection.Tables)
+	if err != nil {
+		return adminSchemaSnapshotRecord{}, false
+	}
+	hashBytes := sha256.Sum256([]byte(source.Name + "\n" + source.Driver + "\n" + string(schemaJSON)))
+	return adminSchemaSnapshotRecord{
+		DataSourceName: source.Name,
+		Driver:         source.DisplayName(),
+		Target:         source.DisplayTarget(),
+		Summary:        inspection.Summary,
+		TableCount:     inspection.TableCount,
+		ColumnCount:    inspection.ColumnCount,
+		SchemaHash:     hex.EncodeToString(hashBytes[:]),
+		ChecksJSON:     string(checksJSON),
+		SchemaJSON:     string(schemaJSON),
+		CapturedAt:     capturedAt,
+	}, true
+}
+
+func schemaObjectLabel(name string, comment string) string {
+	name = strings.TrimSpace(name)
+	comment = normalizeSchemaComment(comment)
+	if comment == "" {
+		return name
+	}
+	return name + "(" + comment + ")"
+}
+
+func schemaColumnLabel(column inspectedDatabaseColumn) string {
+	parts := []string{strings.TrimSpace(column.Name)}
+	if strings.TrimSpace(column.Type) != "" {
+		parts = append(parts, strings.TrimSpace(column.Type))
+	}
+	if strings.TrimSpace(column.Key) != "" {
+		parts = append(parts, strings.TrimSpace(column.Key))
+	}
+	if !column.Nullable {
+		parts = append(parts, "NOT NULL")
+	}
+	if strings.TrimSpace(column.Comment) != "" {
+		parts = append(parts, "注释:"+normalizeSchemaComment(column.Comment))
+	}
+	return strings.Join(parts, " ")
 }
 
 func (ds dataSourceConfig) DisplayName() string {
@@ -2859,6 +6352,16 @@ func settingsNoticeFromQuery(query url.Values) (string, string) {
 		return "基础信息已保存。", "alert-success"
 	case "storage":
 		return "存储设置已保存，目录状态已重新检查。", "alert-success"
+	case "ai":
+		return "AI 设置已保存并通过连接检查。", "alert-success"
+	case "security":
+		return "安全设置已保存。", "alert-success"
+	case "notifications":
+		return "通知设置已保存。", "alert-success"
+	case "notification_test":
+		return "测试通知已发送。", "alert-success"
+	case "task_worker":
+		return "后台自动队列设置已保存。", "alert-success"
 	default:
 		return "", ""
 	}
@@ -2877,6 +6380,36 @@ func fileNoticeFromQuery(query url.Values) (string, string) {
 		return "已上传 " + count + " 个文件。", "alert-success"
 	case "delete":
 		return "文件已删除。", "alert-success"
+	default:
+		return "", ""
+	}
+}
+
+func taskNoticeFromQuery(query url.Values) (string, string) {
+	if message := strings.TrimSpace(query.Get("error")); message != "" {
+		return message, "alert-danger"
+	}
+	switch query.Get("saved") {
+	case "settings":
+		return "后台任务自动执行设置已保存。", "alert-success"
+	case "enqueue":
+		return "后台任务已加入队列。", "alert-success"
+	case "run":
+		return "后台任务已执行完成。", "alert-success"
+	case "run_all":
+		count := strings.TrimSpace(query.Get("count"))
+		failed := strings.TrimSpace(query.Get("failed"))
+		if count == "" {
+			count = "0"
+		}
+		if failed == "" {
+			failed = "0"
+		}
+		return "批量执行完成 " + count + " 个任务，失败/待重试 " + failed + " 个。", "alert-success"
+	case "retry":
+		return "后台任务已重新进入待执行队列。", "alert-success"
+	case "cancel":
+		return "后台任务已取消。", "alert-success"
 	default:
 		return "", ""
 	}
@@ -2931,6 +6464,54 @@ func (s *adminServer) listAuditEvents(limit int) []adminAuditEvent {
 	return events
 }
 
+func (s *adminServer) listNotificationDeliveries(limit int) []adminNotificationDeliveryRecord {
+	records, err := s.store.ListNotificationDeliveries(limit)
+	if err != nil {
+		return nil
+	}
+	return records
+}
+
+func (s *adminServer) listBackgroundTasks(limit int) []adminBackgroundTaskRecord {
+	records, err := s.store.ListBackgroundTasks(limit)
+	if err != nil {
+		return nil
+	}
+	return records
+}
+
+func (s *adminServer) listBackgroundTaskLogs(limit int) []adminBackgroundTaskLogRecord {
+	records, err := s.store.ListBackgroundTaskLogs(limit)
+	if err != nil {
+		return nil
+	}
+	return records
+}
+
+func (s *adminServer) listSchemaSnapshots(limit int) []adminSchemaSnapshotRecord {
+	records, err := s.store.ListSchemaSnapshots(limit)
+	if err != nil {
+		return nil
+	}
+	return records
+}
+
+func (s *adminServer) listSettingChanges(limit int) []adminSettingChangeRecord {
+	records, err := s.store.ListSettingChanges(limit)
+	if err != nil {
+		return nil
+	}
+	return records
+}
+
+func (s *adminServer) listAdminSessions(limit int) []adminSessionRecord {
+	records, err := s.store.ListAdminSessions(limit)
+	if err != nil {
+		return nil
+	}
+	return records
+}
+
 func (s *adminServer) listAgentSessions(limit int) []agentSessionRecord {
 	records, err := s.store.ListAgentSessions(limit)
 	if err != nil {
@@ -2953,6 +6534,30 @@ func (s *adminServer) listAgentToolResults(limit int) []agentToolResultRecord {
 		return nil
 	}
 	return records
+}
+
+func (s *adminServer) listAgentWeChatMessages(limit int) []agentWeChatMessageRecord {
+	records, err := s.store.ListAgentWeChatMessages(limit)
+	if err != nil {
+		return nil
+	}
+	return records
+}
+
+func (s *adminServer) listAgentWeChatMessagesPage(channelKey string, limit int, offset int) []agentWeChatMessageRecord {
+	records, err := s.store.ListAgentWeChatMessagesPage(channelKey, limit, offset)
+	if err != nil {
+		return nil
+	}
+	return records
+}
+
+func (s *adminServer) countAgentWeChatMessages(channelKey string) int {
+	count, err := s.store.CountAgentWeChatMessages(channelKey)
+	if err != nil {
+		return 0
+	}
+	return count
 }
 
 func (r adminAuditRecord) toAdminAuditEvent() adminAuditEvent {
@@ -3351,6 +6956,18 @@ func (a aiConfig) maskedAPIKey() string {
 	return string(runes[:4]) + "****" + string(runes[len(runes)-4:])
 }
 
+func maskSecretValue(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	runes := []rune(value)
+	if len(runes) <= 8 {
+		return "****"
+	}
+	return string(runes[:4]) + "****" + string(runes[len(runes)-4:])
+}
+
 func (a aiConfig) chatCompletionsURL() (string, error) {
 	a = a.sanitized()
 	parsed, err := url.Parse(a.BaseURL)
@@ -3519,9 +7136,10 @@ func validateAIConfig(ai aiConfig) error {
 }
 
 type databaseCheckResult struct {
-	OK      bool     `json:"ok"`
-	Message string   `json:"message"`
-	Checks  []string `json:"checks"`
+	OK         bool                     `json:"ok"`
+	Message    string                   `json:"message"`
+	Checks     []string                 `json:"checks"`
+	Inspection databaseSchemaInspection `json:"-"`
 }
 
 type aiCheckResult struct {
@@ -3584,28 +7202,18 @@ func checkDatabaseConfig(db databaseConfig) databaseCheckResult {
 			},
 		}
 	case "mysql", "postgres", "postgresql":
-		address := net.JoinHostPort(db.Host, db.Port)
-		conn, err := net.DialTimeout("tcp", address, 2*time.Second)
-		if err != nil {
-			return databaseCheckResult{
-				OK:      false,
-				Message: "无法连接数据库端口：" + err.Error(),
-				Checks: []string{
-					"目标：" + address,
-					"说明：当前阶段先检查 TCP 连通性，后续接入驱动后会校验账号密码和建表权限。",
-				},
-			}
-		}
-		_ = conn.Close()
-		return databaseCheckResult{
-			OK:      true,
-			Message: db.DisplayName() + " 端口连通。下一步会接入驱动校验账号密码和迁移权限。",
-			Checks: []string{
-				"目标：" + address,
-				"数据库：" + db.Database,
-				"用户：" + db.Username,
-			},
-		}
+		return checkNetworkDatabase(networkDatabaseConfig{
+			Driver:        db.Driver,
+			DisplayName:   db.DisplayName(),
+			Host:          db.Host,
+			Port:          db.Port,
+			Database:      db.Database,
+			Username:      db.Username,
+			Password:      db.Password,
+			SSLMode:       db.SSLMode,
+			Purpose:       "系统元数据",
+			RequireSchema: false,
+		})
 	default:
 		return databaseCheckResult{
 			OK:      false,
@@ -3757,7 +7365,7 @@ var adminLoginTemplate = template.Must(template.New("admin-login").Parse(`<!doct
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Moyi Admin 登录</title>
-  <link rel="stylesheet" href="/assets/css/admin-foundation.css?v=20260514-agent1">
+  <link rel="stylesheet" href="/assets/css/admin-foundation.css?v=20260517-ux3">
   <style>
     * {
       box-sizing: border-box;
@@ -3906,8 +7514,9 @@ var adminLoginTemplate = template.Must(template.New("admin-login").Parse(`<!doct
           </div>
           <div class="form-group">
             <label class="form-label" for="password">密码</label>
-            <input class="form-control" id="password" name="password" type="password" autocomplete="current-password" placeholder="请输入密码">
+            <input class="form-control" id="password" name="password" type="password" autocomplete="current-password" value="{{.Password}}" placeholder="请输入密码">
           </div>
+          {{if .DebugPrefill}}<div class="alert alert-success">调试模式已自动填充账号密码，方便本地开发验证。</div>{{end}}
           <button class="btn btn-primary" type="submit">登录</button>
         </form>
         <div class="note">如果还没有初始化系统，请先访问隐藏入口下的安装地址完成初始化。</div>
@@ -3923,7 +7532,7 @@ var adminInstallTemplate = template.Must(template.New("admin-install").Parse(`<!
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Moyi Admin 初始化</title>
-  <link rel="stylesheet" href="/assets/css/admin-foundation.css?v=20260514-admin1">
+  <link rel="stylesheet" href="/assets/css/admin-foundation.css?v=20260517-ux3">
   <style>
     * {
       box-sizing: border-box;
@@ -4248,7 +7857,7 @@ var adminWorkspaceTemplate = template.Must(template.New("admin-workspace").Parse
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{.Title}} - Moyi Admin</title>
-  <link rel="stylesheet" href="/assets/css/admin-foundation.css?v=20260514-admin1">
+  <link rel="stylesheet" href="/assets/css/admin-foundation.css?v=20260517-ux3">
 </head>
 <body class="admin-shell">
   <div class="admin-layout">
@@ -4257,7 +7866,7 @@ var adminWorkspaceTemplate = template.Must(template.New("admin-workspace").Parse
         <span class="admin-brand-mark">M</span>
         <span>
           <strong>Moyi Admin</strong>
-          <small>Go AI 管理台</small>
+          <small>{{.AdminTagline}}</small>
         </span>
       </a>
       <nav class="admin-nav" aria-label="后台导航">
@@ -4339,9 +7948,12 @@ var adminWorkspaceTemplate = template.Must(template.New("admin-workspace").Parse
               <div class="admin-command-grid">
                 <a href="{{.BasePath}}/foundation">基础服务盘点</a>
                 <a href="{{.BasePath}}/data-sources">数据源管理</a>
+                <a href="{{.BasePath}}/extensions">能力扩展</a>
                 <a href="{{.BasePath}}/ai">AI 智能体配置</a>
+                <a href="{{.BasePath}}/wechat-agent">微信 Agent 通道</a>
                 <a href="{{.BasePath}}/users">用户权限</a>
                 <a href="{{.BasePath}}/files">文件管理</a>
+                <a href="{{.BasePath}}/tasks">后台任务</a>
               </div>
             </div>
           </section>
@@ -4389,6 +8001,88 @@ var adminWorkspaceTemplate = template.Must(template.New("admin-workspace").Parse
                 <div><dt>权限体系</dt><dd>管理员、角色、菜单、权限持久化</dd></div>
                 <div><dt>扩展系统</dt><dd>插件规范、资源发布、配置管理</dd></div>
               </dl>
+            </div>
+          </section>
+        {{else if eq .Active "extensions"}}
+          <section class="admin-metrics" aria-label="能力扩展概览">
+            {{range .ExtensionMetrics}}
+              <article class="admin-metric-card">
+                <span class="metric-label">{{.Label}}</span>
+                <strong>{{.Value}}</strong>
+                <small>{{.Detail}}</small>
+                <i class="admin-status-dot {{.Status}}"></i>
+              </article>
+            {{end}}
+          </section>
+
+          <section class="admin-grid">
+            <div class="admin-panel admin-panel-wide">
+              <div class="admin-panel-head">
+                <h2>插件扩展包</h2>
+                <div class="admin-panel-actions">
+                  <span class="admin-panel-meta">Extension Registry</span>
+                  <a class="admin-panel-link" href="{{.BasePath}}/extensions/export">导出清单</a>
+                </div>
+              </div>
+              <div class="admin-table plugin-extension-table">
+                <div class="admin-table-row admin-table-head">
+                  <span>插件</span><span>类型</span><span>资源</span><span>工具</span><span>状态</span><span>说明</span>
+                </div>
+                {{range .PluginExtensions}}
+                  <div class="admin-table-row">
+                    <span><strong class="mono">{{.Key}}</strong><small>{{.Name}} · {{.Version}}</small></span>
+                    <span>{{.Kind}}</span>
+                    <span>{{.Resources}}</span>
+                    <span>{{.Tools}}</span>
+                    <span class="admin-badge {{.StatusClass}}">{{.Status}}</span>
+                    <span>{{.Description}}</span>
+                  </div>
+                {{end}}
+              </div>
+            </div>
+
+            <div class="admin-panel admin-panel-wide">
+              <div class="admin-panel-head">
+                <h2>资源模型</h2>
+                <span class="admin-panel-meta">Resource Models</span>
+              </div>
+              <div class="admin-table resource-model-table">
+                <div class="admin-table-row admin-table-head">
+                  <span>资源</span><span>来源</span><span>动作</span><span>字段</span><span>状态</span><span>说明</span>
+                </div>
+                {{range .ResourceModels}}
+                  <div class="admin-table-row">
+                    <span><strong class="mono">{{.Key}}</strong><small>{{.Name}} · {{.Plugin}}</small></span>
+                    <span>{{.Source}}<small class="mono">{{.Table}}</small></span>
+                    <span>{{.Actions}}<small>{{.ToolCount}} 个工具</small></span>
+                    <span>{{.FieldCount}} 个<small>{{.FieldsSummary}}</small></span>
+                    <span class="admin-badge {{.StatusClass}}">{{.Status}}</span>
+                    <span>{{.Description}}<small>{{.ReadScope}}</small></span>
+                  </div>
+                {{end}}
+              </div>
+            </div>
+
+            <div class="admin-panel admin-panel-wide">
+              <div class="admin-panel-head">
+                <h2>AI 工具生成</h2>
+                <span class="admin-panel-meta">Generated Tools</span>
+              </div>
+              <div class="admin-table resource-tool-table">
+                <div class="admin-table-row admin-table-head">
+                  <span>工具</span><span>资源</span><span>动作</span><span>权限</span><span>边界</span><span>状态</span>
+                </div>
+                {{range .ResourceTools}}
+                  <div class="admin-table-row">
+                    <span><strong class="mono">{{.Name}}</strong><small>{{.Plugin}}</small></span>
+                    <span>{{.Resource}}<small class="mono">{{.ResourceKey}}</small></span>
+                    <span>{{.Action}}</span>
+                    <span class="mono">{{.Permission}}</span>
+                    <span>{{.Boundary}}</span>
+                    <span class="admin-badge {{.StatusClass}}">{{.Status}}</span>
+                  </div>
+                {{end}}
+              </div>
             </div>
           </section>
         {{else if eq .Active "data-sources"}}
@@ -4501,6 +8195,9 @@ var adminWorkspaceTemplate = template.Must(template.New("admin-workspace").Parse
             </div>
           </section>
         {{else if eq .Active "ai"}}
+          {{if .AgentNotice}}
+            <div class="admin-alert {{.AgentNoticeClass}}">{{.AgentNotice}}</div>
+          {{end}}
           <section class="admin-grid">
             <div class="admin-panel admin-panel-wide agent-chat-panel">
               <div class="admin-panel-head">
@@ -4608,6 +8305,269 @@ var adminWorkspaceTemplate = template.Must(template.New("admin-workspace").Parse
               </div>
             </div>
           </section>
+        {{else if eq .Active "wechat-agent"}}
+          {{if .AgentNotice}}
+            <div class="admin-alert {{.AgentNoticeClass}}">{{.AgentNotice}}</div>
+          {{end}}
+          <section class="admin-grid">
+            <div class="admin-panel admin-panel-wide">
+              <div class="admin-panel-head">
+                <h2>微信 Agent 通道</h2>
+                <div class="admin-panel-actions">
+                  <span class="admin-badge is-ready">{{len .AgentWeChatChannels}} 个通道</span>
+                  <a class="admin-panel-link" href="{{.BasePath}}/wechat-agent/messages">聊天记录</a>
+                  <a class="admin-panel-link is-button is-primary" href="#agentChannelCreate" data-disclosure-toggle="agentChannelCreate" data-open-label="新增微信 Agent" data-close-label="收起新增" aria-controls="agentChannelCreate" aria-expanded="false">新增微信 Agent</a>
+                </div>
+              </div>
+              <div class="agent-channel-create-panel" id="agentChannelCreate" hidden>
+                <form class="admin-settings-form" method="post" action="{{.AgentWeChatChannel.Action}}">
+                  <div class="admin-form-grid">
+                    <input type="hidden" name="wechat_channel_enabled" value="1">
+                    <label>
+                      <span>新通道名称</span>
+                      <input class="form-control" name="wechat_channel_name" value="OpenClaw Weixin 通道" autocomplete="off">
+                    </label>
+                    <label>
+                      <span>Provider Base URL</span>
+                      <input class="form-control mono" name="wechat_base_url" value="{{.AgentWeChatChannel.BaseURL}}" autocomplete="off">
+                    </label>
+                    <label>
+                      <span>Bot Type</span>
+                      <input class="form-control mono" name="wechat_bot_type" value="{{.AgentWeChatChannel.BotType}}" autocomplete="off">
+                    </label>
+                    <label>
+                      <span>数据权限</span>
+                      <select class="form-select" name="wechat_data_scope">
+                        <option value="none" {{if eq .AgentWeChatChannel.DataScope "none"}}selected{{end}}>禁用数据查询</option>
+                        <option value="tables" {{if eq .AgentWeChatChannel.DataScope "tables"}}selected{{end}}>指定数据表</option>
+                        <option value="all" {{if eq .AgentWeChatChannel.DataScope "all"}}selected{{end}}>全部只读表</option>
+                      </select>
+                    </label>
+                    <label class="admin-form-wide">
+                      <span>授权数据表</span>
+                      <textarea class="form-control mono" name="wechat_allowed_tables" rows="3">{{.AgentWeChatChannel.AllowedTables}}</textarea>
+                      <div class="agent-table-presets" aria-label="授权表快捷填充">
+                        <span>常用授权</span>
+                        <button type="button" data-allowed-tables-preset="admin_users, admin_roles, admin_permissions, admin_sessions">用户权限</button>
+                        <button type="button" data-allowed-tables-preset="data_sources, schema_snapshots">数据源</button>
+                        <button type="button" data-allowed-tables-preset="agent_wechat_messages">微信记录</button>
+                        <button type="button" data-allowed-tables-preset="audit_logs, background_tasks, notification_deliveries, setting_change_logs">运行审计</button>
+                      </div>
+                      <small>仅在“指定数据表”模式下生效；逗号或换行分隔，留空表示无表可读。</small>
+                    </label>
+                    <div class="admin-form-actions">
+                      <button class="admin-submit-button" type="submit" name="wechat_channel_action" value="add">新增微信通道</button>
+                    </div>
+                  </div>
+                </form>
+              </div>
+              <div class="agent-channel-list">
+                <div class="agent-channel-list-head">
+                  <span>通道</span><span>状态</span><span>授权数据</span><span>最近消息</span>
+                </div>
+                {{range .AgentWeChatChannels}}
+                  <details class="agent-channel-item">
+                    <summary class="agent-channel-summary">
+                      <span><strong>{{.DisplayName}}</strong><small class="mono">{{.Key}}</small></span>
+                      <span><span class="admin-badge {{.StatusClass}}">{{.StatusText}}</span><small>{{.LoginMessage}}</small></span>
+                      <span><strong>{{.AllowedSummary}}</strong><small>点击展开配置</small></span>
+                      <span>{{.LastMessageAt}}<small>最近回复：{{.LastOutboundAt}}</small></span>
+                    </summary>
+                    <div class="agent-channel-detail-card">
+                      <div class="agent-channel-layout">
+                        <div class="agent-channel-main">
+                          <form class="admin-settings-form" method="post" action="{{.Action}}">
+                            <input type="hidden" name="wechat_channel_key" value="{{.Key}}">
+                            <div class="admin-form-grid">
+                              <label>
+                                <span>渠道状态</span>
+                                <select class="form-select" name="wechat_channel_enabled">
+                                  <option value="1" {{if .Enabled}}selected{{end}}>启用</option>
+                                  <option value="0" {{if not .Enabled}}selected{{end}}>停用</option>
+                                </select>
+                              </label>
+                              <label>
+                                <span>显示名称</span>
+                                <input class="form-control" name="wechat_channel_name" value="{{.DisplayName}}" autocomplete="off">
+                              </label>
+                              <label>
+                                <span>Provider Base URL</span>
+                                <input class="form-control mono" name="wechat_base_url" value="{{.BaseURL}}" autocomplete="off">
+                              </label>
+                              <label>
+                                <span>Bot Type</span>
+                                <input class="form-control mono" name="wechat_bot_type" value="{{.BotType}}" autocomplete="off">
+                              </label>
+                              <label>
+                                <span>数据权限</span>
+                                <select class="form-select" name="wechat_data_scope">
+                                  <option value="none" {{if eq .DataScope "none"}}selected{{end}}>禁用数据查询</option>
+                                  <option value="tables" {{if eq .DataScope "tables"}}selected{{end}}>指定数据表</option>
+                                  <option value="all" {{if eq .DataScope "all"}}selected{{end}}>全部只读表</option>
+                                </select>
+                              </label>
+                              <label class="admin-form-wide">
+                                <span>授权数据表</span>
+                                <textarea class="form-control mono" name="wechat_allowed_tables" rows="3">{{.AllowedTables}}</textarea>
+                                <div class="agent-table-presets" aria-label="授权表快捷填充">
+                                  <span>常用授权</span>
+                                  <button type="button" data-allowed-tables-preset="admin_users, admin_roles, admin_permissions, admin_sessions">用户权限</button>
+                                  <button type="button" data-allowed-tables-preset="data_sources, schema_snapshots">数据源</button>
+                                  <button type="button" data-allowed-tables-preset="agent_wechat_messages">微信记录</button>
+                                  <button type="button" data-allowed-tables-preset="audit_logs, background_tasks, notification_deliveries, setting_change_logs">运行审计</button>
+                                </div>
+                                <small>当前：{{.AllowedSummary}}。仅在“指定数据表”模式下生效；留空表示无表可读。</small>
+                              </label>
+                              <div class="admin-form-actions admin-form-wide agent-channel-form-footer">
+                                <button class="admin-submit-button" type="submit" name="wechat_channel_action" value="save">保存配置</button>
+                              </div>
+                              <details class="agent-channel-maintenance admin-form-wide">
+                                <summary>通道维护</summary>
+                                <div class="agent-channel-maintenance-grid">
+                                  <section>
+                                    <strong>微信绑定</strong>
+                                    <span>二维码失效或登录状态不同步时使用。</span>
+                                    {{if .HasQRCode}}
+                                      <div class="agent-channel-qr-inline">
+                                        <img class="agent-channel-qr" src="{{.QRImageURL}}" alt="OpenClaw Weixin 登录二维码">
+                                        <label class="admin-copy-line">
+                                          <span>二维码内容</span>
+                                          <input class="form-control mono" value="{{.QRPayload}}" readonly>
+                                          <small>有效期：{{.BindExpiresAt}}</small>
+                                        </label>
+                                      </div>
+                                    {{end}}
+                                    <div class="agent-channel-text-actions">
+                                      <button type="submit" name="wechat_channel_action" value="regenerate">生成二维码</button>
+                                      <button type="submit" name="wechat_channel_action" value="poll">刷新状态</button>
+                                    </div>
+                                  </section>
+                                  <section>
+                                    <strong>高级维护</strong>
+                                    <span>令牌泄露时可重置；不用该入口时直接禁用通道。</span>
+                                    <div class="agent-channel-text-actions">
+                                      <button type="submit" name="wechat_channel_action" value="reset_token">重置令牌</button>
+                                      <button class="is-danger" type="submit" name="wechat_channel_action" value="disable">禁用通道</button>
+                                    </div>
+                                  </section>
+                                </div>
+                              </details>
+                            </div>
+                          </form>
+                          <dl class="admin-kv agent-channel-kv">
+                            <div><dt>会话</dt><dd class="mono">{{.BindSession}}</dd></div>
+                            <div><dt>状态</dt><dd>{{.LoginMessage}}</dd></div>
+                            <div><dt>接入令牌</dt><dd class="mono">{{.TokenMasked}}</dd></div>
+                            <div><dt>账号 ID</dt><dd class="mono">{{.AccountID}}</dd></div>
+                            <div><dt>微信用户</dt><dd class="mono">{{.OpenClawUserID}}</dd></div>
+                            <div><dt>绑定用户</dt><dd>{{.BoundUser}}</dd></div>
+                            <div><dt>绑定时间</dt><dd>{{.BoundAt}}</dd></div>
+                            <div><dt>最近消息</dt><dd>{{.LastMessageAt}}</dd></div>
+                            <div><dt>最近心跳</dt><dd>{{.LastHeartbeatAt}}</dd></div>
+                            <div><dt>最近回复</dt><dd>{{.LastOutboundAt}}</dd></div>
+                            <div><dt>通道错误</dt><dd>{{.LastError}}</dd></div>
+                          </dl>
+                        </div>
+                      </div>
+                      <div class="agent-channel-chat-log">
+                        <div class="agent-channel-section-head">
+                          <strong>最近聊天记录</strong>
+                          <a class="admin-panel-link" href="{{$.BasePath}}/wechat-agent/messages?channel={{.Key}}">查看全部</a>
+                        </div>
+                        {{if .ChatMessages}}
+                          <div class="admin-table agent-channel-message-table">
+                            <div class="admin-table-row admin-table-head">
+                              <span>时间</span><span>用户消息</span><span>AI 回复</span><span>文件</span><span>状态</span>
+                            </div>
+                            {{range .ChatMessages}}
+                              <div class="admin-table-row">
+                                <span>{{.ReceivedAt}}<small class="mono">{{.MessageID}}</small><small class="mono">{{.SessionID}}</small><small class="mono">{{.RunID}}</small></span>
+                                <span>{{.InboundText}}<small class="mono">{{.FromUserID}}</small></span>
+                                <span>{{.ReplyText}}<small>回复：{{.RepliedAt}} · {{.DurationText}}</small></span>
+                                <span>{{.FileSummary}}</span>
+                                <span><span class="admin-badge {{.StatusClass}}">{{.Status}}</span>{{if .Error}}<small>{{.Error}}</small>{{end}}</span>
+                              </div>
+                            {{end}}
+                          </div>
+                        {{else}}
+                          <div class="agent-channel-empty">暂无聊天记录；收到微信消息并完成回复后会自动归档。</div>
+                        {{end}}
+                      </div>
+                    </div>
+                  </details>
+                {{else}}
+                  <div class="agent-channel-empty">暂无微信通道，点击上方“新增微信 Agent”创建一个通道。</div>
+                {{end}}
+              </div>
+            </div>
+          </section>
+        {{else if eq .Active "wechat-agent-messages"}}
+          <section class="admin-panel admin-panel-wide">
+            <div class="admin-panel-head">
+              <div>
+                <h2>微信 Agent 聊天记录</h2>
+                <span class="admin-panel-meta">按最新消息优先展示，回复文本、文件和错误状态均来自归档表。</span>
+              </div>
+              <div class="admin-panel-actions">
+                <span class="admin-badge is-ready">{{.AgentWeChatMessagePage.RangeText}}</span>
+                <a class="admin-panel-link" href="{{.AgentWeChatMessagePage.ExportURL}}">导出 CSV</a>
+                <a class="admin-panel-link" href="{{.BasePath}}/wechat-agent">通道管理</a>
+              </div>
+            </div>
+            <form class="admin-settings-form audit-filter-form" method="get" action="{{.AgentWeChatMessagePage.Action}}">
+              <div class="admin-form-grid">
+                <label>
+                  <span>微信通道</span>
+                  <select class="form-select" name="channel">
+                    <option value="" {{if eq .AgentWeChatMessagePage.ChannelKey ""}}selected{{end}}>全部通道</option>
+                    {{range .AgentWeChatMessagePage.ChannelOptions}}
+                      <option value="{{.Key}}" {{if .Selected}}selected{{end}}>{{.Label}} · {{.Key}}</option>
+                    {{end}}
+                  </select>
+                </label>
+              </div>
+              <div class="admin-filter-actions">
+                <button class="admin-submit-button" type="submit">筛选记录</button>
+                <a class="admin-filter-reset" href="{{.AgentWeChatMessagePage.ResetURL}}">重置</a>
+              </div>
+            </form>
+            <div class="admin-table agent-message-history-table">
+              <div class="admin-table-row admin-table-head">
+                <span>时间</span><span>通道</span><span>用户消息</span><span>AI 回复</span><span>文件</span><span>状态</span>
+              </div>
+              {{if .AgentWeChatMessagePage.Rows}}
+                {{range .AgentWeChatMessagePage.Rows}}
+                  <div class="admin-table-row">
+                    <span>{{.ReceivedAt}}<small class="mono">{{.MessageID}}</small><small class="mono">{{.SessionID}}</small></span>
+                    <span><strong>{{.ChannelName}}</strong><small class="mono">{{.ChannelKey}}</small><small>{{.Provider}}</small></span>
+                    <span>{{.InboundText}}<small class="mono">{{.FromUserID}}</small></span>
+                    <span>{{.ReplyText}}<small>回复：{{.RepliedAt}} · {{.DurationText}}</small><small class="mono">{{.RunID}}</small></span>
+                    <span>{{.FileSummary}}</span>
+                    <span><span class="admin-badge {{.StatusClass}}">{{.Status}}</span>{{if .Error}}<small>{{.Error}}</small>{{end}}</span>
+                  </div>
+                {{end}}
+              {{else}}
+                <div class="admin-table-row">
+                  <span>-</span><span>暂无聊天归档</span><span>收到微信消息并完成回复后会自动出现在这里。</span><span>-</span><span>-</span><span class="admin-badge is-muted">等待</span>
+                </div>
+              {{end}}
+            </div>
+            <div class="admin-pagination">
+              <span>{{.AgentWeChatMessagePage.RangeText}} · {{.AgentWeChatMessagePage.PageText}}</span>
+              <div>
+                {{if .AgentWeChatMessagePage.HasPrev}}
+                  <a href="{{.AgentWeChatMessagePage.PrevURL}}">上一页</a>
+                {{else}}
+                  <span class="disabled">上一页</span>
+                {{end}}
+                {{if .AgentWeChatMessagePage.HasNext}}
+                  <a href="{{.AgentWeChatMessagePage.NextURL}}">下一页</a>
+                {{else}}
+                  <span class="disabled">下一页</span>
+                {{end}}
+              </div>
+            </div>
+          </section>
         {{else if eq .Active "users"}}
           {{if .UserNotice}}
             <div class="admin-alert {{.UserNoticeClass}}">{{.UserNotice}}</div>
@@ -4709,6 +8669,43 @@ var adminWorkspaceTemplate = template.Must(template.New("admin-workspace").Parse
 
             <div class="admin-panel admin-panel-wide">
               <div class="admin-panel-head">
+                <h2>后台会话</h2>
+                <span class="admin-panel-meta">Sessions</span>
+              </div>
+              <div class="admin-table access-session-table">
+                <div class="admin-table-row admin-table-head">
+                  <span>会话</span><span>账号</span><span>来源</span><span>有效期</span><span>状态</span><span>操作</span>
+                </div>
+                {{if .AdminSessions}}
+                  {{range .AdminSessions}}
+                    <div class="admin-table-row">
+                      <span><strong class="mono">{{.IDShort}}</strong><small>{{.CreatedAt}}</small></span>
+                      <span>{{.Username}}</span>
+                      <span>{{.IP}}<small>{{.UserAgent}}</small></span>
+                      <span>{{.ExpiresAt}}</span>
+                      <span class="admin-badge {{.StatusClass}}">{{.Status}}</span>
+                      <span class="admin-file-actions">
+                        {{if .CanRevoke}}
+                          <form method="post" action="{{.RevokeAction}}">
+                            <input type="hidden" name="session_id" value="{{.ID}}">
+                            <button type="submit">下线</button>
+                          </form>
+                        {{else}}
+                          <span class="admin-badge is-muted">当前/不可操作</span>
+                        {{end}}
+                      </span>
+                    </div>
+                  {{end}}
+                {{else}}
+                  <div class="admin-table-row admin-empty-row">
+                    <span>暂无会话记录，新登录后会写入。</span><span>-</span><span>-</span><span>-</span><span class="admin-badge is-muted">等待</span><span>-</span>
+                  </div>
+                {{end}}
+              </div>
+            </div>
+
+            <div class="admin-panel admin-panel-wide">
+              <div class="admin-panel-head">
                 <h2>菜单与权限</h2>
                 <span class="admin-panel-meta">Menus / Permissions</span>
               </div>
@@ -4744,7 +8741,54 @@ var adminWorkspaceTemplate = template.Must(template.New("admin-workspace").Parse
           {{if .SettingsNotice}}
             <div class="admin-alert {{.SettingsNoticeClass}}">{{.SettingsNotice}}</div>
           {{end}}
-          <section class="admin-grid">
+          <section class="settings-hub" data-settings-hub>
+            <aside class="settings-nav-panel" aria-label="系统设置分组">
+              <div class="settings-nav-head">
+                <strong>设置菜单</strong>
+                <span>按模块维护系统配置</span>
+              </div>
+              <nav class="settings-menu">
+                <button class="active" type="button" data-settings-tab="system">
+                  基础信息
+                  <span>站点资料、首页展示、语言与时区</span>
+                </button>
+                <button type="button" data-settings-tab="storage">
+                  存储设置
+                  <span>本地目录、上传限制、导出保留策略</span>
+                </button>
+                <button type="button" data-settings-tab="ai">
+                  AI 模型
+                  <span>百炼兼容接口、模型与 Key 检查</span>
+                </button>
+                <button type="button" data-settings-tab="security">
+                  登录安全
+                  <span>登录保护、后台入口和管理员密码</span>
+                </button>
+                <button type="button" data-settings-tab="notifications">
+                  消息通知
+                  <span>Webhook、飞书机器人和测试通知</span>
+                </button>
+                <button type="button" data-settings-tab="queue">
+                  后台队列
+                  <span>自动执行、定时体检和导出清理</span>
+                </button>
+                <button type="button" data-settings-tab="runtime">
+                  运行状态
+                  <span>运行参数与设置变更历史</span>
+                </button>
+              </nav>
+            </aside>
+
+            <div class="settings-content">
+              <section class="settings-section is-active" id="settings-system" data-settings-section="system">
+                <div class="settings-section-head">
+                  <div>
+                    <h2>基础信息</h2>
+                    <p>管理站点展示、语言、时区和首页文案。</p>
+                  </div>
+                  <span class="admin-badge is-ready">System</span>
+                </div>
+                <div class="settings-section-grid">
             <div class="admin-panel">
               <div class="admin-panel-head">
                 <h2>基础信息</h2>
@@ -4767,11 +8811,38 @@ var adminWorkspaceTemplate = template.Must(template.New("admin-workspace").Parse
                     <span>默认时区</span>
                     <input class="form-control" name="timezone" value="{{.SystemSettings.Timezone}}" placeholder="Asia/Shanghai" autocomplete="off">
                   </label>
+                  <label class="admin-form-wide">
+                    <span>后台副标题</span>
+                    <input class="form-control" name="admin_tagline" value="{{.SystemSettings.AdminTagline}}" autocomplete="off">
+                  </label>
+                  <label class="admin-form-wide">
+                    <span>首页副标题</span>
+                    <input class="form-control" name="public_tagline" value="{{.SystemSettings.PublicTagline}}" autocomplete="off">
+                  </label>
+                  <label class="admin-form-wide">
+                    <span>首页主标题</span>
+                    <textarea class="form-control" name="public_headline" rows="2">{{.SystemSettings.PublicHeadline}}</textarea>
+                  </label>
+                  <label class="admin-form-wide">
+                    <span>首页简介</span>
+                    <textarea class="form-control" name="public_description" rows="3">{{.SystemSettings.PublicDescription}}</textarea>
+                  </label>
                 </div>
                 <button class="admin-submit-button" type="submit">保存基础信息</button>
               </form>
             </div>
+                </div>
+              </section>
 
+              <section class="settings-section" id="settings-storage" data-settings-section="storage">
+                <div class="settings-section-head">
+                  <div>
+                    <h2>存储设置</h2>
+                    <p>管理上传目录、公开访问前缀、文件限制和智能体导出保留。</p>
+                  </div>
+                  <span class="admin-badge {{.StorageSettings.PathStatusClass}}">{{.StorageSettings.PathStatus}}</span>
+                </div>
+                <div class="settings-section-grid">
             <div class="admin-panel">
               <div class="admin-panel-head">
                 <h2>存储设置</h2>
@@ -4810,17 +8881,297 @@ var adminWorkspaceTemplate = template.Must(template.New("admin-workspace").Parse
                 <button class="admin-submit-button" type="submit">保存存储设置</button>
               </form>
             </div>
+                </div>
+              </section>
 
+              <section class="settings-section" id="settings-ai" data-settings-section="ai">
+                <div class="settings-section-head">
+                  <div>
+                    <h2>AI 模型</h2>
+                    <p>配置后台智能体默认模型服务和连接检查。</p>
+                  </div>
+                  <span class="admin-badge {{.AIStatusClass}}">{{.AIStatus}}</span>
+                </div>
+                <div class="settings-section-grid">
+            <div class="admin-panel">
+              <div class="admin-panel-head">
+                <h2>AI 模型设置</h2>
+                <span class="admin-panel-meta">Bailian</span>
+              </div>
+              <form class="admin-settings-form" method="post" action="{{.AISettings.Action}}">
+                <div class="admin-form-grid">
+                  <label>
+                    <span>AI 服务商</span>
+                    <select class="form-select" name="ai_provider">
+                      <option value="bailian" {{if eq .AISettings.Provider "bailian"}}selected{{end}}>阿里云百炼</option>
+                      <option value="disabled" {{if eq .AISettings.Provider "disabled"}}selected{{end}}>暂不启用</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>对话模型</span>
+                    <input class="form-control mono" name="ai_chat_model" value="{{.AISettings.ChatModel}}" placeholder="qwen-plus" autocomplete="off">
+                  </label>
+                  <label class="admin-form-wide">
+                    <span>API Key</span>
+                    <input class="form-control mono" name="ai_api_key" type="password" placeholder="{{if .AISettings.MaskedAPIKey}}{{.AISettings.MaskedAPIKey}}，留空保留{{else}}sk-...{{end}}" autocomplete="new-password">
+                    <small class="form-text">保存时会调用模型接口检查；留空会保留已有 Key。</small>
+                  </label>
+                  <label class="admin-form-wide">
+                    <span>OpenAI 兼容 Base URL</span>
+                    <input class="form-control mono" name="ai_base_url" value="{{.AISettings.BaseURL}}" placeholder="https://dashscope.aliyuncs.com/compatible-mode/v1" autocomplete="off">
+                  </label>
+                </div>
+                <button class="admin-submit-button" type="submit">保存并检查 AI</button>
+              </form>
+            </div>
+                </div>
+              </section>
+
+              <section class="settings-section" id="settings-security" data-settings-section="security">
+                <div class="settings-section-head">
+                  <div>
+                    <h2>登录安全</h2>
+                    <p>管理登录保护、当前管理员密码和后台固定入口。</p>
+                  </div>
+                  <span class="admin-badge is-secure">Policy</span>
+                </div>
+                <div class="settings-section-grid">
+            <div class="admin-panel">
+              <div class="admin-panel-head">
+                <h2>登录保护</h2>
+                <span class="admin-panel-meta">Policy</span>
+              </div>
+              <form class="admin-settings-form" method="post" action="{{.SecuritySettings.Action}}">
+                <input type="hidden" name="security_action" value="policy">
+                <div class="admin-form-grid">
+                  <label>
+                    <span>会话有效期 / 小时</span>
+                    <input class="form-control" name="session_ttl_hours" type="number" min="1" max="168" value="{{.SecuritySettings.SessionTTLHours}}">
+                  </label>
+                  <label>
+                    <span>失败次数阈值</span>
+                    <input class="form-control" name="login_max_attempts" type="number" min="1" max="20" value="{{.SecuritySettings.LoginMaxAttempts}}">
+                  </label>
+                  <label class="admin-form-wide">
+                    <span>锁定窗口 / 分钟</span>
+                    <input class="form-control" name="login_lock_minutes" type="number" min="1" max="1440" value="{{.SecuritySettings.LoginLockMinutes}}">
+                    <small class="form-text">同一管理员或同一 IP 在窗口内连续失败达到阈值后，会临时拒绝登录。</small>
+                  </label>
+                </div>
+                <button class="admin-submit-button" type="submit">保存登录保护</button>
+              </form>
+            </div>
+
+            <div class="admin-panel">
+              <div class="admin-panel-head">
+                <h2>安全设置</h2>
+                <span class="admin-panel-meta">{{.SecuritySettings.Username}}</span>
+              </div>
+              <form class="admin-settings-form" method="post" action="{{.SecuritySettings.Action}}">
+                <input type="hidden" name="security_action" value="password">
+                <div class="admin-form-grid">
+                  <label class="admin-form-wide">
+                    <span>当前密码</span>
+                    <input class="form-control mono" name="current_password" type="password" autocomplete="current-password">
+                  </label>
+                  <label>
+                    <span>新密码</span>
+                    <input class="form-control mono" name="new_password" type="password" autocomplete="new-password" placeholder="至少 6 位">
+                  </label>
+                  <label>
+                    <span>确认新密码</span>
+                    <input class="form-control mono" name="new_password_confirmation" type="password" autocomplete="new-password">
+                  </label>
+                  <label class="admin-form-wide">
+                    <span>后台入口</span>
+                    <input class="form-control mono" value="{{.SecuritySettings.Entry}}" readonly>
+                    <small class="form-text">后台入口在初始化时随机生成，之后保持固定，避免影响已保存的管理地址。</small>
+                  </label>
+                </div>
+                <button class="admin-submit-button" type="submit">更新密码</button>
+              </form>
+            </div>
+                </div>
+              </section>
+
+              <section class="settings-section" id="settings-notifications" data-settings-section="notifications">
+                <div class="settings-section-head">
+                  <div>
+                    <h2>消息通知</h2>
+                    <p>配置消息通道、接收人、机器人地址和通知事件。</p>
+                  </div>
+                  <span class="admin-panel-meta">{{.NotificationSettings.ChannelName}}</span>
+                </div>
+                <div class="settings-section-grid">
+            <div class="admin-panel">
+              <div class="admin-panel-head">
+                <h2>通知设置</h2>
+                <span class="admin-panel-meta">{{.NotificationSettings.ChannelName}}</span>
+              </div>
+              <form class="admin-settings-form" method="post" action="{{.NotificationSettings.Action}}">
+                <div class="admin-form-grid">
+                  <label>
+                    <span>通知状态</span>
+                    <select class="form-select" name="notification_enabled">
+                      <option value="0" {{if not .NotificationSettings.Enabled}}selected{{end}}>暂不启用</option>
+                      <option value="1" {{if .NotificationSettings.Enabled}}selected{{end}}>启用</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>通知通道</span>
+                    <select class="form-select" name="notification_channel">
+                      <option value="disabled" {{if eq .NotificationSettings.Channel "disabled"}}selected{{end}}>暂不启用</option>
+                      <option value="webhook" {{if eq .NotificationSettings.Channel "webhook"}}selected{{end}}>Webhook</option>
+                      <option value="feishu" {{if eq .NotificationSettings.Channel "feishu"}}selected{{end}}>飞书机器人</option>
+                    </select>
+                  </label>
+                  <label class="admin-form-wide">
+                    <span>接收人 / 备注</span>
+                    <input class="form-control" name="notification_receiver" value="{{.NotificationSettings.Receiver}}" placeholder="运维群、管理员、值班人" autocomplete="off">
+                  </label>
+                  <label class="admin-form-wide">
+                    <span>Webhook / 机器人地址</span>
+                    <input class="form-control mono" name="notification_webhook_url" value="{{.NotificationSettings.WebhookURL}}" placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/..." autocomplete="off">
+                    <small class="form-text">普通 Webhook 会发送原始 JSON；飞书机器人会发送飞书 text 消息体。</small>
+                  </label>
+                  <label class="admin-form-wide">
+                    <span>飞书签名密钥</span>
+                    <input class="form-control mono" name="notification_feishu_secret" type="password" placeholder="{{if .NotificationSettings.FeishuSecretMasked}}{{.NotificationSettings.FeishuSecretMasked}}，留空保留{{else}}可选，开启签名校验时填写{{end}}" autocomplete="new-password">
+                    <small class="form-text">飞书机器人启用“签名校验”时填写；未启用签名校验可留空。</small>
+                  </label>
+                  <label class="admin-checkline">
+                    <input type="checkbox" name="notification_event_login_failures" value="1" {{if .NotificationSettings.EventLoginFailures}}checked{{end}}>
+                    <span>登录失败与锁定</span>
+                  </label>
+                  <label class="admin-checkline">
+                    <input type="checkbox" name="notification_event_ai_errors" value="1" {{if .NotificationSettings.EventAIErrors}}checked{{end}}>
+                    <span>AI 调用异常</span>
+                  </label>
+                  <label class="admin-checkline admin-form-wide">
+                    <input type="checkbox" name="notification_event_storage_warning" value="1" {{if .NotificationSettings.EventStorageWarning}}checked{{end}}>
+                    <span>存储与文件风险</span>
+                  </label>
+                </div>
+                <div class="admin-button-row">
+                  <button class="admin-submit-button" type="submit">保存通知设置</button>
+                </div>
+              </form>
+              <form class="admin-inline-form" method="post" action="{{.NotificationSettings.TestAction}}">
+                <button class="admin-secondary-button" type="submit">发送测试通知</button>
+              </form>
+            </div>
+                </div>
+              </section>
+
+              <section class="settings-section" id="settings-queue" data-settings-section="queue">
+                <div class="settings-section-head">
+                  <div>
+                    <h2>后台队列</h2>
+                    <p>管理自动执行队列、定时系统体检和智能体导出清理。</p>
+                  </div>
+                  <span class="admin-panel-meta">{{.TaskWorkerSettings.StatusText}}</span>
+                </div>
+                <div class="settings-section-grid">
+            <div class="admin-panel">
+              <div class="admin-panel-head">
+                <h2>后台自动队列</h2>
+                <span class="admin-panel-meta">{{.TaskWorkerSettings.StatusText}}</span>
+              </div>
+              <form class="admin-settings-form" method="post" action="{{.BasePath}}/settings/tasks">
+                <div class="admin-form-grid">
+                  <label>
+                    <span>自动执行</span>
+                    <select class="form-select" name="task_worker_enabled">
+                      <option value="1" {{if .TaskWorkerSettings.Enabled}}selected{{end}}>开启自动队列</option>
+                      <option value="0" {{if not .TaskWorkerSettings.Enabled}}selected{{end}}>关闭自动队列</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>扫描间隔 / 秒</span>
+                    <input class="form-control" name="task_worker_interval_seconds" type="number" min="5" max="3600" value="{{.TaskWorkerSettings.IntervalSeconds}}">
+                  </label>
+                  <label>
+                    <span>单轮任务数</span>
+                    <input class="form-control" name="task_worker_batch_size" type="number" min="1" max="50" value="{{.TaskWorkerSettings.BatchSize}}">
+                  </label>
+                  <label>
+                    <span>系统体检调度</span>
+                    <select class="form-select" name="task_schedule_health_enabled">
+                      <option value="1" {{if .TaskWorkerSettings.ScheduleHealthEnabled}}selected{{end}}>启用</option>
+                      <option value="0" {{if not .TaskWorkerSettings.ScheduleHealthEnabled}}selected{{end}}>关闭</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>体检间隔 / 分钟</span>
+                    <input class="form-control" name="task_schedule_health_minutes" type="number" min="5" max="10080" value="{{.TaskWorkerSettings.ScheduleHealthMinutes}}">
+                  </label>
+                  <label>
+                    <span>导出清理调度</span>
+                    <select class="form-select" name="task_schedule_cleanup_enabled">
+                      <option value="1" {{if .TaskWorkerSettings.ScheduleCleanupEnabled}}selected{{end}}>启用</option>
+                      <option value="0" {{if not .TaskWorkerSettings.ScheduleCleanupEnabled}}selected{{end}}>关闭</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>清理间隔 / 分钟</span>
+                    <input class="form-control" name="task_schedule_cleanup_minutes" type="number" min="5" max="10080" value="{{.TaskWorkerSettings.ScheduleCleanupMinutes}}">
+                  </label>
+                  <label class="admin-form-wide">
+                    <span>队列说明</span>
+                    <input class="form-control" value="自动队列会在 Go 服务内扫描待执行任务，不会启动额外端口。" readonly>
+                  </label>
+                </div>
+                <button class="admin-submit-button" type="submit">保存自动队列设置</button>
+              </form>
+            </div>
+                </div>
+              </section>
+
+              <section class="settings-section" id="settings-runtime" data-settings-section="runtime">
+                <div class="settings-section-head">
+                  <div>
+                    <h2>运行状态</h2>
+                    <p>查看当前运行参数、固定入口和设置变更记录。</p>
+                  </div>
+                  <a class="admin-panel-link" href="{{.BasePath}}/tasks">进入后台任务</a>
+                </div>
+                <div class="settings-section-grid">
             <div class="admin-panel admin-panel-wide">
               <div class="admin-panel-head">
                 <h2>运行参数</h2>
-                <a class="admin-panel-link" href="{{.BasePath}}/files">进入文件管理</a>
+                <a class="admin-panel-link" href="{{.BasePath}}/tasks">进入后台任务</a>
               </div>
               <dl class="admin-kv admin-kv-table">
                 {{range .Settings}}
                   <div><dt>{{.Key}}</dt><dd>{{.Value}}</dd></div>
                 {{end}}
               </dl>
+            </div>
+
+            <div class="admin-panel admin-panel-wide">
+              <div class="admin-panel-head">
+                <h2>设置变更记录</h2>
+                <span class="admin-panel-meta">History</span>
+              </div>
+              <div class="admin-table setting-change-table">
+                <div class="admin-table-row admin-table-head">
+                  <span>时间</span><span>分组</span><span>动作</span><span>操作者</span><span>摘要</span>
+                </div>
+                {{if .SettingChanges}}
+                  {{range .SettingChanges}}
+                    <div class="admin-table-row">
+                      <span>{{.Time}}</span><span>{{.Category}}</span><span>{{.Action}}</span><span>{{.Actor}}</span><span>{{.Summary}}</span>
+                    </div>
+                  {{end}}
+                {{else}}
+                  <div class="admin-table-row">
+                    <span>暂无变更记录</span><span>-</span><span>-</span><span>-</span><span>保存任一设置后会写入这里。</span>
+                  </div>
+                {{end}}
+              </div>
+            </div>
+                </div>
+              </section>
             </div>
           </section>
         {{else if eq .Active "files"}}
@@ -4889,6 +9240,226 @@ var adminWorkspaceTemplate = template.Must(template.New("admin-workspace").Parse
               </div>
             </div>
           </section>
+        {{else if eq .Active "tasks"}}
+          {{if .TaskNotice}}
+            <div class="admin-alert {{.TaskNoticeClass}}">{{.TaskNotice}}</div>
+          {{end}}
+          <section class="admin-metrics" aria-label="后台任务概览">
+            {{range .TaskMetrics}}
+              <article class="admin-metric-card">
+                <span class="metric-label">{{.Label}}</span>
+                <strong>{{.Value}}</strong>
+                <small>{{.Detail}}</small>
+                <i class="admin-status-dot {{.Status}}"></i>
+              </article>
+            {{end}}
+          </section>
+
+          <section class="admin-grid">
+            <div class="admin-panel">
+              <div class="admin-panel-head">
+                <h2>创建任务</h2>
+                <span class="admin-panel-meta">Queue</span>
+              </div>
+              <form class="admin-settings-form" method="post" action="{{.TaskEnqueueAction}}">
+                <div class="admin-form-grid">
+                  <label class="admin-form-wide">
+                    <span>任务类型</span>
+                    <select class="form-select" name="task_type">
+                      {{range .TaskTypeOptions}}
+                        <option value="{{.Type}}">{{.Name}} - {{.Description}}</option>
+                      {{end}}
+                    </select>
+                  </label>
+                </div>
+                <button class="admin-submit-button" type="submit">加入队列</button>
+              </form>
+            </div>
+
+            <div class="admin-panel">
+              <div class="admin-panel-head">
+                <h2>执行器</h2>
+                <span class="admin-panel-meta">Worker</span>
+              </div>
+              <dl class="admin-kv">
+                <div><dt>运行方式</dt><dd>支持手动执行单个任务或批量执行当前可运行队列。</dd></div>
+                <div><dt>失败处理</dt><dd>任务失败会记录日志，并按最大次数进入重试队列。</dd></div>
+                <div><dt>任务边界</dt><dd>系统体检、导出清理、测试通知均落库记录执行结果和生命周期。</dd></div>
+              </dl>
+              <div class="admin-button-row">
+                <form class="admin-inline-form" method="post" action="{{.TaskRunAction}}">
+                  <button class="admin-submit-button" type="submit">执行下一个任务</button>
+                </form>
+                <form class="admin-inline-form" method="post" action="{{.TaskRunAllAction}}">
+                  <button class="admin-secondary-button" type="submit">批量执行就绪任务</button>
+                </form>
+              </div>
+            </div>
+
+            <div class="admin-panel admin-panel-wide">
+              <div class="admin-panel-head">
+                <h2>自动执行</h2>
+                <span class="admin-panel-meta">{{.TaskWorkerSettings.StatusText}}</span>
+              </div>
+              <form class="admin-settings-form" method="post" action="{{.TaskWorkerSettings.Action}}">
+                <div class="admin-form-grid">
+                  <label>
+                    <span>Worker 状态</span>
+                    <select class="form-select" name="task_worker_enabled">
+                      <option value="0" {{if not .TaskWorkerSettings.Enabled}}selected{{end}}>关闭自动执行</option>
+                      <option value="1" {{if .TaskWorkerSettings.Enabled}}selected{{end}}>开启自动执行</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>扫描间隔（秒）</span>
+                    <input class="form-control" name="task_worker_interval_seconds" type="number" min="5" max="3600" value="{{.TaskWorkerSettings.IntervalSeconds}}">
+                  </label>
+                  <label>
+                    <span>单轮执行数量</span>
+                    <input class="form-control" name="task_worker_batch_size" type="number" min="1" max="50" value="{{.TaskWorkerSettings.BatchSize}}">
+                  </label>
+                  <label>
+                    <span>系统体检调度</span>
+                    <select class="form-select" name="task_schedule_health_enabled">
+                      <option value="1" {{if .TaskWorkerSettings.ScheduleHealthEnabled}}selected{{end}}>启用</option>
+                      <option value="0" {{if not .TaskWorkerSettings.ScheduleHealthEnabled}}selected{{end}}>关闭</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>体检间隔（分钟）</span>
+                    <input class="form-control" name="task_schedule_health_minutes" type="number" min="5" max="10080" value="{{.TaskWorkerSettings.ScheduleHealthMinutes}}">
+                  </label>
+                  <label>
+                    <span>导出清理调度</span>
+                    <select class="form-select" name="task_schedule_cleanup_enabled">
+                      <option value="1" {{if .TaskWorkerSettings.ScheduleCleanupEnabled}}selected{{end}}>启用</option>
+                      <option value="0" {{if not .TaskWorkerSettings.ScheduleCleanupEnabled}}selected{{end}}>关闭</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>清理间隔（分钟）</span>
+                    <input class="form-control" name="task_schedule_cleanup_minutes" type="number" min="5" max="10080" value="{{.TaskWorkerSettings.ScheduleCleanupMinutes}}">
+                  </label>
+                </div>
+                <button class="admin-submit-button" type="submit">保存自动执行设置</button>
+              </form>
+            </div>
+
+            <div class="admin-panel admin-panel-wide">
+              <div class="admin-panel-head">
+                <h2>任务列表</h2>
+                <span class="admin-panel-meta">Background Tasks</span>
+              </div>
+              <div class="admin-table background-task-table">
+                <div class="admin-table-row admin-table-head">
+                  <span>任务</span><span>队列</span><span>状态</span><span>时间</span><span>结果</span><span>操作</span>
+                </div>
+                {{if .TaskRows}}
+                  {{range .TaskRows}}
+                    <div class="admin-table-row">
+                      <span><strong>{{.Name}}</strong><small class="mono">{{.IDShort}} · {{.TypeName}}</small><small>{{.CreatedBy}}</small></span>
+                      <span>{{.Queue}}<small>尝试 {{.Attempts}}</small></span>
+                      <span><b class="admin-badge {{.StatusClass}}">{{.Status}}</b>{{if .LastError}}<small>{{.LastError}}</small>{{end}}</span>
+                      <span>创建 {{.CreatedAt}}<small>可执行 {{.AvailableAt}}</small>{{if .FinishedAt}}<small>完成 {{.FinishedAt}}</small>{{end}}</span>
+                      <span>{{if .Result}}{{.Result}}{{else}}等待执行结果{{end}}</span>
+                      <span class="admin-file-actions">
+                        {{if .CanRun}}
+                          <form method="post" action="{{.RunAction}}">
+                            <input type="hidden" name="task_id" value="{{.ID}}">
+                            <button type="submit">执行</button>
+                          </form>
+                        {{end}}
+                        {{if .CanRetry}}
+                          <form method="post" action="{{.RetryAction}}">
+                            <input type="hidden" name="task_id" value="{{.ID}}">
+                            <button type="submit">重试</button>
+                          </form>
+                        {{end}}
+                        {{if .CanCancel}}
+                          <form method="post" action="{{.CancelAction}}">
+                            <input type="hidden" name="task_id" value="{{.ID}}">
+                            <button type="submit">取消</button>
+                          </form>
+                        {{end}}
+                        {{if and (not .CanRun) (not .CanRetry) (not .CanCancel)}}
+                          <span class="admin-badge is-muted">无操作</span>
+                        {{end}}
+                      </span>
+                    </div>
+                  {{end}}
+                {{else}}
+                  <div class="admin-table-row admin-empty-row">
+                    <span>暂无任务，先创建一个系统体检任务。</span><span>default</span><span class="admin-badge is-muted">等待</span><span>-</span><span>-</span><span>-</span>
+                  </div>
+                {{end}}
+              </div>
+            </div>
+
+            <div class="admin-panel admin-panel-wide">
+              <div class="admin-panel-head">
+                <h2>任务日志</h2>
+                <span class="admin-panel-meta">Lifecycle Logs</span>
+              </div>
+              <div class="admin-table background-task-log-table">
+                <div class="admin-table-row admin-table-head">
+                  <span>时间 / 任务</span><span>事件</span><span>状态</span><span>尝试</span><span>消息</span>
+                </div>
+                {{if .TaskLogRows}}
+                  {{range .TaskLogRows}}
+                    <div class="admin-table-row">
+                      <span>{{.Time}}<small class="mono">{{.TaskIDShort}}</small></span>
+                      <span><b class="admin-badge {{.LevelClass}}">{{.Level}}</b><small>{{.Event}}</small></span>
+                      <span>{{.Status}}</span>
+                      <span>{{.Attempt}}</span>
+                      <span>{{.Message}}</span>
+                    </div>
+                  {{end}}
+                {{else}}
+                  <div class="admin-table-row admin-empty-row">
+                    <span>暂无任务日志。</span><span>-</span><span>-</span><span>0</span><span>任务入队或执行后会写入这里。</span>
+                  </div>
+                {{end}}
+              </div>
+            </div>
+          </section>
+        {{else if eq .Active "notifications"}}
+          <section class="admin-metrics" aria-label="通知概览">
+            {{range .NotificationMetrics}}
+              <article class="admin-metric-card">
+                <span class="metric-label">{{.Label}}</span>
+                <strong>{{.Value}}</strong>
+                <small>{{.Detail}}</small>
+                <i class="admin-status-dot {{.Status}}"></i>
+              </article>
+            {{end}}
+          </section>
+
+          <section class="admin-panel admin-panel-wide">
+            <div class="admin-panel-head">
+              <h2>通知事件</h2>
+              <a class="admin-panel-link" href="{{.BasePath}}/settings">通知设置</a>
+            </div>
+            <div class="admin-table notification-table">
+              <div class="admin-table-row admin-table-head">
+                <span>时间 / 事件</span><span>接收人</span><span>通道</span><span>目标</span><span>结果</span>
+              </div>
+              {{if .NotificationRows}}
+                {{range .NotificationRows}}
+                  <div class="admin-table-row">
+                    <span><strong>{{.Title}}</strong><small>{{.Time}} · {{.Event}}</small>{{if .Message}}<small>{{.Message}}</small>{{end}}</span>
+                    <span>{{.Receiver}}</span>
+                    <span>{{.Channel}}</span>
+                    <span class="mono">{{.Target}}</span>
+                    <span><b class="admin-badge {{.StatusClass}}">{{.Status}}</b>{{if .Error}}<small>{{.Error}}</small>{{end}}</span>
+                  </div>
+                {{end}}
+              {{else}}
+                <div class="admin-table-row admin-empty-row">
+                  <span>暂无通知发送记录。</span><span>-</span><span>-</span><span>-</span><span class="admin-badge is-muted">等待事件</span>
+                </div>
+              {{end}}
+            </div>
+          </section>
         {{else if eq .Active "audit"}}
           <section class="admin-metrics" aria-label="审计概览">
             {{range .AuditMetrics}}
@@ -4904,8 +9475,40 @@ var adminWorkspaceTemplate = template.Must(template.New("admin-workspace").Parse
           <section class="admin-panel admin-panel-wide">
             <div class="admin-panel-head">
               <h2>审计事件</h2>
-              <span class="admin-panel-meta">Audit</span>
+              <a class="admin-panel-link" href="{{.AuditFilter.ExportURL}}">导出 CSV</a>
             </div>
+            <form class="admin-settings-form audit-filter-form" method="get" action="{{.AuditFilter.Action}}">
+              <div class="admin-form-grid">
+                <label>
+                  <span>事件分类</span>
+                  <select class="form-select" name="category">
+                    <option value="" {{if eq .AuditFilter.Category ""}}selected{{end}}>全部分类</option>
+                    <option value="login" {{if eq .AuditFilter.Category "login"}}selected{{end}}>登录</option>
+                    <option value="operation" {{if eq .AuditFilter.Category "operation"}}selected{{end}}>操作</option>
+                    <option value="file" {{if eq .AuditFilter.Category "file"}}selected{{end}}>文件</option>
+                    <option value="ai" {{if eq .AuditFilter.Category "ai"}}selected{{end}}>AI</option>
+                    <option value="system" {{if eq .AuditFilter.Category "system"}}selected{{end}}>系统</option>
+                  </select>
+                </label>
+                <label>
+                  <span>状态</span>
+                  <select class="form-select" name="status">
+                    <option value="" {{if eq .AuditFilter.Status ""}}selected{{end}}>全部状态</option>
+                    <option value="success" {{if eq .AuditFilter.Status "success"}}selected{{end}}>成功 2xx/3xx</option>
+                    <option value="warning" {{if eq .AuditFilter.Status "warning"}}selected{{end}}>警告 4xx</option>
+                    <option value="error" {{if eq .AuditFilter.Status "error"}}selected{{end}}>错误 5xx</option>
+                  </select>
+                </label>
+                <label class="admin-form-wide">
+                  <span>关键词</span>
+                  <input class="form-control" name="keyword" value="{{.AuditFilter.Keyword}}" placeholder="操作、路径、账号、IP" autocomplete="off">
+                </label>
+              </div>
+              <div class="admin-filter-actions">
+                <button class="admin-submit-button" type="submit">筛选日志</button>
+                <a class="admin-filter-reset" href="{{.AuditFilter.Action}}">重置</a>
+              </div>
+            </form>
             <div class="admin-timeline">
               {{if .AuditEvents}}
                 {{range .AuditEvents}}
@@ -4930,6 +9533,6 @@ var adminWorkspaceTemplate = template.Must(template.New("admin-workspace").Parse
       </main>
     </div>
   </div>
-  <script src="/assets/js/admin-agent.js?v=20260514-agent1"></script>
+  <script src="/assets/js/admin-agent.js?v=20260517-ux3"></script>
 </body>
 </html>`))
