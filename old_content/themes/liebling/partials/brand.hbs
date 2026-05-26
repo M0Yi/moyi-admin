@@ -1,0 +1,15 @@
+{{!--
+If the template in question has a background image, then we render responsive image styles
+for it, and apply those styles to the <header> tag.
+--}}
+
+  <section class="m-hero with-picture as-brand" data-animate="fade-down">
+      <article class="m-article-card as-brand">
+          <div class="m-article-card__picture as-brand">
+              {{#if background}}
+                  <img clasS="m-article-card__picture-background as-brand" src="{{img_url background size="m"}}" loading="lazy" alt="">
+              {{else}}
+                  <img clasS="m-article-card__picture-background as-brand" src="{{asset "images/default-avatar-rectangle.jpg"}}" loading="lazy" alt="">
+              {{/if}}
+          </div>
+      </article>

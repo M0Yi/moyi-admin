@@ -1,0 +1,201 @@
+{{!--
+This template is used for the post page.
+--}}
+
+{{!-- This block preloads specific assets for the post page --}}
+{{#contentFor "preload"}}
+    <link rel="preload" href="{{asset "css/post.css"}}" as="style"/>
+    <link rel="preload" href="{{asset "js/post.js"}}" as="script"/>
+{{/contentFor}}
+
+{{!-- This block loads specific styles for the post page --}}
+{{#contentFor "styles"}}
+    <link rel="stylesheet" type="text/css" href="{{asset "css/post.css"}}" media="screen"/>
+{{/contentFor}}
+
+{{!-- The tag below means: insert everything in this file
+into the {body} of the default.hbs template --}}
+{{!< default}}
+
+{{!-- Special header.hbs partial to generate the <header> tag --}}
+{{#post}}
+    {{> header background=feature_image}}
+{{/post}}
+
+<main class="main-wrap">
+<!--  {{#post}}-->
+    <!--    {{!-- Inject styles of the hero image to make it responsive --}}-->
+    <!--    {{> hero background=feature_image}}-->
+    <!--    </section>-->
+        <!--    {{#if feature_image}}-->
+            <!--      {{#if feature_image_caption}}-->
+            <!--        <div class="l-wrapper in-caption">-->
+            <!--          <p class="m-small-text align-center">-->
+            <!--            {{feature_image_caption}}-->
+            <!--          </p>-->
+            <!--        </div>-->
+                <!--      {{/if}}-->
+            <!--    {{/if}}-->
+        <!--  {{/post}}-->
+
+    <article>
+        <div class="l-content in-post">
+            {{!-- Everything inside the #post tags pulls data from the post --}}
+            {{#post}}
+                <div class="l-wrapper in-post {{#unless feature_image}}no-image{{/unless}} js-animation-wrapper"
+                     data-animate="fade-up">
+                    <div class="l-post-content js-progress-content">
+
+
+                        <!--                        <div class="m-qrcode">-->
+                        <!--                            ABCDS-->
+                        <!--                        </div>-->
+
+                        <header class="m-heading">
+                            <h1 class="m-heading__title in-post">{{title}}</h1>
+                            <div class="m-heading__meta">
+
+                                <span class="m-heading__meta__time">{{date published_at format="YYYY MM DD "}}</span>
+                            </div>
+                        </header>
+                        <div class="pos-relative js-post-content">
+
+
+                            <div class="m-share">
+                                <div class="m-share__content js-sticky">
+                                    <button class="m-icon-button filled in-share progress js-scrolltop"
+                                            aria-label="{{t "Scroll to top"}}">
+                                        <span class="icon-arrow-top" aria-hidden="true"></span>
+                                        <svg aria-hidden="true">
+                                            <circle class="progress-ring__circle js-progress" fill="transparent" r="0"/>
+                                        </svg>
+                                    </button>
+                                </div>
+                            </div>
+
+                            {{content}}
+                            {{!-- List of tags  --}}
+                            {{#if tags}}
+                                <section class="m-tags in-post">
+                                    <h3 class="m-submenu-title">{{t "Tags"}}</h3>
+                                    <ul>
+                                        {{#foreach tags}}
+                                            <li>
+                                                <a href="{{url}}" title="{{name}}">{{name}}</a>
+                                            </li>
+                                        {{/foreach}}
+                                    </ul>
+                                </section>
+                            {{/if}}
+                        </div>
+                    </div>
+                </div>
+                {{!-- Email subscribe form at the bottom of the page --}}
+                {{#if @site.members_enabled}}
+                    <section class="m-subscribe-section js-newsletter">
+                        <div class="l-wrapper in-post">
+                            <div class="m-subscribe-section__content">
+                                <div class="m-subscribe-section__text">
+                                    <h4 class="m-subscribe-section__title">{{t "Subscribe to our newsletter"}}</h4>
+                                    <p class="m-subscribe-section__description">
+                                        {{t "Get the latest posts delivered right to your inbox."}}
+                                    </p>
+                                </div>
+                                <div class="m-subscribe-section__form">
+                                    {{> "newsletter-form"}}
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+                {{/if}}
+                <section class="m-author">
+                    {{#foreach authors}}
+
+                    <div class="m-author__content in-post">
+                        <div class="m-author__picture">
+                            <a href="{{url}}" class="m-author-picture"
+                               aria-label="{{name}}">
+                                {{#if profile_image}}
+                                    <div style="background-image: url({{profile_image}});"></div>
+                                {{else}}
+                                    <div style="background-image: url({{asset
+                                            "images/default-avatar-square-small.jpg"}});"></div>
+                                {{/if}}
+                            </a>
+                        </div>
+                        <div class="m-author__info">
+                            <h4 class="m-author__name">
+                                <a href="{{url}}">{{name}}</a>
+                            </h4>
+
+                            <ul class="m-author-links">
+
+                                {{#if location}}
+                                    <li>
+                                        <a href="{{url}}" target="_blank" rel="noopener"
+                                           aria-label="Facebook">
+                                            {{location}}
+                                        </a>
+                                    </li>
+                                {{/if}}
+
+                            </ul>
+                        </div>
+                    </div>
+                    {{/foreach}}
+
+                </section>
+                {{!-- Native comments --}}
+                {{#if comments}}
+                    <div class="m-comments">
+                        <div class="l-wrapper in-comments js-native-comments">
+                            {{comments}}
+                        </div>
+                    </div>
+                {{/if}}
+            {{!-- Third-party comments --}}
+            {{!--
+              <section class="m-comments">
+                <div class="l-wrapper in-comments js-third-party-comments">
+                  <!-- Paste here the provided code snippet -->
+                </div>
+              </section>
+            --}}
+            {{/post}}
+            {{!-- Related posts --}}
+            {{#if post.tags.length}}
+                {{#get "posts" limit="3" filter="tags:[{{post.tags}}]+id:-{{post.id}}" include="tags,authors"
+                       order="published_at desc" as |related|}}
+                    {{#if related}}
+                        <section class="m-recommended">
+                            <div class="l-wrapper in-recommended">
+                                <h3 class="m-section-title in-recommended">{{t "Recommended for you"}}</h3>
+                                <div class="m-recommended-articles">
+                                    <div class="m-recommended-slider swiper js-recommended-slider">
+                                        <div class="swiper-wrapper">
+                                            {{!-- The tag below iterates over all the related posts --}}
+                                            {{> "loop"}}
+                                        </div>
+                                        <button class="m-icon-button filled in-recommended-articles swiper-button-prev"
+                                                aria-label="{{t "Previous"}}">
+                                            <span class="icon-arrow-left" aria-hidden="true"></span>
+                                        </button>
+                                        <button class="m-icon-button filled in-recommended-articles swiper-button-next"
+                                                aria-label="{{t "Next"}}">
+                                            <span class="icon-arrow-right" aria-hidden="true"></span>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </section>
+                    {{/if}}
+                {{/get}}
+            {{/if}}
+        </div>
+    </article>
+</main>
+
+{{!-- The #contentFor helper here will send everything inside it up to the matching #block helper found in default.hbs --}}
+{{#contentFor "scripts"}}
+    <script defer src="{{asset "js/post.js"}}"></script>
+{{/contentFor}}

@@ -4,12 +4,17 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"database/sql"
+	"encoding/base64"
 	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"io"
+	"net"
 	"net/http"
+	neturl "net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -20,16 +25,31 @@ import (
 	"unicode/utf8"
 )
 
-const defaultAgentTimeout = 18 * time.Second
+const (
+	defaultAgentTimeout      = 18 * time.Second
+	defaultAgentImageTimeout = 90 * time.Second
+)
 
 var agentHTTPClient = &http.Client{Timeout: defaultAgentTimeout}
+var agentImageHTTPClient = &http.Client{Timeout: defaultAgentImageTimeout}
+var agentWebSearchBaseURL = "https://duckduckgo.com/html/"
+var agentAllowPrivateWebTargets = false
 
 type agentChatRequest struct {
-	SessionID       string             `json:"session_id,omitempty"`
-	Message         string             `json:"message"`
-	History         []agentChatMessage `json:"history,omitempty"`
-	TableAccessMode string             `json:"-"`
-	AllowedTables   []string           `json:"-"`
+	SessionID          string                   `json:"session_id,omitempty"`
+	Message            string                   `json:"message"`
+	History            []agentChatMessage       `json:"history,omitempty"`
+	ResolvedMessage    string                   `json:"-"`
+	CompressedContext  string                   `json:"-"`
+	HistoricalTasks    string                   `json:"-"`
+	StructuredMemory   agentStructuredMemory    `json:"-"`
+	LastImage          *agentFileResult         `json:"-"`
+	LastExport         *agentExportContinuation `json:"-"`
+	TableAccessMode    string                   `json:"-"`
+	AllowedTables      []string                 `json:"-"`
+	AllowReadOnlyQuery *bool                    `json:"-"`
+	AllowWebRead       *bool                    `json:"-"`
+	AllowImageGenerate *bool                    `json:"-"`
 }
 
 type agentChatMessage struct {
@@ -38,15 +58,16 @@ type agentChatMessage struct {
 }
 
 type agentChatResponse struct {
-	OK          bool              `json:"ok"`
-	SessionID   string            `json:"session_id,omitempty"`
-	Reply       string            `json:"reply"`
-	Run         agentRun          `json:"run"`
-	ToolResults []agentToolResult `json:"tool_results,omitempty"`
-	Files       []agentFileResult `json:"files,omitempty"`
-	ModelUsed   bool              `json:"model_used"`
-	Error       string            `json:"error,omitempty"`
-	ModelError  string            `json:"-"`
+	OK          bool               `json:"ok"`
+	SessionID   string             `json:"session_id,omitempty"`
+	Reply       string             `json:"reply"`
+	Run         agentRun           `json:"run"`
+	CurrentTask *agentTaskSnapshot `json:"current_task,omitempty"`
+	ToolResults []agentToolResult  `json:"tool_results,omitempty"`
+	Files       []agentFileResult  `json:"files,omitempty"`
+	ModelUsed   bool               `json:"model_used"`
+	Error       string             `json:"error,omitempty"`
+	ModelError  string             `json:"-"`
 }
 
 type agentRun struct {
@@ -132,6 +153,62 @@ type agentRunRecord struct {
 	Files       []agentFileResult
 }
 
+type agentTaskRecord struct {
+	ID              string
+	SessionID       string
+	Actor           string
+	Title           string
+	Goal            string
+	Status          string
+	Intent          string
+	PrimaryTable    string
+	FocusTables     []string
+	Filters         map[string]string
+	ExportFormat    string
+	LastTool        string
+	LastRunID       string
+	LastUserMessage string
+	LastReply       string
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+	CompletedAt     time.Time
+}
+
+type agentTaskStepRecord struct {
+	ID        int64
+	TaskID    string
+	RunID     string
+	StepIndex int
+	Title     string
+	Detail    string
+	Status    string
+	Tool      string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+type agentTaskSnapshot struct {
+	ID              string                  `json:"id"`
+	Title           string                  `json:"title"`
+	Goal            string                  `json:"goal"`
+	Status          string                  `json:"status"`
+	StatusText      string                  `json:"status_text"`
+	Intent          string                  `json:"intent"`
+	PrimaryTable    string                  `json:"primary_table,omitempty"`
+	ExportFormat    string                  `json:"export_format,omitempty"`
+	LastUserMessage string                  `json:"last_user_message,omitempty"`
+	UpdatedAt       string                  `json:"updated_at,omitempty"`
+	Steps           []agentTaskStepSnapshot `json:"steps,omitempty"`
+}
+
+type agentTaskStepSnapshot struct {
+	Title      string `json:"title"`
+	Detail     string `json:"detail"`
+	Status     string `json:"status"`
+	StatusText string `json:"status_text"`
+	Tool       string `json:"tool,omitempty"`
+}
+
 type agentToolResultRecord struct {
 	RunID     string
 	Index     int
@@ -149,11 +226,47 @@ type agentToolResultRecord struct {
 }
 
 type agentFileResult struct {
-	Name        string `json:"name"`
-	URL         string `json:"url"`
-	MIME        string `json:"mime"`
-	Size        int64  `json:"size"`
-	Description string `json:"description"`
+	Name           string `json:"name"`
+	URL            string `json:"url"`
+	MIME           string `json:"mime"`
+	Size           int64  `json:"size"`
+	Description    string `json:"description"`
+	Prompt         string `json:"prompt,omitempty"`
+	OriginalPrompt string `json:"original_prompt,omitempty"`
+}
+
+type agentSessionContext struct {
+	History           []agentChatMessage
+	CompressedContext string
+	HistoricalTasks   string
+	Memory            agentStructuredMemory
+	ActiveTask        *agentTaskRecord
+	LastExport        *agentExportContinuation
+	LastImage         *agentFileResult
+}
+
+type agentExportContinuation struct {
+	UserMessage string
+	Reply       string
+	Table       string
+	FileName    string
+}
+
+type agentStructuredMemory struct {
+	TaskAnchorMessage string            `json:"task_anchor_message,omitempty"`
+	CurrentGoal       string            `json:"current_goal,omitempty"`
+	LastIntent        string            `json:"last_intent,omitempty"`
+	PrimaryTable      string            `json:"primary_table,omitempty"`
+	FocusTables       []string          `json:"focus_tables,omitempty"`
+	ActiveFilters     map[string]string `json:"active_filters,omitempty"`
+	LastTool          string            `json:"last_tool,omitempty"`
+	LastSQL           string            `json:"last_sql,omitempty"`
+	LastFileName      string            `json:"last_file_name,omitempty"`
+	ExportFormat      string            `json:"export_format,omitempty"`
+	LastUserMessage   string            `json:"last_user_message,omitempty"`
+	LastReply         string            `json:"last_reply,omitempty"`
+	RecentFiles       []string          `json:"recent_files,omitempty"`
+	RecentOperations  []string          `json:"recent_operations,omitempty"`
 }
 
 type agentTableColumn struct {
@@ -163,27 +276,44 @@ type agentTableColumn struct {
 }
 
 type agentTableDefinition struct {
-	Name        string
-	Type        string
+	Name              string
+	Type              string
+	DisplayName       string
+	Description       string
+	Aliases           []string
+	HiddenFromCatalog bool
+}
+
+type agentExternalTable struct {
+	ID          string
+	Source      dataSourceConfig
+	RawName     string
 	DisplayName string
 	Description string
-	Aliases     []string
+	Columns     []agentTableColumn
+	RawColumns  map[string]string
 }
 
 type tableToolProvider struct {
-	state            installState
-	exportDir        string
-	downloadBasePath string
-	allowedTables    map[string]struct{}
-	denyAllTables    bool
-	auditEvents      []adminAuditEvent
-	notifications    []adminNotificationDeliveryRecord
-	adminSessions    []adminSessionRecord
-	backgroundTasks  []adminBackgroundTaskRecord
-	backgroundLogs   []adminBackgroundTaskLogRecord
-	schemaSnapshots  []adminSchemaSnapshotRecord
-	settingChanges   []adminSettingChangeRecord
-	runtime          agentRuntimeSnapshot
+	state              installState
+	exportDir          string
+	downloadBasePath   string
+	rawMessage         string
+	allowedTables      map[string]struct{}
+	denyAllTables      bool
+	memory             agentStructuredMemory
+	lastExport         *agentExportContinuation
+	allowReadOnlyQuery bool
+	allowWebRead       bool
+	allowImageGenerate bool
+	auditEvents        []adminAuditEvent
+	notifications      []adminNotificationDeliveryRecord
+	adminSessions      []adminSessionRecord
+	backgroundTasks    []adminBackgroundTaskRecord
+	backgroundLogs     []adminBackgroundTaskLogRecord
+	schemaSnapshots    []adminSchemaSnapshotRecord
+	settingChanges     []adminSettingChangeRecord
+	runtime            agentRuntimeSnapshot
 }
 
 type agentQueryScope struct {
@@ -210,6 +340,12 @@ type agentExportData struct {
 	TotalRows   int                `json:"total_rows"`
 }
 
+type agentGeneratedImageArtifact struct {
+	URL      string
+	Base64   string
+	MIMEType string
+}
+
 type agentIntent string
 
 const (
@@ -224,10 +360,37 @@ const (
 	agentIntentDesign       agentIntent = "agent_design"
 	agentIntentUserAccess   agentIntent = "user_access"
 	agentIntentAccessScope  agentIntent = "access_scope"
+	agentIntentSystemConfig agentIntent = "system_config"
+	agentIntentWebAccess    agentIntent = "web_access"
+	agentIntentImage        agentIntent = "image_generation"
 )
 
-var simpleSelectPattern = regexp.MustCompile(`(?i)^\s*select\s+(.+?)\s+from\s+([a-zA-Z_][a-zA-Z0-9_]*)(?:\s+limit\s+(\d+))?\s*$`)
+const (
+	agentTaskStatusRunning = "running"
+	agentTaskStatusWaiting = "waiting"
+	agentTaskStatusDone    = "done"
+	agentTaskStatusFailed  = "failed"
+)
+
+var simpleSelectPattern = regexp.MustCompile(`(?i)^\s*select\s+(.+?)\s+from\s+([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)*)(?:\s+limit\s+(\d+))?\s*$`)
 var identifierPattern = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
+var agentURLPattern = regexp.MustCompile(`https?://[^\s<>"']+`)
+var agentHTMLTitlePattern = regexp.MustCompile(`(?is)<title[^>]*>(.*?)</title>`)
+var agentHTMLScriptPattern = regexp.MustCompile(`(?is)<script[^>]*>.*?</script>`)
+var agentHTMLStylePattern = regexp.MustCompile(`(?is)<style[^>]*>.*?</style>`)
+var agentHTMLTagPattern = regexp.MustCompile(`(?is)<[^>]+>`)
+var agentHTMLSpacePattern = regexp.MustCompile(`\s+`)
+var agentSearchResultPattern = regexp.MustCompile(`(?is)<a[^>]+href=["']([^"']+)["'][^>]*>(.*?)</a>`)
+
+const (
+	agentSessionRawRunLimit      = 4
+	agentSessionSummaryRunLimit  = 12
+	agentSessionSummaryCharLimit = 1800
+)
+
+func boolPtr(value bool) *bool {
+	return &value
+}
 
 func (s *adminServer) aiChat(w http.ResponseWriter, r *http.Request) {
 	state, err := s.store.Load()
@@ -245,10 +408,19 @@ func (s *adminServer) aiChat(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	currentUser := s.sessionUsername(r)
+	access := adminRoleAccessForUsername(state, currentUser)
 	if !s.isAuthenticated(r) {
 		writeJSON(w, http.StatusUnauthorized, agentChatResponse{
 			OK:    false,
 			Error: "请先登录后台",
+		})
+		return
+	}
+	if !access.CanViewPage("ai") {
+		writeJSON(w, http.StatusForbidden, agentChatResponse{
+			OK:    false,
+			Error: "当前管理员未获授权访问 AI 智能体。",
 		})
 		return
 	}
@@ -283,6 +455,20 @@ func (s *adminServer) aiChat(w http.ResponseWriter, r *http.Request) {
 	if sessionID == "" {
 		sessionID = newAgentSessionID()
 	}
+	sessionContext := s.agentSessionContext(sessionID, currentUser)
+	payload.History = preferredAgentHistory(sessionContext.History, payload.History)
+	payload.CompressedContext = strings.TrimSpace(sessionContext.CompressedContext)
+	payload.HistoricalTasks = strings.TrimSpace(sessionContext.HistoricalTasks)
+	payload.StructuredMemory = sessionContext.Memory.normalized()
+	payload.LastImage = sessionContext.LastImage
+	payload.LastExport = sessionContext.LastExport
+	payload.ResolvedMessage = resolveAgentContinuationMessage(payload.Message, sessionContext)
+	scope := agentScopeForAdminAccount(state, currentUser)
+	payload.TableAccessMode = scope.Mode
+	payload.AllowedTables = scope.Tables
+	payload.AllowReadOnlyQuery = boolPtr(access.HasPermission("agent.sql.select"))
+	payload.AllowWebRead = boolPtr(access.HasPermission("agent.web.read"))
+	payload.AllowImageGenerate = boolPtr(access.HasPermission("agent.image.generate"))
 	response := s.runAgentChat(r.Context(), state, payload)
 	response.SessionID = sessionID
 	statusCode := http.StatusOK
@@ -290,7 +476,7 @@ func (s *adminServer) aiChat(w http.ResponseWriter, r *http.Request) {
 		statusCode = http.StatusBadRequest
 	}
 	duration := time.Since(startedAt)
-	actor := s.sessionUsername(r)
+	actor := currentUser
 	if actor == "" {
 		actor = state.AdminUser
 	}
@@ -312,10 +498,11 @@ func (s *adminServer) aiChat(w http.ResponseWriter, r *http.Request) {
 		ToolResults: response.ToolResults,
 		Files:       response.Files,
 	})
+	response.CurrentTask = s.persistAgentTaskState(sessionID, actor, payload, response, sessionContext)
 	s.recordAuditEvent(r, state, auditEventInput{
 		Category:   "ai",
 		Action:     "智能体对话",
-		Detail:     fmt.Sprintf("模式 %s，工具调用 %d 次，返回文件 %d 个", response.Run.Mode, len(response.ToolResults), len(response.Files)),
+		Detail:     fmt.Sprintf("模式 %s，工具调用 %d 次，返回文件 %d 个，数据范围 %s", response.Run.Mode, len(response.ToolResults), len(response.Files), scope.Metadata()),
 		StatusCode: statusCode,
 		Duration:   duration,
 	})
@@ -339,6 +526,10 @@ func (s *adminServer) aiFileDownload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "请先登录后台", http.StatusUnauthorized)
 		return
 	}
+	if !adminRoleAccessForUsername(state, s.sessionUsername(r)).CanViewPage("ai") {
+		http.Error(w, "当前管理员未获授权访问 AI 导出文件", http.StatusForbidden)
+		return
+	}
 
 	entry := s.adminEntryForState(state)
 	subpath := adminSubpath(r.URL.Path, entry)
@@ -356,7 +547,11 @@ func (s *adminServer) aiFileDownload(w http.ResponseWriter, r *http.Request) {
 
 	filePath := filepath.Join(s.agentExportDir(), name)
 	w.Header().Set("Content-Type", contentType)
-	w.Header().Set("Content-Disposition", `attachment; filename="`+name+`"`)
+	disposition := "attachment"
+	if strings.HasPrefix(contentType, "image/") {
+		disposition = "inline"
+	}
+	w.Header().Set("Content-Disposition", disposition+`; filename="`+name+`"`)
 	http.ServeFile(w, r, filePath)
 }
 
@@ -365,6 +560,18 @@ func (s *adminServer) runAgentChat(ctx context.Context, state installState, payl
 	scope := newAgentQueryScope(payload.TableAccessMode, payload.AllowedTables)
 	tools := newTableToolProvider(state, s.agentExportDir(), entry+"/ai/files", s.listAuditEvents(50))
 	tools = tools.withQueryScope(scope)
+	tools = tools.withStructuredMemory(payload.StructuredMemory)
+	tools = tools.withLastExport(payload.LastExport)
+	tools = tools.withRequestMessage(payload.Message)
+	if payload.AllowReadOnlyQuery != nil {
+		tools.allowReadOnlyQuery = *payload.AllowReadOnlyQuery
+	}
+	if payload.AllowWebRead != nil {
+		tools.allowWebRead = *payload.AllowWebRead
+	}
+	if payload.AllowImageGenerate != nil {
+		tools.allowImageGenerate = *payload.AllowImageGenerate
+	}
 	tools.runtime = agentRuntimeSnapshot{
 		Sessions:       s.listAgentSessions(50),
 		Runs:           s.listAgentRuns(80),
@@ -377,14 +584,67 @@ func (s *adminServer) runAgentChat(ctx context.Context, state installState, payl
 	tools.backgroundLogs = s.listBackgroundTaskLogs(120)
 	tools.schemaSnapshots = s.listSchemaSnapshots(120)
 	tools.settingChanges = s.listSettingChanges(120)
-	intent := determineAgentIntent(payload.Message)
-	results := planAndRunAgentTools(tools, payload.Message)
+	if shouldReuseLastImagePreview(payload.Message, payload.LastImage, payload.StructuredMemory) {
+		run := buildAgentRun(state, payload.Message, agentIntentImage, nil)
+		run.Goal = "重新展示上一张已生成图片"
+		run.Trace = []agentTraceItem{
+			{Title: "识别图片续接", Detail: "检测到用户希望直接查看上一张图片，不重新生成。", Status: "done"},
+			{Title: "复用已有结果", Detail: "已把上一张生成图片重新附在当前回复中。", Status: "done"},
+		}
+		run.Insights = []agentInsight{
+			{Title: "图片已重新附上", Detail: "这次直接复用了上一张生成图片，没有再次调用图片模型。", Tone: "ready"},
+		}
+		run.Suggestions = []agentSuggestion{
+			{Label: "改成横版", Prompt: "基于刚才那张图，改成更适合横版首页横幅的构图"},
+			{Label: "换个风格", Prompt: "延续刚才那张图的主题，但改成更简洁的插图风格"},
+			{Label: "加说明文字", Prompt: "基于刚才那张图，生成一版适合加标题文案的海报构图"},
+		}
+		run.Metadata["table_authorization"] = scope.Metadata()
+		if tools.allowWebRead {
+			run.Metadata["web_authorization"] = "enabled"
+		} else {
+			run.Metadata["web_authorization"] = "disabled"
+		}
+		if tools.allowImageGenerate {
+			run.Metadata["image_authorization"] = "enabled"
+		} else {
+			run.Metadata["image_authorization"] = "disabled"
+		}
+		applyAgentStructuredMemoryMetadata(run.Metadata, payload.StructuredMemory)
+		return agentChatResponse{
+			OK:        true,
+			Reply:     finalizeAgentReply(payload.Message, "刚才那张图已经重新附上，可以直接预览或下载。"),
+			Run:       run,
+			Files:     []agentFileResult{*payload.LastImage},
+			ModelUsed: false,
+		}
+	}
+	effectiveMessage := strings.TrimSpace(payload.ResolvedMessage)
+	if effectiveMessage == "" {
+		effectiveMessage = payload.Message
+	}
+	intent := determineAgentIntent(effectiveMessage)
+	results := planAndRunAgentTools(tools, effectiveMessage)
 	run := buildAgentRun(state, payload.Message, intent, results)
 	run.Metadata["table_authorization"] = scope.Metadata()
+	if tools.allowWebRead {
+		run.Metadata["web_authorization"] = "enabled"
+	} else {
+		run.Metadata["web_authorization"] = "disabled"
+	}
+	if tools.allowImageGenerate {
+		run.Metadata["image_authorization"] = "enabled"
+	} else {
+		run.Metadata["image_authorization"] = "disabled"
+	}
+	applyAgentStructuredMemoryMetadata(run.Metadata, payload.StructuredMemory)
 	fallbackReply := composeLocalAgentReply(payload.Message, run, results, scope.Mode, scope.Tables)
 	files := collectAgentFiles(results)
 
 	modelPayload := payload
+	modelPayload.CompressedContext = strings.TrimSpace(payload.CompressedContext)
+	modelPayload.HistoricalTasks = strings.TrimSpace(payload.HistoricalTasks)
+	modelPayload.StructuredMemory = payload.StructuredMemory.normalized()
 	modelPayload.TableAccessMode = scope.Mode
 	modelPayload.AllowedTables = append([]string(nil), scope.Tables...)
 	modelReply, modelUsed, err := "", false, error(nil)
@@ -392,6 +652,7 @@ func (s *adminServer) runAgentChat(ctx context.Context, state installState, payl
 		modelReply, modelUsed, err = callConfiguredAgentModel(ctx, state.AI, modelPayload, run, results)
 	}
 	if err == nil && strings.TrimSpace(modelReply) != "" {
+		modelReply = finalizeAgentReply(payload.Message, modelReply)
 		return agentChatResponse{
 			OK:          true,
 			Reply:       modelReply,
@@ -402,7 +663,8 @@ func (s *adminServer) runAgentChat(ctx context.Context, state installState, payl
 		}
 	}
 	if err != nil && !state.AI.IsDisabled() {
-		fallbackReply += "\n\n模型服务暂时没有返回可用结果，已使用后台本地受控工具完成这次查询。"
+		fallbackReply += "\n\n模型暂时不可用，已改用本地工具完成。"
+		fallbackReply = finalizeAgentReply(payload.Message, fallbackReply)
 		return agentChatResponse{
 			OK:          true,
 			Reply:       fallbackReply,
@@ -414,6 +676,7 @@ func (s *adminServer) runAgentChat(ctx context.Context, state installState, payl
 		}
 	}
 
+	fallbackReply = finalizeAgentReply(payload.Message, fallbackReply)
 	return agentChatResponse{
 		OK:          true,
 		Reply:       fallbackReply,
@@ -467,8 +730,1162 @@ func normalizeAgentSessionID(value string) string {
 	return value
 }
 
+func agentMessageWantsDetailedReply(message string) bool {
+	lower := strings.ToLower(strings.TrimSpace(message))
+	return containsAny(lower,
+		"详细", "展开", "具体", "完整", "一步一步", "分步骤", "详细说", "详细讲", "详细解释",
+		"why", "in detail", "step by step", "full explanation")
+}
+
+func splitAgentReplySentences(reply string) []string {
+	reply = strings.TrimSpace(reply)
+	if reply == "" {
+		return nil
+	}
+	parts := make([]string, 0, 4)
+	var current strings.Builder
+	flush := func(force bool) {
+		text := strings.TrimSpace(current.String())
+		if text == "" && !force {
+			current.Reset()
+			return
+		}
+		if text != "" {
+			parts = append(parts, text)
+		}
+		current.Reset()
+	}
+	for _, r := range reply {
+		current.WriteRune(r)
+		switch r {
+		case '。', '！', '？', '!', '?', '\n':
+			flush(false)
+		}
+	}
+	flush(false)
+	return parts
+}
+
+func finalizeAgentReply(message string, reply string) string {
+	reply = strings.TrimSpace(reply)
+	if reply == "" {
+		return ""
+	}
+	reply = regexp.MustCompile(`\n{3,}`).ReplaceAllString(reply, "\n\n")
+	if agentMessageWantsDetailedReply(message) || strings.Contains(reply, "```") {
+		return reply
+	}
+	sentences := splitAgentReplySentences(reply)
+	if utf8.RuneCountInString(reply) <= 160 && strings.Count(reply, "\n") <= 2 && len(sentences) <= 3 {
+		return reply
+	}
+	if len(sentences) == 0 {
+		return reply
+	}
+	out := make([]string, 0, 3)
+	total := 0
+	for _, sentence := range sentences {
+		sentence = strings.TrimSpace(sentence)
+		if sentence == "" {
+			continue
+		}
+		length := utf8.RuneCountInString(sentence)
+		if len(out) >= 3 {
+			break
+		}
+		if len(out) > 0 && total+length > 160 {
+			break
+		}
+		out = append(out, sentence)
+		total += length
+	}
+	if len(out) == 0 {
+		return reply
+	}
+	return strings.Join(out, " ")
+}
+
 func newAgentSessionID() string {
 	return "session-" + strconv.FormatInt(time.Now().UnixNano(), 36)
+}
+
+func (s *adminServer) agentSessionContext(sessionID string, actor string) agentSessionContext {
+	sessionID = normalizeAgentSessionID(sessionID)
+	actor = strings.TrimSpace(actor)
+	if sessionID == "" {
+		return agentSessionContext{}
+	}
+	tasks := s.listAgentTasks(60)
+	activeTask := latestAgentTaskForSession(tasks, sessionID, actor)
+	if activeTask == nil {
+		activeTask = latestOpenAgentTaskForActor(tasks, actor)
+	}
+	historicalTasks := summarizeHistoricalAgentTasks(tasks, sessionID, actor)
+	runs := s.listAgentRuns(160)
+	if len(runs) == 0 {
+		return buildAgentTaskSeedContext(historicalTasks, activeTask)
+	}
+	toolsByRun := map[string][]agentToolResultRecord{}
+	for _, record := range s.listAgentToolResults(320) {
+		if strings.TrimSpace(record.RunID) == "" {
+			continue
+		}
+		toolsByRun[record.RunID] = append(toolsByRun[record.RunID], record)
+	}
+
+	matchedDesc := make([]agentRunRecord, 0, 40)
+	for _, run := range runs {
+		if run.SessionID != sessionID {
+			continue
+		}
+		if actor != "" && run.Actor != actor {
+			continue
+		}
+		matchedDesc = append(matchedDesc, run)
+		if len(matchedDesc) >= 40 {
+			break
+		}
+	}
+	if len(matchedDesc) == 0 {
+		return buildAgentTaskSeedContext(historicalTasks, activeTask)
+	}
+
+	recentRunsDesc := matchedDesc
+	if len(recentRunsDesc) > agentSessionRawRunLimit {
+		recentRunsDesc = recentRunsDesc[:agentSessionRawRunLimit]
+	}
+	ctx := agentSessionContext{
+		History: make([]agentChatMessage, 0, len(recentRunsDesc)*2),
+	}
+	for i := len(recentRunsDesc) - 1; i >= 0; i-- {
+		run := recentRunsDesc[i]
+		if message := strings.TrimSpace(run.Message); message != "" {
+			ctx.History = append(ctx.History, agentChatMessage{Role: "user", Content: message})
+		}
+		reply := agentPersistedAssistantHistory(run, toolsByRun[run.ID])
+		if reply != "" {
+			ctx.History = append(ctx.History, agentChatMessage{Role: "assistant", Content: reply})
+		}
+	}
+	ctx.Memory = buildAgentStructuredMemory(matchedDesc, toolsByRun)
+	if len(matchedDesc) > agentSessionRawRunLimit {
+		ctx.CompressedContext = buildCompressedAgentSessionContext(matchedDesc[agentSessionRawRunLimit:], toolsByRun)
+	}
+	for _, run := range matchedDesc {
+		lastExport := latestSessionExportContinuation(run, toolsByRun[run.ID])
+		if ctx.LastExport == nil && lastExport != nil {
+			ctx.LastExport = lastExport
+		}
+		lastImage := latestSessionImageContinuation(toolsByRun[run.ID])
+		if ctx.LastImage == nil && lastImage != nil {
+			ctx.LastImage = lastImage
+		}
+		if ctx.LastExport != nil && ctx.LastImage != nil {
+			break
+		}
+	}
+	ctx.ActiveTask = activeTask
+	ctx.HistoricalTasks = historicalTasks
+	ctx.History = tailAgentHistory(ctx.History, 8)
+	return ctx
+}
+
+func buildAgentTaskSeedContext(historicalTasks string, activeTask *agentTaskRecord) agentSessionContext {
+	ctx := agentSessionContext{
+		HistoricalTasks: historicalTasks,
+		ActiveTask:      activeTask,
+	}
+	if activeTask == nil {
+		return ctx
+	}
+	ctx.Memory = agentStructuredMemory{
+		TaskAnchorMessage: activeTask.Title,
+		CurrentGoal:       activeTask.Goal,
+		LastIntent:        activeTask.Intent,
+		PrimaryTable:      activeTask.PrimaryTable,
+		FocusTables:       append([]string(nil), activeTask.FocusTables...),
+		ActiveFilters:     copyAgentFilters(activeTask.Filters),
+		LastTool:          activeTask.LastTool,
+		LastFileName:      "",
+		ExportFormat:      activeTask.ExportFormat,
+		LastUserMessage:   activeTask.LastUserMessage,
+		LastReply:         activeTask.LastReply,
+	}.normalized()
+	return ctx
+}
+
+func (s *adminServer) persistAgentTaskState(sessionID string, actor string, payload agentChatRequest, response agentChatResponse, sessionContext agentSessionContext) *agentTaskSnapshot {
+	actor = strings.TrimSpace(actor)
+	if actor == "" {
+		return nil
+	}
+	now := time.Now().UTC()
+	activeTask := sessionContext.ActiveTask
+	continueTask := shouldContinueAgentTask(payload.Message, payload.StructuredMemory, activeTask)
+	if activeTask != nil && !continueTask && activeTask.Status != agentTaskStatusDone {
+		closed := *activeTask
+		closed.Status = agentTaskStatusDone
+		closed.CompletedAt = now
+		closed.UpdatedAt = now
+		_ = s.store.UpsertAgentTask(closed)
+		activeTask = nil
+	}
+
+	task := buildAgentTaskRecord(activeTask, sessionID, actor, payload, response, now)
+	steps := buildAgentTaskSteps(task.ID, response, now)
+	if err := s.store.UpsertAgentTask(task); err != nil {
+		return nil
+	}
+	if err := s.store.ReplaceAgentTaskSteps(task.ID, steps); err != nil {
+		return nil
+	}
+	return buildAgentTaskSnapshot(task, steps)
+}
+
+func shouldContinueAgentTask(message string, memory agentStructuredMemory, activeTask *agentTaskRecord) bool {
+	if activeTask == nil {
+		return false
+	}
+	if shouldReuseStructuredTaskMemory(message, memory) {
+		return true
+	}
+	if len(inferAgentExplicitTablesFromMessage(message)) == 0 && strings.TrimSpace(message) != "" && len([]rune(strings.TrimSpace(message))) <= 24 {
+		return true
+	}
+	return false
+}
+
+func buildAgentTaskRecord(activeTask *agentTaskRecord, sessionID string, actor string, payload agentChatRequest, response agentChatResponse, now time.Time) agentTaskRecord {
+	memory := payload.StructuredMemory.normalized()
+	task := agentTaskRecord{
+		ID:              newAgentTaskID(),
+		SessionID:       sessionID,
+		Actor:           actor,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+		Status:          deriveAgentTaskStatus(response),
+		Intent:          response.Run.Mode,
+		Title:           truncateAuditText(firstNonEmpty(response.Run.Goal, payload.Message, memory.CurrentGoal), 96),
+		Goal:            strings.TrimSpace(firstNonEmpty(memory.CurrentGoal, response.Run.Goal, payload.Message)),
+		PrimaryTable:    deriveAgentPrimaryTable(memory, response.ToolResults),
+		FocusTables:     deriveAgentFocusTables(memory, response.ToolResults),
+		Filters:         copyAgentFilters(memory.ActiveFilters),
+		ExportFormat:    deriveAgentExportFormat(memory, response),
+		LastTool:        deriveAgentLastTool(response.ToolResults),
+		LastRunID:       response.Run.ID,
+		LastUserMessage: strings.TrimSpace(payload.Message),
+		LastReply:       strings.TrimSpace(response.Reply),
+	}
+	if activeTask != nil {
+		task.ID = activeTask.ID
+		task.CreatedAt = activeTask.CreatedAt
+		task.FocusTables = mergeAgentFocusTables(task.FocusTables, activeTask.FocusTables)
+		task.Filters = mergeAgentFilters(activeTask.Filters, task.Filters)
+		if task.Title == "" {
+			task.Title = activeTask.Title
+		}
+		if task.Goal == "" {
+			task.Goal = activeTask.Goal
+		}
+		if task.PrimaryTable == "" {
+			task.PrimaryTable = activeTask.PrimaryTable
+		}
+		if task.ExportFormat == "" {
+			task.ExportFormat = activeTask.ExportFormat
+		}
+		if task.LastTool == "" {
+			task.LastTool = activeTask.LastTool
+		}
+	}
+	if task.Status == agentTaskStatusDone || task.Status == agentTaskStatusFailed {
+		task.CompletedAt = now
+	}
+	return task.normalized()
+}
+
+func buildAgentTaskSteps(taskID string, response agentChatResponse, now time.Time) []agentTaskStepRecord {
+	steps := make([]agentTaskStepRecord, 0, len(response.Run.Plan)+1)
+	for index, step := range response.Run.Plan {
+		steps = append(steps, agentTaskStepRecord{
+			TaskID:    taskID,
+			RunID:     response.Run.ID,
+			StepIndex: index,
+			Title:     step.Title,
+			Detail:    step.Detail,
+			Status:    normalizeAgentTaskStepStatus(step.Status),
+			CreatedAt: now,
+			UpdatedAt: now,
+		})
+	}
+	if deriveAgentTaskStatus(response) == agentTaskStatusWaiting {
+		steps = append(steps, agentTaskStepRecord{
+			TaskID:    taskID,
+			RunID:     response.Run.ID,
+			StepIndex: len(steps),
+			Title:     "等待下一步",
+			Detail:    "本轮任务已完成，等待继续追问、补充条件或下一个受控动作。",
+			Status:    agentTaskStatusWaiting,
+			CreatedAt: now,
+			UpdatedAt: now,
+		})
+	}
+	return steps
+}
+
+func buildAgentTaskSnapshot(task agentTaskRecord, steps []agentTaskStepRecord) *agentTaskSnapshot {
+	snapshot := &agentTaskSnapshot{
+		ID:              task.ID,
+		Title:           task.Title,
+		Goal:            task.Goal,
+		Status:          task.Status,
+		StatusText:      agentTaskStatusText(task.Status),
+		Intent:          task.Intent,
+		PrimaryTable:    task.PrimaryTable,
+		ExportFormat:    task.ExportFormat,
+		LastUserMessage: task.LastUserMessage,
+		UpdatedAt:       formatAdminTime(task.UpdatedAt),
+		Steps:           make([]agentTaskStepSnapshot, 0, len(steps)),
+	}
+	for _, step := range steps {
+		snapshot.Steps = append(snapshot.Steps, agentTaskStepSnapshot{
+			Title:      step.Title,
+			Detail:     step.Detail,
+			Status:     step.Status,
+			StatusText: agentTaskStatusText(step.Status),
+			Tool:       step.Tool,
+		})
+	}
+	return snapshot
+}
+
+func latestAgentTaskForSession(tasks []agentTaskRecord, sessionID string, actor string) *agentTaskRecord {
+	sessionID = normalizeAgentSessionID(sessionID)
+	actor = strings.TrimSpace(actor)
+	for _, task := range tasks {
+		if task.SessionID != sessionID {
+			continue
+		}
+		if actor != "" && task.Actor != actor {
+			continue
+		}
+		candidate := task.normalized()
+		return &candidate
+	}
+	return nil
+}
+
+func latestOpenAgentTaskForActor(tasks []agentTaskRecord, actor string) *agentTaskRecord {
+	actor = strings.TrimSpace(actor)
+	if actor == "" {
+		return nil
+	}
+	for _, task := range tasks {
+		task = task.normalized()
+		if task.Actor != actor {
+			continue
+		}
+		if task.Status == agentTaskStatusDone || task.Status == agentTaskStatusFailed {
+			continue
+		}
+		candidate := task
+		return &candidate
+	}
+	return nil
+}
+
+func summarizeHistoricalAgentTasks(tasks []agentTaskRecord, sessionID string, actor string) string {
+	actor = strings.TrimSpace(actor)
+	if actor == "" {
+		return ""
+	}
+	lines := make([]string, 0, 5)
+	for _, task := range tasks {
+		if task.Actor != actor || task.SessionID == sessionID {
+			continue
+		}
+		task = task.normalized()
+		lineParts := []string{}
+		if task.Title != "" {
+			lineParts = append(lineParts, "任务="+task.Title)
+		}
+		if task.PrimaryTable != "" {
+			lineParts = append(lineParts, "主表="+task.PrimaryTable)
+		}
+		if task.ExportFormat != "" {
+			lineParts = append(lineParts, "格式="+task.ExportFormat)
+		}
+		if summary := agentFilterSummary(task.Filters); summary != "" {
+			lineParts = append(lineParts, "筛选="+summary)
+		}
+		if len(lineParts) == 0 {
+			continue
+		}
+		lines = append(lines, strings.Join(lineParts, "；"))
+		if len(lines) >= 4 {
+			break
+		}
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	return "当前管理员最近完成或处理中任务摘要：" + strings.Join(lines, "\n")
+}
+
+func newAgentTaskID() string {
+	return "task-" + strconv.FormatInt(time.Now().UnixNano(), 36)
+}
+
+func buildAgentStructuredMemory(runsDesc []agentRunRecord, toolsByRun map[string][]agentToolResultRecord) agentStructuredMemory {
+	if len(runsDesc) == 0 {
+		return agentStructuredMemory{}
+	}
+
+	latest := runsDesc[0]
+	memory := agentStructuredMemory{
+		TaskAnchorMessage: strings.TrimSpace(firstNonEmpty(latest.Message, latest.Goal)),
+		CurrentGoal:       strings.TrimSpace(firstNonEmpty(latest.Goal, latest.Message)),
+		LastIntent:        strings.TrimSpace(latest.Mode),
+		LastUserMessage:   strings.TrimSpace(latest.Message),
+		LastReply:         truncateAuditText(strings.TrimSpace(latest.Reply), 220),
+	}
+
+	tableSeen := map[string]struct{}{}
+	fileSeen := map[string]struct{}{}
+	opSeen := map[string]struct{}{}
+	for i, run := range runsDesc {
+		if i >= 10 {
+			break
+		}
+		inferredTables := inferAgentExplicitTablesFromMessage(run.Message)
+		for _, table := range inferredTables {
+			table = normalizeAgentTableName(table)
+			if table == "" {
+				continue
+			}
+			if memory.PrimaryTable == "" {
+				memory.PrimaryTable = table
+			}
+			if _, ok := tableSeen[table]; !ok {
+				tableSeen[table] = struct{}{}
+				memory.FocusTables = append(memory.FocusTables, table)
+			}
+		}
+		toolResults := toolsByRun[run.ID]
+		for _, result := range toolResults {
+			if memory.LastTool == "" && strings.TrimSpace(result.Name) != "" {
+				memory.LastTool = strings.TrimSpace(result.Name)
+			}
+			if memory.LastSQL == "" && strings.TrimSpace(result.SQL) != "" {
+				memory.LastSQL = strings.TrimSpace(result.SQL)
+			}
+			if table := normalizeAgentTableName(result.Table); table != "" {
+				if memory.PrimaryTable == "" {
+					memory.PrimaryTable = table
+				}
+				if _, ok := tableSeen[table]; !ok {
+					tableSeen[table] = struct{}{}
+					memory.FocusTables = append(memory.FocusTables, table)
+				}
+			}
+			if op := strings.TrimSpace(result.Name); op != "" {
+				if _, ok := opSeen[op]; !ok {
+					opSeen[op] = struct{}{}
+					memory.RecentOperations = append(memory.RecentOperations, op)
+				}
+			}
+			if fileName := strings.TrimSpace(result.FileName); fileName != "" {
+				if memory.LastFileName == "" {
+					memory.LastFileName = fileName
+				}
+				if memory.ExportFormat == "" {
+					memory.ExportFormat = agentFileExtensionLabel(fileName)
+				}
+				if _, ok := fileSeen[fileName]; !ok {
+					fileSeen[fileName] = struct{}{}
+					memory.RecentFiles = append(memory.RecentFiles, fileName)
+				}
+			}
+		}
+	}
+
+	if memory.PrimaryTable != "" {
+		for _, run := range runsDesc {
+			related := false
+			for _, table := range inferAgentExplicitTablesFromMessage(run.Message) {
+				if normalizeAgentTableName(table) == memory.PrimaryTable {
+					related = true
+					break
+				}
+			}
+			if !related {
+				for _, result := range toolsByRun[run.ID] {
+					if normalizeAgentTableName(result.Table) == memory.PrimaryTable {
+						related = true
+						break
+					}
+				}
+			}
+			if !related {
+				continue
+			}
+			filters := inferAgentFilters(memory.PrimaryTable, run.Message)
+			for column, value := range filters {
+				if strings.TrimSpace(value) == "" {
+					continue
+				}
+				if memory.ActiveFilters == nil {
+					memory.ActiveFilters = map[string]string{}
+				}
+				if _, ok := memory.ActiveFilters[column]; !ok {
+					memory.ActiveFilters[column] = value
+				}
+			}
+		}
+	}
+
+	return memory.normalized()
+}
+
+func preferredAgentHistory(sessionHistory []agentChatMessage, requestHistory []agentChatMessage) []agentChatMessage {
+	if len(sessionHistory) > 0 {
+		return tailAgentHistory(sessionHistory, 8)
+	}
+	return tailAgentHistory(requestHistory, 8)
+}
+
+func (m agentStructuredMemory) normalized() agentStructuredMemory {
+	m.TaskAnchorMessage = strings.TrimSpace(m.TaskAnchorMessage)
+	m.CurrentGoal = strings.TrimSpace(m.CurrentGoal)
+	m.LastIntent = strings.TrimSpace(m.LastIntent)
+	m.PrimaryTable = normalizeAgentTableName(m.PrimaryTable)
+	m.LastTool = strings.TrimSpace(m.LastTool)
+	m.LastSQL = strings.TrimSpace(m.LastSQL)
+	m.LastFileName = strings.TrimSpace(m.LastFileName)
+	m.ExportFormat = strings.ToUpper(strings.TrimSpace(m.ExportFormat))
+	m.LastUserMessage = strings.TrimSpace(m.LastUserMessage)
+	m.LastReply = strings.TrimSpace(m.LastReply)
+	m.FocusTables = normalizeAgentAllowedTables(m.FocusTables)
+	m.RecentFiles = normalizeAgentRecentStrings(m.RecentFiles, 4)
+	m.RecentOperations = normalizeAgentRecentStrings(m.RecentOperations, 6)
+	if len(m.ActiveFilters) > 0 {
+		normalizedFilters := make(map[string]string, len(m.ActiveFilters))
+		for key, value := range m.ActiveFilters {
+			key = normalizeAgentTableName(key)
+			value = strings.TrimSpace(value)
+			if key == "" || value == "" {
+				continue
+			}
+			normalizedFilters[key] = value
+		}
+		if len(normalizedFilters) > 0 {
+			m.ActiveFilters = normalizedFilters
+		} else {
+			m.ActiveFilters = nil
+		}
+	}
+	return m
+}
+
+func (m agentStructuredMemory) hasContext() bool {
+	return m.TaskAnchorMessage != "" || m.CurrentGoal != "" || m.PrimaryTable != "" || len(m.FocusTables) > 0
+}
+
+func (m agentStructuredMemory) filterSummary() string {
+	if len(m.ActiveFilters) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(m.ActiveFilters))
+	for key := range m.ActiveFilters {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, key := range keys {
+		parts = append(parts, key+"="+m.ActiveFilters[key])
+	}
+	return strings.Join(parts, "，")
+}
+
+func (m agentStructuredMemory) promptSummary() string {
+	m = m.normalized()
+	if !m.hasContext() {
+		return ""
+	}
+	parts := make([]string, 0, 8)
+	if m.CurrentGoal != "" {
+		parts = append(parts, "当前任务="+m.CurrentGoal)
+	}
+	if m.TaskAnchorMessage != "" && m.TaskAnchorMessage != m.CurrentGoal {
+		parts = append(parts, "最近锚点消息="+m.TaskAnchorMessage)
+	}
+	if m.LastIntent != "" {
+		parts = append(parts, "最近模式="+m.LastIntent)
+	}
+	if m.PrimaryTable != "" {
+		parts = append(parts, "主表="+m.PrimaryTable)
+	}
+	if len(m.FocusTables) > 0 {
+		parts = append(parts, "相关表="+strings.Join(m.FocusTables, ","))
+	}
+	if summary := m.filterSummary(); summary != "" {
+		parts = append(parts, "当前筛选="+summary)
+	}
+	if m.ExportFormat != "" {
+		parts = append(parts, "最近导出格式="+m.ExportFormat)
+	}
+	if m.LastFileName != "" {
+		parts = append(parts, "最近文件="+m.LastFileName)
+	}
+	if m.LastTool != "" {
+		parts = append(parts, "最近工具="+m.LastTool)
+	}
+	return strings.Join(parts, "；")
+}
+
+func normalizeAgentRecentStrings(values []string, limit int) []string {
+	out := make([]string, 0, len(values))
+	seen := map[string]struct{}{}
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+		if limit > 0 && len(out) >= limit {
+			break
+		}
+	}
+	return out
+}
+
+func agentFileExtensionLabel(name string) string {
+	ext := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(filepath.Ext(name))), ".")
+	if ext == "" {
+		return ""
+	}
+	return strings.ToUpper(ext)
+}
+
+func applyAgentStructuredMemoryMetadata(metadata map[string]string, memory agentStructuredMemory) {
+	memory = memory.normalized()
+	if metadata == nil || !memory.hasContext() {
+		return
+	}
+	if memory.CurrentGoal != "" {
+		metadata["memory_goal"] = truncateAuditText(memory.CurrentGoal, 80)
+	}
+	if memory.PrimaryTable != "" {
+		metadata["memory_primary_table"] = memory.PrimaryTable
+	}
+	if len(memory.FocusTables) > 0 {
+		metadata["memory_tables"] = strings.Join(memory.FocusTables, ",")
+	}
+	if summary := memory.filterSummary(); summary != "" {
+		metadata["memory_filters"] = truncateAuditText(summary, 120)
+	}
+	if memory.ExportFormat != "" {
+		metadata["memory_export_format"] = memory.ExportFormat
+	}
+}
+
+func (r agentTaskRecord) normalized() agentTaskRecord {
+	r.ID = strings.TrimSpace(r.ID)
+	r.SessionID = normalizeAgentSessionID(r.SessionID)
+	r.Actor = strings.TrimSpace(r.Actor)
+	r.Title = strings.TrimSpace(r.Title)
+	r.Goal = strings.TrimSpace(r.Goal)
+	r.Status = normalizeAgentTaskStepStatus(r.Status)
+	r.Intent = strings.TrimSpace(r.Intent)
+	r.PrimaryTable = normalizeAgentTableName(r.PrimaryTable)
+	r.FocusTables = normalizeAgentAllowedTables(r.FocusTables)
+	r.Filters = copyAgentFilters(r.Filters)
+	r.ExportFormat = strings.ToUpper(strings.TrimSpace(r.ExportFormat))
+	r.LastTool = strings.TrimSpace(r.LastTool)
+	r.LastRunID = strings.TrimSpace(r.LastRunID)
+	r.LastUserMessage = strings.TrimSpace(r.LastUserMessage)
+	r.LastReply = strings.TrimSpace(r.LastReply)
+	return r
+}
+
+func normalizeAgentTaskStepStatus(status string) string {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "done", "success", "ok", "completed":
+		return agentTaskStatusDone
+	case "failed", "error", "blocked":
+		return agentTaskStatusFailed
+	case "running", "in_progress", "progress":
+		return agentTaskStatusRunning
+	case "waiting", "pending", "hold":
+		return agentTaskStatusWaiting
+	default:
+		return agentTaskStatusWaiting
+	}
+}
+
+func agentTaskStatusText(status string) string {
+	switch normalizeAgentTaskStepStatus(status) {
+	case agentTaskStatusDone:
+		return "已完成"
+	case agentTaskStatusFailed:
+		return "失败"
+	case agentTaskStatusRunning:
+		return "执行中"
+	default:
+		return "等待继续"
+	}
+}
+
+func deriveAgentTaskStatus(response agentChatResponse) string {
+	if !response.OK {
+		return agentTaskStatusFailed
+	}
+	for _, result := range response.ToolResults {
+		if !result.OK {
+			return agentTaskStatusFailed
+		}
+	}
+	return agentTaskStatusWaiting
+}
+
+func deriveAgentPrimaryTable(memory agentStructuredMemory, results []agentToolResult) string {
+	if memory.PrimaryTable != "" {
+		return normalizeAgentTableName(memory.PrimaryTable)
+	}
+	for _, result := range results {
+		if table := normalizeAgentTableName(result.Table); table != "" {
+			if strings.Contains(table, ",") {
+				parts := normalizeAgentAllowedTables([]string{table})
+				if len(parts) > 0 {
+					return parts[0]
+				}
+			}
+			return table
+		}
+	}
+	return ""
+}
+
+func deriveAgentFocusTables(memory agentStructuredMemory, results []agentToolResult) []string {
+	focus := append([]string(nil), memory.FocusTables...)
+	for _, result := range results {
+		if strings.TrimSpace(result.Table) == "" {
+			continue
+		}
+		focus = append(focus, normalizeAgentAllowedTables([]string{result.Table})...)
+	}
+	return normalizeAgentAllowedTables(focus)
+}
+
+func deriveAgentExportFormat(memory agentStructuredMemory, response agentChatResponse) string {
+	if len(response.Files) > 0 {
+		if label := agentFileExtensionLabel(response.Files[0].Name); label != "" {
+			return label
+		}
+	}
+	if memory.ExportFormat != "" {
+		return memory.ExportFormat
+	}
+	for _, result := range response.ToolResults {
+		if result.File != nil {
+			if label := agentFileExtensionLabel(result.File.Name); label != "" {
+				return label
+			}
+		}
+	}
+	return ""
+}
+
+func deriveAgentLastTool(results []agentToolResult) string {
+	for i := len(results) - 1; i >= 0; i-- {
+		if name := strings.TrimSpace(results[i].Name); name != "" {
+			return name
+		}
+	}
+	return ""
+}
+
+func copyAgentFilters(filters map[string]string) map[string]string {
+	if len(filters) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(filters))
+	for key, value := range filters {
+		key = normalizeAgentTableName(key)
+		value = strings.TrimSpace(value)
+		if key == "" || value == "" {
+			continue
+		}
+		out[key] = value
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func mergeAgentFilters(base map[string]string, newer map[string]string) map[string]string {
+	out := copyAgentFilters(base)
+	if out == nil {
+		out = map[string]string{}
+	}
+	for key, value := range copyAgentFilters(newer) {
+		out[key] = value
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func mergeAgentFocusTables(current []string, previous []string) []string {
+	merged := append([]string(nil), current...)
+	merged = append(merged, previous...)
+	return normalizeAgentAllowedTables(merged)
+}
+
+func agentFilterSummary(filters map[string]string) string {
+	if len(filters) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(filters))
+	for key := range filters {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, key := range keys {
+		parts = append(parts, key+"="+filters[key])
+	}
+	return strings.Join(parts, "，")
+}
+
+func buildCompressedAgentSessionContext(olderRunsDesc []agentRunRecord, toolsByRun map[string][]agentToolResultRecord) string {
+	if len(olderRunsDesc) == 0 {
+		return ""
+	}
+
+	lines := []string{
+		fmt.Sprintf("当前会话较早历史已压缩，共 %d 轮，以下保留关键事实与结果：", len(olderRunsDesc)),
+	}
+	for i := len(olderRunsDesc) - 1; i >= 0; i-- {
+		if len(lines)-1 >= agentSessionSummaryRunLimit {
+			break
+		}
+		run := olderRunsDesc[i]
+		line := summarizeCompressedAgentRun(run, toolsByRun[run.ID])
+		if line == "" {
+			continue
+		}
+		candidate := strings.Join(append(lines, line), "\n")
+		if len([]rune(candidate)) > agentSessionSummaryCharLimit {
+			break
+		}
+		lines = append(lines, line)
+	}
+	if len(lines) == 1 {
+		return ""
+	}
+	return strings.Join(lines, "\n")
+}
+
+func agentPersistedAssistantHistory(run agentRunRecord, toolResults []agentToolResultRecord) string {
+	parts := make([]string, 0, 2)
+	if reply := strings.TrimSpace(run.Reply); reply != "" {
+		parts = append(parts, reply)
+	}
+	summary := summarizeAgentToolResultsForHistory(toolResults)
+	if summary != "" {
+		parts = append(parts, summary)
+	}
+	return strings.TrimSpace(strings.Join(parts, "\n"))
+}
+
+func summarizeCompressedAgentRun(run agentRunRecord, toolResults []agentToolResultRecord) string {
+	message := truncateAuditText(strings.TrimSpace(run.Message), 48)
+	if message == "" {
+		message = truncateAuditText(strings.TrimSpace(run.Goal), 48)
+	}
+	if message == "" {
+		message = "未命名任务"
+	}
+	parts := []string{"用户：" + message}
+	if goal := truncateAuditText(strings.TrimSpace(run.Goal), 42); goal != "" && goal != message {
+		parts = append(parts, "目标："+goal)
+	}
+	if run.Mode != "" {
+		parts = append(parts, "模式："+run.Mode)
+	}
+	if toolSummary := summarizeAgentToolResultsCompact(toolResults); toolSummary != "" {
+		parts = append(parts, toolSummary)
+	}
+	if reply := truncateAuditText(strings.TrimSpace(run.Reply), 72); reply != "" {
+		parts = append(parts, "回复："+reply)
+	}
+	return strings.Join(parts, "；")
+}
+
+func summarizeAgentToolResultsForHistory(results []agentToolResultRecord) string {
+	parts := make([]string, 0, len(results))
+	for _, result := range results {
+		if !result.OK {
+			if detail := strings.TrimSpace(result.Error); detail != "" {
+				parts = append(parts, "工具结果："+detail)
+			}
+			continue
+		}
+		if result.Name != "export_table" {
+			continue
+		}
+		detailParts := make([]string, 0, 4)
+		if table := strings.TrimSpace(result.Table); table != "" {
+			detailParts = append(detailParts, "表 "+table)
+		}
+		if fileName := strings.TrimSpace(result.FileName); fileName != "" {
+			detailParts = append(detailParts, "文件 "+fileName)
+		}
+		if summary := strings.TrimSpace(result.Message); summary != "" {
+			detailParts = append(detailParts, summary)
+		}
+		if len(detailParts) > 0 {
+			parts = append(parts, "工具结果：导出成功，"+strings.Join(detailParts, "，")+"。")
+		}
+	}
+	return strings.TrimSpace(strings.Join(parts, "\n"))
+}
+
+func summarizeAgentToolResultsCompact(results []agentToolResultRecord) string {
+	if len(results) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(results))
+	for i, result := range results {
+		if i >= 2 {
+			break
+		}
+		if !result.OK {
+			detail := truncateAuditText(strings.TrimSpace(result.Error), 60)
+			if detail != "" {
+				parts = append(parts, "拦截："+detail)
+			}
+			continue
+		}
+		switch result.Name {
+		case "export_table":
+			detail := "导出"
+			if table := strings.TrimSpace(result.Table); table != "" {
+				detail += " " + table
+			}
+			if fileName := strings.TrimSpace(result.FileName); fileName != "" {
+				detail += " -> " + fileName
+			}
+			parts = append(parts, detail)
+		case "generate_image":
+			detail := "生成图片"
+			if fileName := strings.TrimSpace(result.FileName); fileName != "" {
+				detail += " -> " + fileName
+			}
+			parts = append(parts, detail)
+		case "query_readonly":
+			detail := "只读查询"
+			if table := strings.TrimSpace(result.Table); table != "" {
+				detail += " " + table
+			}
+			if result.RowCount > 0 {
+				detail += fmt.Sprintf(" 返回 %d 行", result.RowCount)
+			}
+			parts = append(parts, detail)
+		case "count_table":
+			detail := "统计"
+			if table := strings.TrimSpace(result.Table); table != "" {
+				detail += " " + table
+			}
+			if msg := truncateAuditText(strings.TrimSpace(result.Message), 36); msg != "" {
+				detail += " " + msg
+			}
+			parts = append(parts, detail)
+		case "preview_table":
+			detail := "预览"
+			if table := strings.TrimSpace(result.Table); table != "" {
+				detail += " " + table
+			}
+			parts = append(parts, detail)
+		case "describe_table":
+			detail := "读取字段结构"
+			if table := strings.TrimSpace(result.Table); table != "" {
+				detail += " " + table
+			}
+			parts = append(parts, detail)
+		case "list_tables":
+			parts = append(parts, "列出可读数据表")
+		case "access_scope":
+			parts = append(parts, "读取权限快照")
+		default:
+			if msg := truncateAuditText(strings.TrimSpace(result.Message), 48); msg != "" {
+				parts = append(parts, msg)
+			}
+		}
+	}
+	if len(results) > 2 {
+		parts = append(parts, fmt.Sprintf("另有 %d 个工具结果", len(results)-2))
+	}
+	return strings.Join(parts, "；")
+}
+
+func latestSessionExportContinuation(run agentRunRecord, toolResults []agentToolResultRecord) *agentExportContinuation {
+	if strings.TrimSpace(run.Message) == "" {
+		return nil
+	}
+	for _, result := range toolResults {
+		if result.Name != "export_table" || !result.OK {
+			continue
+		}
+		return &agentExportContinuation{
+			UserMessage: strings.TrimSpace(run.Message),
+			Reply:       strings.TrimSpace(run.Reply),
+			Table:       strings.TrimSpace(result.Table),
+			FileName:    strings.TrimSpace(result.FileName),
+		}
+	}
+	return nil
+}
+
+func latestSessionImageContinuation(toolResults []agentToolResultRecord) *agentFileResult {
+	for _, result := range toolResults {
+		if result.Name != "generate_image" || !result.OK {
+			continue
+		}
+		fileName := strings.TrimSpace(result.FileName)
+		fileURL := strings.TrimSpace(result.FileURL)
+		if fileName == "" || fileURL == "" {
+			continue
+		}
+		mimeType, ok := agentExportContentType(fileName)
+		if !ok || !strings.HasPrefix(mimeType, "image/") {
+			continue
+		}
+		return &agentFileResult{
+			Name:        fileName,
+			URL:         fileURL,
+			MIME:        mimeType,
+			Description: "上一张生成图片",
+		}
+	}
+	return nil
+}
+
+func resolveAgentContinuationMessage(message string, ctx agentSessionContext) string {
+	message = strings.TrimSpace(message)
+	if message == "" {
+		return message
+	}
+	if _, ok := extractAgentSQL(message); ok {
+		return message
+	}
+	if len(inferAgentExplicitTablesFromMessage(message)) > 0 {
+		return message
+	}
+	ctx.Memory = ctx.Memory.normalized()
+	if shouldReuseStructuredTaskMemory(message, ctx.Memory) {
+		return synthesizeStructuredContinuationMessage(message, ctx.Memory, ctx.LastExport)
+	}
+	if ctx.LastExport == nil || !shouldReuseLastExportContext(message) {
+		return message
+	}
+	base := strings.TrimSpace(ctx.LastExport.UserMessage)
+	if base == "" {
+		return message
+	}
+	return strings.TrimSpace(base + "；保持和上一份导出相同的数据范围与筛选条件，另外" + message)
+}
+
+func shouldReuseLastExportContext(message string) bool {
+	lower := strings.ToLower(strings.TrimSpace(message))
+	if lower == "" {
+		return false
+	}
+	if containsAny(lower, "xlsx", "excel", "xls", "csv", "json", "格式", "转为", "改成", "换成", "另存为", "重新导出", "重导", "再导一份", "重新生成", "这个文件", "刚才那个", "刚才这份", "上一份", "上一个导出", "保持同样", "只保留", "前10", "前 10", "limit ") {
+		return true
+	}
+	return false
+}
+
+func shouldReuseLastImagePreview(message string, lastImage *agentFileResult, memory agentStructuredMemory) bool {
+	if lastImage == nil || strings.TrimSpace(lastImage.URL) == "" {
+		return false
+	}
+	lower := strings.ToLower(strings.TrimSpace(message))
+	if lower == "" {
+		return false
+	}
+	if containsAny(lower, "改成", "换成", "重新生成", "重做", "再画", "再生成", "再来一张", "横版", "竖版", "方图", "加文字", "去文字") {
+		return false
+	}
+	showIntent := containsAny(lower, "发给我", "展示", "预览", "打开", "给我看", "看看", "看下", "看一下", "再发", "重新发", "贴出来", "贴给我")
+	target := containsAny(lower, "图", "图片", "海报", "封面", "插图", "配图", "横幅")
+	if showIntent && target {
+		return true
+	}
+	memory = memory.normalized()
+	if memory.LastTool == "generate_image" && containsAny(lower, "刚才", "上一张", "上一个", "这张", "那个", "那张") && target {
+		return true
+	}
+	return len([]rune(lower)) <= 12 && target && containsAny(lower, "发我", "预览", "看看", "给我看")
+}
+
+func shouldReuseStructuredTaskMemory(message string, memory agentStructuredMemory) bool {
+	memory = memory.normalized()
+	if !memory.hasContext() {
+		return false
+	}
+	lower := strings.ToLower(strings.TrimSpace(message))
+	if lower == "" {
+		return false
+	}
+	if shouldReuseLastExportContext(message) {
+		return true
+	}
+	if containsAny(lower, "继续", "接着", "刚才", "上一份", "上一个", "上面", "这个", "这些", "那些", "同样", "一样", "沿用", "改成", "换成", "再来", "再查", "再导", "只看", "只要", "只保留", "筛选", "过滤", "启用", "禁用", "再给我", "还是", "另外") {
+		return true
+	}
+	return len([]rune(lower)) <= 20
+}
+
+func synthesizeStructuredContinuationMessage(message string, memory agentStructuredMemory, lastExport *agentExportContinuation) string {
+	memory = memory.normalized()
+	if !memory.hasContext() {
+		return message
+	}
+	parts := make([]string, 0, 6)
+	anchor := strings.TrimSpace(firstNonEmpty(memory.TaskAnchorMessage, memory.CurrentGoal))
+	if anchor != "" {
+		parts = append(parts, anchor)
+	}
+	if memory.PrimaryTable != "" {
+		parts = append(parts, "沿用当前任务表 "+memory.PrimaryTable)
+	}
+	if summary := memory.filterSummary(); summary != "" && shouldCarryStructuredFilters(message) {
+		parts = append(parts, "保持当前筛选条件 "+summary)
+	}
+	if memory.ExportFormat != "" && lastExport != nil {
+		parts = append(parts, "沿用上一份导出的数据范围")
+	}
+	parts = append(parts, "本次补充要求："+message)
+	return strings.Join(parts, "；")
+}
+
+func shouldCarryStructuredFilters(message string) bool {
+	lower := strings.ToLower(strings.TrimSpace(message))
+	if lower == "" {
+		return false
+	}
+	if containsAny(lower, "全部", "清空筛选", "取消筛选", "不过滤", "所有") {
+		return false
+	}
+	return true
 }
 
 func agentRunStatus(ok bool) string {
@@ -512,11 +1929,189 @@ func newTableToolProvider(state installState, exportDir string, downloadBasePath
 		events = auditEvents[0]
 	}
 	return tableToolProvider{
-		state:            state,
-		exportDir:        strings.TrimSpace(exportDir),
-		downloadBasePath: strings.TrimRight(strings.TrimSpace(downloadBasePath), "/"),
-		auditEvents:      events,
+		state:              state,
+		exportDir:          strings.TrimSpace(exportDir),
+		downloadBasePath:   strings.TrimRight(strings.TrimSpace(downloadBasePath), "/"),
+		allowReadOnlyQuery: true,
+		auditEvents:        events,
 	}
+}
+
+func (p tableToolProvider) tableDefinitions() []agentTableDefinition {
+	definitions := append([]agentTableDefinition(nil), agentTableDefinitions()...)
+	for _, table := range p.externalAgentTables() {
+		aliases := []string{
+			table.RawName,
+			table.DisplayName,
+			externalAgentTableCommentAlias(table.Description),
+			table.Source.Name,
+			table.Source.Role,
+			"外部数据源",
+			"业务数据源",
+			"业务库",
+		}
+		for _, column := range table.Columns {
+			aliases = append(aliases, column.Name, column.Description)
+		}
+		definitions = append(definitions, agentTableDefinition{
+			Name:        table.ID,
+			Type:        "external_data_source",
+			DisplayName: table.DisplayName,
+			Description: table.Description,
+			Aliases:     aliases,
+		})
+	}
+	return definitions
+}
+
+func externalAgentTableCommentAlias(description string) string {
+	description = strings.TrimSpace(description)
+	if idx := strings.LastIndex(description, "："); idx >= 0 && idx+len("：") < len(description) {
+		return strings.TrimSpace(description[idx+len("："):])
+	}
+	return ""
+}
+
+func (p tableToolProvider) externalAgentTables() []agentExternalTable {
+	sources := map[string]dataSourceConfig{}
+	for _, source := range normalizeDataSources(p.state.DataSources) {
+		source = source.normalized()
+		if source.Name == "" || source.Status != "available" {
+			continue
+		}
+		sources[strings.ToLower(source.Name)] = source
+	}
+	if len(sources) == 0 || len(p.schemaSnapshots) == 0 {
+		return nil
+	}
+
+	latest := map[string]adminSchemaSnapshotRecord{}
+	for _, snapshot := range p.schemaSnapshots {
+		key := strings.ToLower(strings.TrimSpace(snapshot.DataSourceName))
+		if key == "" {
+			continue
+		}
+		if _, ok := latest[key]; !ok {
+			latest[key] = snapshot
+		}
+	}
+
+	usedIDs := map[string]int{}
+	tables := make([]agentExternalTable, 0)
+	for key, source := range sources {
+		snapshot, ok := latest[key]
+		if !ok || strings.TrimSpace(snapshot.SchemaJSON) == "" {
+			continue
+		}
+		var inspected []inspectedDatabaseTable
+		if err := json.Unmarshal([]byte(snapshot.SchemaJSON), &inspected); err != nil {
+			continue
+		}
+		for _, inspectedTable := range inspected {
+			rawTable := strings.TrimSpace(inspectedTable.Name)
+			if rawTable == "" {
+				continue
+			}
+			baseID := externalAgentTableID(source.Name, rawTable)
+			id := baseID
+			if usedIDs[id] > 0 {
+				id = baseID + "_" + strconv.Itoa(usedIDs[id]+1)
+			}
+			usedIDs[baseID]++
+			columns, rawColumns := externalAgentColumns(inspectedTable.Columns)
+			if len(columns) == 0 {
+				continue
+			}
+			comment := normalizeSchemaComment(inspectedTable.Comment)
+			description := "外部数据源 `" + source.Name + "` 的真实表 `" + rawTable + "`"
+			if comment != "" {
+				description += "：" + comment
+			}
+			tables = append(tables, agentExternalTable{
+				ID:          id,
+				Source:      source,
+				RawName:     rawTable,
+				DisplayName: source.Name + "." + rawTable,
+				Description: description,
+				Columns:     columns,
+				RawColumns:  rawColumns,
+			})
+		}
+	}
+	sort.SliceStable(tables, func(i, j int) bool {
+		return tables[i].ID < tables[j].ID
+	})
+	return tables
+}
+
+func externalAgentColumns(columns []inspectedDatabaseColumn) ([]agentTableColumn, map[string]string) {
+	out := make([]agentTableColumn, 0, len(columns))
+	rawByName := map[string]string{}
+	used := map[string]int{}
+	for _, column := range columns {
+		raw := strings.TrimSpace(column.Name)
+		if raw == "" {
+			continue
+		}
+		name := slugAgentIdentifier(raw)
+		if used[name] > 0 {
+			name = name + "_" + strconv.Itoa(used[name]+1)
+		}
+		used[slugAgentIdentifier(raw)]++
+		description := normalizeSchemaComment(column.Comment)
+		if description == "" {
+			description = raw
+		}
+		columnType := strings.TrimSpace(column.Type)
+		if columnType == "" {
+			columnType = "string"
+		}
+		out = append(out, agentTableColumn{Name: name, Type: columnType, Description: description})
+		rawByName[name] = raw
+	}
+	return out, rawByName
+}
+
+func (p tableToolProvider) externalAgentTableByName(name string) (agentExternalTable, bool) {
+	name = normalizeAgentTableName(name)
+	for _, table := range p.externalAgentTables() {
+		if table.ID == name {
+			return table, true
+		}
+	}
+	return agentExternalTable{}, false
+}
+
+func externalAgentTableID(sourceName string, tableName string) string {
+	return "datasource." + slugAgentIdentifier(sourceName) + "." + slugAgentIdentifier(tableName)
+}
+
+func slugAgentIdentifier(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	var builder strings.Builder
+	lastUnderscore := false
+	for _, r := range value {
+		valid := (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9')
+		if valid {
+			builder.WriteRune(r)
+			lastUnderscore = false
+			continue
+		}
+		if r == '_' || r == '-' || r == '.' || r == ' ' || r == '\t' || r == '\n' || r == '\r' {
+			if builder.Len() > 0 && !lastUnderscore {
+				builder.WriteRune('_')
+				lastUnderscore = true
+			}
+		}
+	}
+	out := strings.Trim(builder.String(), "_")
+	if out == "" {
+		out = "item"
+	}
+	if out[0] >= '0' && out[0] <= '9' {
+		out = "t_" + out
+	}
+	return out
 }
 
 func (p tableToolProvider) withAllowedTables(tables []string) tableToolProvider {
@@ -577,9 +2172,9 @@ func (s agentQueryScope) ReplyNote() string {
 	normalized := normalizeAgentAllowedTables(s.Tables)
 	switch effectiveAgentTableAccessMode(s.Mode, normalized) {
 	case agentTableAccessNone:
-		return "当前通道未启用数据查询，不能读取任何数据表。"
+		return "当前通道未启用数据查询。"
 	case agentTableAccessAll:
-		return "当前通道明确选择了全部只读表，按后台全局只读权限执行。"
+		return "当前通道可读取全部只读表。"
 	default:
 		return "当前通道只允许读取：" + strings.Join(normalized, "、") + "。"
 	}
@@ -625,6 +2220,21 @@ func (p tableToolProvider) withQueryScope(scope agentQueryScope) tableToolProvid
 	}
 }
 
+func (p tableToolProvider) withStructuredMemory(memory agentStructuredMemory) tableToolProvider {
+	p.memory = memory.normalized()
+	return p
+}
+
+func (p tableToolProvider) withLastExport(lastExport *agentExportContinuation) tableToolProvider {
+	p.lastExport = lastExport
+	return p
+}
+
+func (p tableToolProvider) withRequestMessage(message string) tableToolProvider {
+	p.rawMessage = strings.TrimSpace(message)
+	return p
+}
+
 func normalizeAgentAllowedTables(tables []string) []string {
 	out := make([]string, 0, len(tables))
 	seen := map[string]struct{}{}
@@ -666,6 +2276,20 @@ func agentAuthorizationReplyNote(mode string, tables []string) string {
 	return newAgentQueryScope(mode, tables).ReplyNote()
 }
 
+func agentWebAuthorizationInstruction(allowed bool) string {
+	if !allowed {
+		return "当前会话未启用公开网页访问，不能抓取网页或执行联网检索。"
+	}
+	return "当前会话允许访问公开 http/https 页面，但默认拒绝 localhost、127.0.0.1、内网地址和其他受保护目标。"
+}
+
+func agentImageAuthorizationInstruction(allowed bool) string {
+	if !allowed {
+		return "当前会话未启用图片创作能力，不能调用图片模型生成海报、插图或封面图。"
+	}
+	return "当前会话允许调用图片模型生成图片，并会把生成结果保存为后台文件返回。"
+}
+
 func (p tableToolProvider) isTableAuthorized(table string) bool {
 	table = normalizeAgentTableName(table)
 	if p.denyAllTables {
@@ -682,7 +2306,7 @@ func (p tableToolProvider) authorizedDefinitions() []agentTableDefinition {
 	if p.denyAllTables {
 		return nil
 	}
-	definitions := agentTableDefinitions()
+	definitions := filterAgentCatalogDefinitions(p.tableDefinitions())
 	if len(p.allowedTables) == 0 {
 		return definitions
 	}
@@ -744,8 +2368,796 @@ func (p tableToolProvider) unauthorizedTableResult(toolName string, table string
 		Name:  toolName,
 		OK:    false,
 		Table: table,
-		Error: "当前微信渠道未授权查询 `" + table + "`。已授权：" + p.authorizedTableSummary() + "。",
+		Error: "当前账号未授权查询 `" + table + "`。已授权：" + p.authorizedTableSummary() + "。",
 	}
+}
+
+func (p tableToolProvider) accessWeb(message string) agentToolResult {
+	urls := extractAgentURLs(message)
+	if len(urls) > 0 {
+		return p.fetchWebPage(urls[0])
+	}
+	return p.searchWeb(message)
+}
+
+func (p tableToolProvider) unauthorizedWebResult(toolName string) agentToolResult {
+	return agentToolResult{
+		Name:  toolName,
+		OK:    false,
+		Error: "当前账号未授予 `agent.web.read`，不能访问公开网页或执行联网检索。",
+	}
+}
+
+func (p tableToolProvider) unauthorizedImageResult(toolName string) agentToolResult {
+	return agentToolResult{
+		Name:  toolName,
+		OK:    false,
+		Error: "当前账号未授予 `agent.image.generate`，不能生成图片。",
+	}
+}
+
+func (p tableToolProvider) generateImage(message string) agentToolResult {
+	result := agentToolResult{
+		Name:    "generate_image",
+		Columns: []string{"file", "format", "size"},
+	}
+	if !p.allowImageGenerate {
+		return p.unauthorizedImageResult(result.Name)
+	}
+	if p.exportDir == "" {
+		result.OK = false
+		result.Error = "图片输出目录未配置。"
+		return result
+	}
+	if err := os.MkdirAll(p.exportDir, 0o755); err != nil {
+		result.OK = false
+		result.Error = "创建图片输出目录失败：" + err.Error()
+		return result
+	}
+
+	ai := p.state.AI.sanitized()
+	if ai.IsDisabled() {
+		result.OK = false
+		result.Error = "当前后台尚未启用 AI 图片模型。"
+		return result
+	}
+	if err := validateAIConfig(ai); err != nil {
+		result.OK = false
+		result.Error = "AI 配置不可用：" + err.Error()
+		return result
+	}
+	endpoint, err := ai.imageGenerationURL()
+	if err != nil {
+		result.OK = false
+		result.Error = "图片模型接口地址不正确：" + err.Error()
+		return result
+	}
+
+	originalPrompt := strings.TrimSpace(message)
+	if originalPrompt == "" {
+		result.OK = false
+		result.Error = "请输入要生成的图片描述。"
+		return result
+	}
+	prompt := buildAgentImagePrompt(originalPrompt)
+	size := inferAgentImageSize(originalPrompt)
+
+	body, _ := json.Marshal(map[string]any{
+		"model": ai.DisplayImageModel(),
+		"input": map[string]any{
+			"messages": []map[string]any{
+				{
+					"role": "user",
+					"content": []map[string]string{
+						{"type": "text", "text": prompt},
+					},
+				},
+			},
+		},
+		"parameters": map[string]any{
+			"size": size,
+		},
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), defaultAgentImageTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		result.OK = false
+		result.Error = "创建图片生成请求失败：" + err.Error()
+		return result
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+ai.APIKey)
+
+	resp, err := agentImageHTTPClient.Do(req)
+	if err != nil {
+		result.OK = false
+		result.Error = "图片模型请求失败：" + err.Error()
+		return result
+	}
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 512*1024))
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		result.OK = false
+		result.Error = fmt.Sprintf("图片模型返回 %d：%s", resp.StatusCode, truncateAgentText(string(respBody), 180))
+		return result
+	}
+
+	artifact, err := extractAgentGeneratedImageArtifact(respBody)
+	if err != nil {
+		result.OK = false
+		result.Error = "图片模型没有返回可用图片：" + err.Error()
+		return result
+	}
+	imageBytes, mimeType, sourceURL, err := downloadAgentGeneratedImage(ctx, artifact)
+	if err != nil {
+		result.OK = false
+		result.Error = "下载生成图片失败：" + err.Error()
+		return result
+	}
+	if detected := strings.TrimSpace(http.DetectContentType(imageBytes)); mimeType == "" || mimeType == "application/octet-stream" {
+		mimeType = detected
+	}
+	ext := agentImageExtension(mimeType, sourceURL)
+	now := time.Now()
+	fileName := "moyi-agent-image-" + now.Format("20060102-150405") + "-" + strconv.FormatInt(now.UnixNano()%1_000_000, 10) + "." + ext
+	filePath := filepath.Join(p.exportDir, fileName)
+	if err := os.WriteFile(filePath, imageBytes, 0o600); err != nil {
+		result.OK = false
+		result.Error = "保存生成图片失败：" + err.Error()
+		return result
+	}
+
+	fileResult := agentFileResult{
+		Name:           fileName,
+		URL:            p.downloadBasePath + "/" + fileName,
+		MIME:           mimeType,
+		Size:           int64(len(imageBytes)),
+		Description:    "文生图结果：" + truncateAgentText(originalPrompt, 72),
+		Prompt:         prompt,
+		OriginalPrompt: originalPrompt,
+	}
+	result.OK = true
+	result.Message = "已生成 1 张图片，并按整理后的绘图提示词保存为后台文件。"
+	result.File = &fileResult
+	result.Rows = []map[string]string{{
+		"file":   fileName,
+		"format": strings.ToUpper(ext),
+		"size":   strconv.Itoa(len(imageBytes)),
+	}}
+	return result
+}
+
+func inferAgentImageSize(message string) string {
+	lower := strings.ToLower(strings.TrimSpace(message))
+	switch {
+	case containsAny(lower, "横版", "横幅", "横向", "banner", "landscape", "16:9", "宽屏"):
+		return "1664*928"
+	case containsAny(lower, "竖版", "竖向", "封面", "海报", "portrait", "9:16"):
+		return "928*1664"
+	case containsAny(lower, "方图", "方形", "正方形", "头像", "1:1", "square"):
+		return "1024*1024"
+	default:
+		return "1024*1024"
+	}
+}
+
+func buildAgentImagePrompt(message string) string {
+	original := strings.TrimSpace(message)
+	if original == "" {
+		return ""
+	}
+	purpose := agentImagePurpose(original)
+	composition := agentImageComposition(original)
+	style := agentImageStyleSummary(original)
+	textRule := agentImageTextRule(original)
+	mediumRule := agentImageMediumRule(original)
+	return strings.Join([]string{
+		"用户原始需求：" + original,
+		"请围绕这个需求生成一张" + purpose + "，采用" + composition + "。",
+		"视觉方向：" + style + "。",
+		"画面要求：主体明确，层次清晰，构图完整，留白自然，避免杂乱，质感统一，细节干净，整体更像成熟的商业视觉而不是随意拼贴。",
+		mediumRule,
+		textRule,
+	}, "\n")
+}
+
+func agentImagePurpose(message string) string {
+	lower := strings.ToLower(strings.TrimSpace(message))
+	switch {
+	case containsAny(lower, "海报", "poster"):
+		return "宣传海报"
+	case containsAny(lower, "封面", "cover"):
+		return "封面主视觉"
+	case containsAny(lower, "横幅", "banner", "头图"):
+		return "横幅主视觉"
+	case containsAny(lower, "插图", "配图", "插画", "illustration"):
+		return "插图配图"
+	default:
+		return "视觉主图"
+	}
+}
+
+func agentImageComposition(message string) string {
+	lower := strings.ToLower(strings.TrimSpace(message))
+	switch {
+	case containsAny(lower, "横版", "横幅", "横向", "banner", "landscape", "16:9", "宽屏"):
+		return "横版宽幅构图"
+	case containsAny(lower, "竖版", "竖向", "封面", "portrait", "9:16"):
+		return "竖版封面构图"
+	case containsAny(lower, "方图", "方形", "正方形", "头像", "1:1", "square"):
+		return "方形聚焦构图"
+	default:
+		return "主体清晰的平衡构图"
+	}
+}
+
+func agentImageStyleSummary(message string) string {
+	lower := strings.ToLower(strings.TrimSpace(message))
+	style := make([]string, 0, 8)
+	if containsAny(lower, "科技", "tech", "未来", "数字化", "后台") {
+		style = append(style, "蓝绿冷调", "科技感", "轻微发光", "现代数字界面气质")
+	}
+	if containsAny(lower, "公益", "慈善", "温暖", "希望", "爱心") {
+		style = append(style, "温暖可信", "克制真诚", "具有公益叙事感")
+	}
+	if containsAny(lower, "简洁", "极简", "干净", "minimal") {
+		style = append(style, "简洁", "留白充足", "信息噪点少")
+	}
+	if containsAny(lower, "高级", "质感", "品牌", "banner", "海报", "封面") {
+		style = append(style, "高完成度", "品牌视觉感", "适合正式对外展示")
+	}
+	if containsAny(lower, "插图", "插画", "illustration", "配图") {
+		style = append(style, "高级插画风格", "形体概括明确")
+	}
+	if containsAny(lower, "写实", "真实", "摄影", "照片", "photo", "realistic") {
+		style = append(style, "高质量写实风格")
+	}
+	if len(style) == 0 {
+		style = append(style, "现代", "干净", "构图明确", "视觉重点集中")
+	}
+	return strings.Join(uniqueAgentPromptParts(style), "、")
+}
+
+func agentImageTextRule(message string) string {
+	lower := strings.ToLower(strings.TrimSpace(message))
+	if containsAny(lower, "文字", "文案", "标题", "标语", "slogan", "logo") {
+		return "如果需要文字，请确保文字极少、排版清晰、可读性强，并与画面整体风格统一。"
+	}
+	if containsAny(lower, "不要字", "无字", "不要文字", "不要文案", "不要 logo", "不要logo") {
+		return "不要出现任何文字、logo、水印、二维码或界面截图。"
+	}
+	return "除非用户明确要求，否则不要出现任何文字、logo、水印、二维码、边框或界面截图。"
+}
+
+func agentImageMediumRule(message string) string {
+	lower := strings.ToLower(strings.TrimSpace(message))
+	if containsAny(lower, "写实", "真实", "摄影", "照片", "photo", "realistic") {
+		return "请优先输出自然可信的写实摄影质感，不要过度插画化。"
+	}
+	if containsAny(lower, "图标", "icon", "logo") {
+		return "请保持图形简洁、边缘干净、识别度高。"
+	}
+	return "如果用户没有明确要求真实摄影，请优先输出高级插画或成熟视觉设计风格。"
+}
+
+func uniqueAgentPromptParts(values []string) []string {
+	out := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
+}
+
+func extractAgentGeneratedImageArtifact(body []byte) (agentGeneratedImageArtifact, error) {
+	var payload any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return agentGeneratedImageArtifact{}, err
+	}
+	artifact := findAgentGeneratedImageArtifact(payload)
+	if artifact.URL == "" && artifact.Base64 == "" {
+		return agentGeneratedImageArtifact{}, errors.New(truncateAgentText(string(body), 180))
+	}
+	return artifact, nil
+}
+
+func findAgentGeneratedImageArtifact(node any) agentGeneratedImageArtifact {
+	switch value := node.(type) {
+	case map[string]any:
+		artifact := agentGeneratedImageArtifact{}
+		if mimeType, ok := value["mime_type"].(string); ok {
+			artifact.MIMEType = strings.TrimSpace(mimeType)
+		}
+		for _, key := range []string{"url", "image_url", "image"} {
+			raw, _ := value[key].(string)
+			raw = strings.TrimSpace(raw)
+			if raw == "" {
+				continue
+			}
+			if strings.HasPrefix(strings.ToLower(raw), "http://") || strings.HasPrefix(strings.ToLower(raw), "https://") || strings.HasPrefix(strings.ToLower(raw), "data:image/") {
+				artifact.URL = raw
+				return artifact
+			}
+			if looksLikeBase64ImagePayload(raw) {
+				artifact.Base64 = raw
+				return artifact
+			}
+		}
+		for _, key := range []string{"b64_json", "base64", "image_base64"} {
+			raw, _ := value[key].(string)
+			raw = strings.TrimSpace(raw)
+			if raw == "" {
+				continue
+			}
+			artifact.Base64 = raw
+			return artifact
+		}
+		for _, child := range value {
+			found := findAgentGeneratedImageArtifact(child)
+			if found.URL != "" || found.Base64 != "" {
+				if found.MIMEType == "" {
+					found.MIMEType = artifact.MIMEType
+				}
+				return found
+			}
+		}
+	case []any:
+		for _, child := range value {
+			found := findAgentGeneratedImageArtifact(child)
+			if found.URL != "" || found.Base64 != "" {
+				return found
+			}
+		}
+	}
+	return agentGeneratedImageArtifact{}
+}
+
+func looksLikeBase64ImagePayload(value string) bool {
+	value = strings.TrimSpace(value)
+	if len(value) < 64 {
+		return false
+	}
+	for _, r := range value {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '+' || r == '/' || r == '=' || r == '-' || r == '_' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func downloadAgentGeneratedImage(ctx context.Context, artifact agentGeneratedImageArtifact) ([]byte, string, string, error) {
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(artifact.URL)), "data:image/") {
+		data, mimeType, err := decodeAgentDataImageURL(artifact.URL)
+		return data, firstNonEmpty(mimeType, artifact.MIMEType), "", err
+	}
+	if strings.TrimSpace(artifact.Base64) != "" {
+		data, err := decodeAgentBase64Image(artifact.Base64)
+		return data, firstNonEmpty(artifact.MIMEType, "image/png"), "", err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, artifact.URL, nil)
+	if err != nil {
+		return nil, "", "", err
+	}
+	resp, err := agentImageHTTPClient.Do(req)
+	if err != nil {
+		return nil, "", "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 32*1024))
+		return nil, "", "", fmt.Errorf("image download returned %d: %s", resp.StatusCode, truncateAgentText(string(body), 120))
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 20*1024*1024))
+	if err != nil {
+		return nil, "", "", err
+	}
+	return data, firstNonEmpty(strings.TrimSpace(resp.Header.Get("Content-Type")), artifact.MIMEType), artifact.URL, nil
+}
+
+func decodeAgentDataImageURL(raw string) ([]byte, string, error) {
+	parts := strings.SplitN(raw, ",", 2)
+	if len(parts) != 2 {
+		return nil, "", errors.New("data URL 格式不正确")
+	}
+	meta := strings.TrimSpace(parts[0])
+	mimeType := "image/png"
+	if strings.HasPrefix(strings.ToLower(meta), "data:") {
+		mimeType = strings.TrimPrefix(strings.SplitN(strings.TrimPrefix(meta, "data:"), ";", 2)[0], " ")
+	}
+	data, err := decodeAgentBase64Image(parts[1])
+	return data, mimeType, err
+}
+
+func decodeAgentBase64Image(raw string) ([]byte, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, errors.New("图片内容为空")
+	}
+	if data, err := base64.StdEncoding.DecodeString(raw); err == nil {
+		return data, nil
+	}
+	if data, err := base64.RawStdEncoding.DecodeString(raw); err == nil {
+		return data, nil
+	}
+	if data, err := base64.URLEncoding.DecodeString(raw); err == nil {
+		return data, nil
+	}
+	return base64.RawURLEncoding.DecodeString(raw)
+}
+
+func agentImageExtension(mimeType string, sourceURL string) string {
+	mimeType = strings.ToLower(strings.TrimSpace(strings.SplitN(mimeType, ";", 2)[0]))
+	switch mimeType {
+	case "image/jpeg", "image/jpg":
+		return "jpg"
+	case "image/webp":
+		return "webp"
+	case "image/gif":
+		return "gif"
+	case "image/png":
+		return "png"
+	}
+	ext := strings.TrimPrefix(strings.ToLower(filepath.Ext(sourceURL)), ".")
+	switch ext {
+	case "jpg", "jpeg", "png", "webp", "gif":
+		if ext == "jpeg" {
+			return "jpg"
+		}
+		return ext
+	default:
+		return "png"
+	}
+}
+
+func (p tableToolProvider) fetchWebPage(rawURL string) agentToolResult {
+	result := agentToolResult{
+		Name:    "web_fetch",
+		Columns: []string{"url", "title", "content_type", "summary", "content"},
+	}
+	if !p.allowWebRead {
+		return p.unauthorizedWebResult(result.Name)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultAgentTimeout)
+	defer cancel()
+	body, finalURL, contentType, err := fetchAgentWebDocument(ctx, rawURL)
+	if err != nil {
+		result.OK = false
+		result.Error = err.Error()
+		return result
+	}
+	title, content := parseAgentHTMLDocument(body, contentType)
+	summary := truncateAgentText(content, 480)
+	if title == "" {
+		title = truncateAgentText(summary, 80)
+	}
+	if title == "" {
+		title = finalURL
+	}
+	result.OK = true
+	result.Message = "已读取公开网页 `" + finalURL + "`，并提取标题与正文摘要。"
+	result.Rows = []map[string]string{{
+		"url":          finalURL,
+		"title":        title,
+		"content_type": contentType,
+		"summary":      summary,
+		"content":      content,
+	}}
+	return result
+}
+
+func (p tableToolProvider) searchWeb(message string) agentToolResult {
+	result := agentToolResult{
+		Name:    "web_search",
+		Columns: []string{"title", "url"},
+	}
+	if !p.allowWebRead {
+		return p.unauthorizedWebResult(result.Name)
+	}
+	query := inferAgentWebSearchQuery(message)
+	if query == "" {
+		result.OK = false
+		result.Error = "没有识别到可用于联网检索的关键词，请直接提供链接或更明确的网页关键词。"
+		return result
+	}
+	searchURL, err := buildAgentSearchURL(query)
+	if err != nil {
+		result.OK = false
+		result.Error = "构造联网检索地址失败：" + err.Error()
+		return result
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultAgentTimeout)
+	defer cancel()
+	body, _, _, err := fetchAgentWebDocument(ctx, searchURL)
+	if err != nil {
+		result.OK = false
+		result.Error = err.Error()
+		return result
+	}
+	rows := parseAgentSearchResults(string(body), 5)
+	if len(rows) == 0 {
+		result.OK = false
+		result.Error = "公开网页检索没有返回可用结果，请换一个关键词或直接提供链接。"
+		return result
+	}
+	result.OK = true
+	result.Message = fmt.Sprintf("已完成公开网页检索，关键词：`%s`。", query)
+	result.Rows = rows
+	return result
+}
+
+func extractAgentURLs(message string) []string {
+	matches := agentURLPattern.FindAllString(message, -1)
+	if len(matches) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(matches))
+	seen := map[string]struct{}{}
+	for _, match := range matches {
+		candidate := strings.TrimRight(strings.TrimSpace(match), ".,，。!！?？;；:：)）]】}\"'")
+		if candidate == "" {
+			continue
+		}
+		if _, ok := seen[candidate]; ok {
+			continue
+		}
+		seen[candidate] = struct{}{}
+		out = append(out, candidate)
+	}
+	return out
+}
+
+func inferAgentWebSearchQuery(message string) string {
+	query := strings.TrimSpace(message)
+	for _, rawURL := range extractAgentURLs(query) {
+		query = strings.ReplaceAll(query, rawURL, " ")
+	}
+	replacements := []string{
+		"帮我", "请", "麻烦", "搜索", "搜一下", "搜一搜", "查一下", "查找", "联网", "上网", "访问", "打开", "读取",
+		"浏览", "看看", "看下", "总结", "整理", "告诉我", "给我", "一下", "吧",
+	}
+	for _, target := range replacements {
+		query = strings.ReplaceAll(query, target, " ")
+		query = strings.ReplaceAll(query, strings.ToUpper(target), " ")
+	}
+	query = strings.NewReplacer("\n", " ", "\r", " ", "\t", " ", "，", " ", ",", " ", "。", " ", "：", " ", ":", " ").Replace(query)
+	query = agentHTMLSpacePattern.ReplaceAllString(strings.TrimSpace(query), " ")
+	if len([]rune(query)) > 160 {
+		query = string([]rune(query)[:160])
+	}
+	return strings.TrimSpace(query)
+}
+
+func validateAgentWebURL(ctx context.Context, rawURL string) (*neturl.URL, error) {
+	_ = ctx
+	parsed, err := neturl.Parse(strings.TrimSpace(rawURL))
+	if err != nil {
+		return nil, errors.New("网页地址格式不正确")
+	}
+	scheme := strings.ToLower(strings.TrimSpace(parsed.Scheme))
+	if scheme != "http" && scheme != "https" {
+		return nil, errors.New("只允许访问公开 http/https 页面")
+	}
+	if parsed.User != nil {
+		return nil, errors.New("不允许携带带凭据的网页地址")
+	}
+	host := strings.ToLower(strings.TrimSpace(parsed.Hostname()))
+	if host == "" {
+		return nil, errors.New("网页地址缺少主机名")
+	}
+	if agentAllowPrivateWebTargets {
+		return parsed, nil
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		if !isAgentPublicIP(ip) {
+			return nil, errors.New("已拒绝访问本机、内网或受保护地址")
+		}
+		return parsed, nil
+	}
+	if isAgentBlockedWebHost(host) {
+		return nil, errors.New("已拒绝访问本机、内网或受保护地址")
+	}
+	return parsed, nil
+}
+
+func buildAgentSearchURL(query string) (string, error) {
+	base, err := neturl.Parse(strings.TrimSpace(agentWebSearchBaseURL))
+	if err != nil {
+		return "", err
+	}
+	params := base.Query()
+	params.Set("q", query)
+	base.RawQuery = params.Encode()
+	return base.String(), nil
+}
+
+func fetchAgentWebDocument(ctx context.Context, rawURL string) ([]byte, string, string, error) {
+	validated, err := validateAgentWebURL(ctx, rawURL)
+	if err != nil {
+		return nil, "", "", err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, validated.String(), nil)
+	if err != nil {
+		return nil, "", "", err
+	}
+	req.Header.Set("User-Agent", "MoyiAdminAgent/1.0 (+https://moyi.admin)")
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,text/plain,application/json,text/*;q=0.9,*/*;q=0.1")
+	client := *agentHTTPClient
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if len(via) >= 4 {
+			return errors.New("网页跳转次数过多")
+		}
+		_, err := validateAgentWebURL(ctx, req.URL.String())
+		return err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, "", "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, "", "", fmt.Errorf("网页返回状态 %d", resp.StatusCode)
+	}
+	if resp.Request != nil && resp.Request.URL != nil {
+		if _, err := validateAgentWebURL(ctx, resp.Request.URL.String()); err != nil {
+			return nil, "", "", err
+		}
+	}
+	contentType := strings.ToLower(strings.TrimSpace(strings.Split(resp.Header.Get("Content-Type"), ";")[0]))
+	if contentType == "" {
+		contentType = "text/html"
+	}
+	if !strings.HasPrefix(contentType, "text/") &&
+		contentType != "application/xhtml+xml" &&
+		contentType != "application/json" &&
+		contentType != "application/xml" &&
+		contentType != "text/xml" {
+		return nil, "", "", fmt.Errorf("暂不支持读取 `%s` 类型的网页内容", contentType)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 512*1024))
+	if err != nil {
+		return nil, "", "", err
+	}
+	finalURL := validated.String()
+	if resp.Request != nil && resp.Request.URL != nil {
+		finalURL = resp.Request.URL.String()
+	}
+	return body, finalURL, contentType, nil
+}
+
+func parseAgentHTMLDocument(body []byte, contentType string) (string, string) {
+	raw := string(body)
+	title := ""
+	if matches := agentHTMLTitlePattern.FindStringSubmatch(raw); len(matches) == 2 {
+		title = truncateAgentText(stripAgentHTMLToText(matches[1]), 120)
+	}
+	text := ""
+	if strings.Contains(contentType, "html") || strings.Contains(strings.ToLower(truncateAgentText(raw, 256)), "<html") {
+		text = stripAgentHTMLToText(raw)
+	} else {
+		text = strings.Map(func(r rune) rune {
+			if r == '\t' || r == '\n' || r == '\r' || r >= 0x20 {
+				return r
+			}
+			return -1
+		}, raw)
+		text = agentHTMLSpacePattern.ReplaceAllString(strings.TrimSpace(text), " ")
+		text = html.UnescapeString(text)
+	}
+	text = truncateAgentText(text, 4000)
+	if title == "" {
+		title = truncateAgentText(text, 120)
+	}
+	return title, text
+}
+
+func stripAgentHTMLToText(body string) string {
+	body = agentHTMLScriptPattern.ReplaceAllString(body, " ")
+	body = agentHTMLStylePattern.ReplaceAllString(body, " ")
+	body = strings.NewReplacer("</p>", "\n", "</div>", "\n", "<br>", "\n", "<br/>", "\n", "<br />", "\n", "</li>", "\n", "</tr>", "\n", "</h1>", "\n", "</h2>", "\n", "</h3>", "\n").Replace(body)
+	body = agentHTMLTagPattern.ReplaceAllString(body, " ")
+	body = html.UnescapeString(body)
+	body = strings.ReplaceAll(body, "\u00a0", " ")
+	body = agentHTMLSpacePattern.ReplaceAllString(strings.TrimSpace(body), " ")
+	return strings.TrimSpace(body)
+}
+
+func parseAgentSearchResults(body string, limit int) []map[string]string {
+	if limit <= 0 {
+		limit = 5
+	}
+	matches := agentSearchResultPattern.FindAllStringSubmatch(body, -1)
+	if len(matches) == 0 {
+		return nil
+	}
+	results := make([]map[string]string, 0, limit)
+	seen := map[string]struct{}{}
+	for _, match := range matches {
+		if len(match) < 3 {
+			continue
+		}
+		title := truncateAgentText(stripAgentHTMLToText(match[2]), 160)
+		if title == "" {
+			continue
+		}
+		rawURL := html.UnescapeString(strings.TrimSpace(match[1]))
+		if rawURL == "" {
+			continue
+		}
+		if parsed, err := neturl.Parse(rawURL); err == nil {
+			if uddg := strings.TrimSpace(parsed.Query().Get("uddg")); uddg != "" {
+				rawURL = uddg
+			}
+		}
+		if !strings.HasPrefix(strings.ToLower(rawURL), "http://") && !strings.HasPrefix(strings.ToLower(rawURL), "https://") {
+			continue
+		}
+		if _, err := validateAgentWebURL(context.Background(), rawURL); err != nil {
+			continue
+		}
+		if _, ok := seen[rawURL]; ok {
+			continue
+		}
+		seen[rawURL] = struct{}{}
+		results = append(results, map[string]string{
+			"title": title,
+			"url":   rawURL,
+		})
+		if len(results) >= limit {
+			break
+		}
+	}
+	return results
+}
+
+func isAgentBlockedWebHost(host string) bool {
+	host = strings.ToLower(strings.TrimSpace(host))
+	if host == "" {
+		return true
+	}
+	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
+		return true
+	}
+	if strings.HasSuffix(host, ".local") || strings.HasSuffix(host, ".internal") || strings.HasSuffix(host, ".lan") || strings.HasSuffix(host, ".home") || strings.HasSuffix(host, ".corp") || strings.HasSuffix(host, ".localdomain") {
+		return true
+	}
+	if !strings.Contains(host, ".") {
+		return true
+	}
+	return false
+}
+
+func isAgentPublicIP(ip net.IP) bool {
+	if ip == nil {
+		return false
+	}
+	return !ip.IsLoopback() &&
+		!ip.IsPrivate() &&
+		!ip.IsLinkLocalMulticast() &&
+		!ip.IsLinkLocalUnicast() &&
+		!ip.IsMulticast() &&
+		!ip.IsUnspecified()
+}
+
+func truncateAgentText(value string, limit int) string {
+	value = strings.TrimSpace(value)
+	if limit <= 0 {
+		return value
+	}
+	runes := []rune(value)
+	if len(runes) <= limit {
+		return value
+	}
+	return strings.TrimSpace(string(runes[:limit])) + "..."
 }
 
 func isUnauthorizedAgentResult(result agentToolResult) bool {
@@ -753,11 +3165,14 @@ func isUnauthorizedAgentResult(result agentToolResult) bool {
 }
 
 func shouldCallAgentModel(intent agentIntent, results []agentToolResult) bool {
-	if intent == agentIntentAccessScope {
+	if intent == agentIntentAccessScope || intent == agentIntentSystemConfig {
 		return false
 	}
 	for _, result := range results {
 		if !result.OK {
+			return false
+		}
+		if result.File != nil {
 			return false
 		}
 	}
@@ -774,6 +3189,15 @@ func determineAgentIntent(message string) agentIntent {
 	}
 	if isAgentAccessScopeQuestion(message) {
 		return agentIntentAccessScope
+	}
+	if isAgentSystemConfigQuestion(message) {
+		return agentIntentSystemConfig
+	}
+	if isAgentWebQuestion(message) {
+		return agentIntentWebAccess
+	}
+	if isAgentImageQuestion(message) {
+		return agentIntentImage
 	}
 	if containsAny(lower, "插件扩展", "扩展包", "插件系统", "资源模型", "资源定义", "crud 生成", "crud生成", "工具生成", "ai 工具生成", "ai工具生成", "resource model", "resource tool", "plugin extension") &&
 		!containsAny(lower, "导出", "表格", "文件", "下载", "发给我", "返回文件", "excel", "xlsx", "csv", "json") {
@@ -807,11 +3231,12 @@ func determineAgentIntent(message string) agentIntent {
 	if containsAny(lower, "管理员", "账号", "账户", "用户", "权限", "角色", "菜单", "导航", "admin", "user", "users", "role", "permission", "menu") {
 		return agentIntentUserAccess
 	}
+	if containsAny(lower, "预览", "查看", "明细", "rows", "preview") ||
+		(strings.Contains(lower, "数据") && !containsAny(lower, "列出", "有哪些", "什么表", "哪些表", "数据表", "数据库")) {
+		return agentIntentPreview
+	}
 	if containsAny(lower, "列出", "有哪些", "表", "tables", "table", "数据库") {
 		return agentIntentTableCatalog
-	}
-	if containsAny(lower, "预览", "查看", "数据", "明细", "rows", "preview") {
-		return agentIntentPreview
 	}
 	return agentIntentAdmin
 }
@@ -844,6 +3269,78 @@ func isAgentAccessScopeQuestion(message string) bool {
 	)
 }
 
+func isAgentWebQuestion(message string) bool {
+	lower := strings.ToLower(strings.TrimSpace(message))
+	if lower == "" {
+		return false
+	}
+	if len(extractAgentURLs(message)) > 0 {
+		return true
+	}
+	if containsAny(lower, "官网", "网站", "网页", "网址", "url", "web page", "website") {
+		return true
+	}
+	if containsAny(lower, "搜索", "搜一下", "搜一搜", "查一下", "查找", "搜索一下", "search", "google", "duckduckgo", "bing") &&
+		containsAny(lower, "官网", "网站", "网页", "网址", "链接", "新闻", "资料", "互联网", "网上") {
+		return true
+	}
+	if containsAny(lower, "访问", "打开", "抓取", "读取", "联网", "上网", "浏览") &&
+		containsAny(lower, "官网", "网站", "网页", "网址", "链接", "互联网", "网上") {
+		return true
+	}
+	return false
+}
+
+func isAgentSystemConfigQuestion(message string) bool {
+	lower := strings.ToLower(strings.TrimSpace(message))
+	if lower == "" {
+		return false
+	}
+	if containsAny(lower, "导出", "表格", "文件", "下载", "发给我", "返回文件", "xlsx", "csv", "json") {
+		return false
+	}
+	if containsAny(lower, "数据表", "哪些表", "什么表", "列出表", "select ", " from ", "字段", "结构", "schema") {
+		return false
+	}
+	return containsAny(lower,
+		"站点信息",
+		"站点配置",
+		"系统配置",
+		"后台配置",
+		"ai 配置",
+		"ai配置",
+		"模型配置",
+		"站点和 ai 配置",
+		"查看站点信息和 ai 配置",
+		"元数据数据库",
+		"数据库配置",
+		"首页设置",
+		"系统信息")
+}
+
+func isAgentImageQuestion(message string) bool {
+	lower := strings.ToLower(strings.TrimSpace(message))
+	if lower == "" {
+		return false
+	}
+	if containsAny(lower, "支持图片创作", "支持文生图", "能不能文生图", "可以文生图吗", "能生成图片吗") &&
+		!containsAny(lower, "帮我", "给我", "生成", "画", "做", "设计", "创作") {
+		return false
+	}
+	action := containsAny(lower, "生成", "画", "绘制", "做一张", "做个", "创作", "出一张", "设计一张", "做成", "整理成", "合成", "输出", "来一张", "给我一张")
+	target := containsAny(lower, "图片", "图", "海报", "插图", "封面", "配图", "横幅", "banner", "poster", "image", "介绍图", "概览图", "示意图", "信息图", "封面图", "主视觉")
+	if action && target {
+		return true
+	}
+	if target && containsAny(lower, "一张", "单张", "一图", "总览", "对比", "展示", "介绍", "说明") {
+		return true
+	}
+	if containsAny(lower, "文生图", "图片创作", "生成一张", "画一张", "生成海报", "生成封面", "生成插图") {
+		return true
+	}
+	return false
+}
+
 func buildAgentRun(state installState, message string, intent agentIntent, results []agentToolResult) agentRun {
 	mode := string(intent)
 	run := agentRun{
@@ -872,6 +3369,12 @@ func summarizeAgentGoal(message string, intent agentIntent) string {
 		return "升级后台智能体构造方案"
 	case agentIntentHealth:
 		return "检查当前后台智能体与数据源状态"
+	case agentIntentWebAccess:
+		return "访问公开网页并提取关键信息"
+	case agentIntentImage:
+		return "生成并返回图片文件"
+	case agentIntentSystemConfig:
+		return "查看站点与 AI 配置概览"
 	case agentIntentQuery:
 		return "执行受控只读查询"
 	case agentIntentExport:
@@ -907,6 +3410,24 @@ func buildAgentPlan(intent agentIntent) []agentPlanStep {
 			{Title: "收集上下文", Detail: "读取受控表清单、数据源和能力边界。", Status: "done"},
 			{Title: "识别短板", Detail: "判断当前后台到强智能体之间缺少的基础设施。", Status: "done"},
 			{Title: "给出动作", Detail: "生成下一步接入建议。", Status: "done"},
+		}
+	case agentIntentWebAccess:
+		return []agentPlanStep{
+			{Title: "识别网页目标", Detail: "优先识别显式 URL，没有链接时转为公开网页检索。", Status: "done"},
+			{Title: "执行公开访问", Detail: "只访问公开 http/https 页面，拒绝本机、内网和受保护地址。", Status: "done"},
+			{Title: "抽取正文", Detail: "提取标题、链接和正文摘要，交给智能体整理回答。", Status: "done"},
+		}
+	case agentIntentImage:
+		return []agentPlanStep{
+			{Title: "理解画面需求", Detail: "识别图片主题、风格、版式和输出方向。", Status: "done"},
+			{Title: "调用图片模型", Detail: "使用百炼图片模型生成结果，并保持当前权限边界。", Status: "done"},
+			{Title: "保存文件", Detail: "把图片保存为后台文件，返回预览与下载入口。", Status: "done"},
+		}
+	case agentIntentSystemConfig:
+		return []agentPlanStep{
+			{Title: "识别系统配置问题", Detail: "把站点信息、AI 配置、数据库类型等问题与数据表查询分开。", Status: "done"},
+			{Title: "读取安全概览", Detail: "只返回站点、数据库、AI、存储等安全配置摘要，不暴露敏感值。", Status: "done"},
+			{Title: "直接回答", Detail: "给出简短结论，不回退到内部状态表。", Status: "done"},
 		}
 	case agentIntentGuardrail:
 		return []agentPlanStep{
@@ -1028,6 +3549,16 @@ func buildAgentInsights(intent agentIntent, results []agentToolResult) []agentIn
 				Detail: detail,
 				Tone:   "ready",
 			})
+		case "generate_image":
+			detail := result.Message
+			if result.File != nil {
+				detail = "已生成图片文件 `" + result.File.Name + "`，可以继续要求改成横版、竖版或调整风格。"
+			}
+			insights = append(insights, agentInsight{
+				Title:  "图片结果已生成",
+				Detail: detail,
+				Tone:   "ready",
+			})
 		case "preview_table":
 			insights = append(insights, agentInsight{
 				Title:  "预览结果可继续追问",
@@ -1046,6 +3577,12 @@ func buildAgentInsights(intent agentIntent, results []agentToolResult) []agentIn
 				Detail: result.Message,
 				Tone:   "info",
 			})
+		case "inspect_system_config":
+			insights = append(insights, agentInsight{
+				Title:  "系统配置已独立处理",
+				Detail: "站点信息与 AI 配置现在走独立规则，不再混入通用数据表识别。",
+				Tone:   "ready",
+			})
 		}
 	}
 	if intent == agentIntentHealth {
@@ -1054,6 +3591,34 @@ func buildAgentInsights(intent agentIntent, results []agentToolResult) []agentIn
 			Detail: "建议优先接真实数据库 Schema 探测，再接导出 Excel 工具，这两项会直接提升后台可用性。",
 			Tone:   "warning",
 		})
+	}
+	if intent == agentIntentWebAccess {
+		for _, result := range results {
+			if !result.OK {
+				continue
+			}
+			switch result.Name {
+			case "web_fetch":
+				title := ""
+				if len(result.Rows) > 0 {
+					title = strings.TrimSpace(result.Rows[0]["title"])
+				}
+				if title == "" {
+					title = "网页内容"
+				}
+				insights = append(insights, agentInsight{
+					Title:  "公开网页已读取",
+					Detail: "已提取 `" + title + "` 的标题和正文摘要，可以继续追问重点或要求整理成结论。",
+					Tone:   "ready",
+				})
+			case "web_search":
+				insights = append(insights, agentInsight{
+					Title:  "公开网页检索已完成",
+					Detail: fmt.Sprintf("本次返回 %d 条搜索结果，可以继续指定其中某个链接深入阅读。", len(result.Rows)),
+					Tone:   "info",
+				})
+			}
+		}
 	}
 	if intent == agentIntentAdmin && len(results) == 0 {
 		insights = append(insights, agentInsight{
@@ -1086,10 +3651,23 @@ func buildAgentSuggestions(intent agentIntent, results []agentToolResult) []agen
 			{Label: "能力清单", Prompt: "预览智能体能力"},
 			{Label: "智能体方案", Prompt: "给出 Moyi Admin 智能体构造方案"},
 		}
+	case agentIntentWebAccess:
+		return []agentSuggestion{
+			{Label: "继续读链接", Prompt: "继续访问刚才提到的那个链接，并把要点整理给我"},
+			{Label: "提炼要点", Prompt: "把刚才网页里的关键信息提炼成 3 条结论"},
+			{Label: "结合后台", Prompt: "把这个网页信息和我们当前后台任务结合起来给建议"},
+		}
+	case agentIntentImage:
+		return []agentSuggestion{
+			{Label: "横版海报", Prompt: "把刚才那张图改成更适合横版首页横幅的构图"},
+			{Label: "竖版封面", Prompt: "基于刚才的主题，再生成一张更适合竖版封面的图片"},
+			{Label: "简洁插图", Prompt: "延续刚才的主题，但改成更简洁的插图风格"},
+		}
 	case agentIntentGuardrail:
 		return []agentSuggestion{
-			{Label: "只读查询", Prompt: "select * from install_state limit 1"},
-			{Label: "字段结构", Prompt: "查看系统初始化状态的字段结构"},
+			{Label: "列出数据表", Prompt: "列出当前可查询的数据表"},
+			{Label: "查看权限", Prompt: "检查一下当前是否有数据库读取权限"},
+			{Label: "预览数据源", Prompt: "预览数据源配置"},
 		}
 	case agentIntentUserAccess:
 		return []agentSuggestion{
@@ -1104,6 +3682,12 @@ func buildAgentSuggestions(intent agentIntent, results []agentToolResult) []agen
 			{Label: "数据源", Prompt: "预览数据源配置"},
 			{Label: "导出授权表", Prompt: "把当前授权的数据表清单导出 CSV 发给我"},
 		}
+	case agentIntentSystemConfig:
+		return []agentSuggestion{
+			{Label: "系统体检", Prompt: "对当前后台做一次系统体检并给出下一步建议"},
+			{Label: "数据源", Prompt: "预览数据源配置"},
+			{Label: "AI 能力", Prompt: "预览智能体能力"},
+		}
 	case agentIntentExport:
 		return []agentSuggestion{
 			{Label: "导出账号", Prompt: "把管理员账号的账号、角色、状态整理成 XLSX 文件发给我"},
@@ -1114,6 +3698,7 @@ func buildAgentSuggestions(intent agentIntent, results []agentToolResult) []agen
 		return []agentSuggestion{
 			{Label: "系统体检", Prompt: "对当前后台做一次系统体检并给出下一步建议"},
 			{Label: "导出账号", Prompt: "把管理员账号整理成表格文件发给我"},
+			{Label: "生成海报", Prompt: "帮我生成一张蓝绿色科技感的后台海报"},
 			{Label: "查询表", Prompt: "列出当前可查询的数据表"},
 		}
 	default:
@@ -1158,6 +3743,15 @@ func planAndRunAgentTools(tools tableToolProvider, message string) []agentToolRe
 	if intent == agentIntentAccessScope {
 		return []agentToolResult{tools.accessScopeResult()}
 	}
+	if intent == agentIntentSystemConfig {
+		return []agentToolResult{tools.inspectSystemConfig()}
+	}
+	if intent == agentIntentWebAccess {
+		return []agentToolResult{tools.accessWeb(message)}
+	}
+	if intent == agentIntentImage {
+		return []agentToolResult{tools.generateImage(message)}
+	}
 	if intent == agentIntentExport {
 		return []agentToolResult{tools.exportTables(message)}
 	}
@@ -1199,7 +3793,7 @@ func planAndRunAgentTools(tools tableToolProvider, message string) []agentToolRe
 		return results
 	}
 	if intent == agentIntentPreview {
-		tables := inferAgentTablesFromMessage(message)
+		tables := tools.inferExplicitTablesFromMessage(message)
 		if len(tables) > 1 {
 			results := make([]agentToolResult, 0, len(tables))
 			for i, table := range tables {
@@ -1210,16 +3804,16 @@ func planAndRunAgentTools(tools tableToolProvider, message string) []agentToolRe
 			}
 			return results
 		}
-		return []agentToolResult{tools.previewTable(inferAgentTableName(message), 10)}
+		return []agentToolResult{tools.previewTable(tools.inferTableName(message), 10)}
 	}
 	if containsAny(lower, "字段", "结构", "schema", "describe", "columns") {
-		return []agentToolResult{tools.describeTable(inferAgentTableName(message))}
+		return []agentToolResult{tools.describeTable(tools.inferTableName(message))}
 	}
 	if containsAny(lower, "列出", "有哪些", "表", "tables", "table", "数据库") {
 		return []agentToolResult{tools.listTables()}
 	}
 	if containsAny(lower, "预览", "查看", "数据", "明细", "rows", "preview") {
-		return []agentToolResult{tools.previewTable(inferAgentTableName(message), 10)}
+		return []agentToolResult{tools.previewTable(tools.inferTableName(message), 10)}
 	}
 	return []agentToolResult{tools.listTables()}
 }
@@ -1241,17 +3835,85 @@ func composeLocalAgentReply(message string, run agentRun, results []agentToolRes
 		return "这次请求没有执行成功：" + strings.Join(failed, "；")
 	}
 	if run.Mode == string(agentIntentAdmin) {
-		return "我是后台管理员助理。这个任务没有涉及具体数据表查询，所以不会调用数据库工具。你可以让我做后台巡检、解释功能、规划迁移、查询数据、按条件筛选并导出表格文件。"
+		return "这个问题不需要查表。我可以直接帮你看后台、查数据、导出文件，或者生成图片。"
 	}
 	if len(successful) == 0 {
-		return "我已经收到你的问题，但当前没有找到可执行的数据工具。你可以试试：列出数据表、查看系统初始化状态字段、预览数据源配置，或输入只读 SELECT。"
+		return "这次没有命中可执行工具。你可以直接说表名、查询目标，或让我先列出可查询的数据表。"
 	}
 
 	if run.Mode == string(agentIntentDesign) {
-		return "我会把后台的核心体验收敛成智能体工作台：先理解任务，再制定计划，然后通过受控工具读取数据，最后给出洞察、表格结果和下一步动作。当前已经具备计划、工具轨迹、只读查询和模型兜底；下一步应该接入真实数据库 Schema、导出工具和审计记忆。"
+		return "我建议把这块收成更轻的智能体工作台：对话、结果、下一步，别把太多信息堆在一页。"
 	}
 	if run.Mode == string(agentIntentHealth) {
-		return "系统体检完成：当前智能体能识别受控数据表、检查数据源状态，并展示已启用的工具边界。" + agentAuthorizationReplyNote(tableAccessMode, allowedTables)
+		return "系统体检完成。" + agentAuthorizationReplyNote(tableAccessMode, allowedTables)
+	}
+	if run.Mode == string(agentIntentWebAccess) {
+		for _, result := range successful {
+			switch result.Name {
+			case "web_fetch":
+				if len(result.Rows) > 0 {
+					title := strings.TrimSpace(result.Rows[0]["title"])
+					if title == "" {
+						title = strings.TrimSpace(result.Rows[0]["url"])
+					}
+					if title != "" {
+						return "已读取网页 `" + title + "`。"
+					}
+				}
+				return "已读取网页内容。"
+			case "web_search":
+				return fmt.Sprintf("已完成网页检索，找到 %d 条结果。", len(result.Rows))
+			}
+		}
+	}
+	if run.Mode == string(agentIntentImage) {
+		for _, result := range successful {
+			if result.File != nil {
+				return fmt.Sprintf("图片已生成：`%s`。", result.File.Name)
+			}
+		}
+		return "图片任务已完成，但这次没有返回可用文件。"
+	}
+	if run.Mode == string(agentIntentSystemConfig) {
+		siteName := ""
+		database := ""
+		aiProvider := ""
+		aiModel := ""
+		for _, result := range successful {
+			if result.Name != "inspect_system_config" {
+				continue
+			}
+			for _, row := range result.Rows {
+				switch row["key"] {
+				case "site_name":
+					siteName = row["value"]
+				case "database_driver":
+					database = row["value"]
+				case "ai_provider":
+					aiProvider = row["value"]
+				case "ai_model":
+					aiModel = row["value"]
+				}
+			}
+		}
+		parts := make([]string, 0, 4)
+		if siteName != "" {
+			parts = append(parts, "站点："+siteName)
+		}
+		if database != "" {
+			parts = append(parts, "数据库："+database)
+		}
+		if aiProvider != "" {
+			if aiModel != "" {
+				parts = append(parts, "AI："+aiProvider+" / "+aiModel)
+			} else {
+				parts = append(parts, "AI："+aiProvider)
+			}
+		}
+		if len(parts) == 0 {
+			return "已读取站点与 AI 配置概览。"
+		}
+		return "已读取站点与 AI 配置：" + strings.Join(parts, "；") + "。"
 	}
 	if run.Mode == string(agentIntentAccessScope) {
 		return composeAccessScopeReply(results)
@@ -1273,17 +3935,17 @@ func composeLocalAgentReply(message string, run agentRun, results []agentToolRes
 			count = "0"
 		}
 		if username != "" {
-			return fmt.Sprintf("当前后台管理员账号共 %s 个。已识别内置管理员 `%s`，角色为 %s。%s", count, username, role, agentAuthorizationReplyNote(tableAccessMode, allowedTables))
+			return fmt.Sprintf("当前后台管理员账号共 %s 个。内置管理员是 `%s`，角色为 %s。%s", count, username, role, agentAuthorizationReplyNote(tableAccessMode, allowedTables))
 		}
 		return fmt.Sprintf("当前后台管理员账号共 %s 个。%s", count, agentAuthorizationReplyNote(tableAccessMode, allowedTables))
 	}
 	if run.Mode == string(agentIntentExport) {
 		for _, result := range successful {
 			if result.File != nil {
-				return fmt.Sprintf("已按当前通道权限整理数据并生成表格文件 `%s`，可以直接下载。", result.File.Name)
+				return fmt.Sprintf("已生成文件 `%s`。", result.File.Name)
 			}
 		}
-		return "已读取数据，但暂时没有生成可下载文件。"
+		return "已读取数据，但还没有生成文件。"
 	}
 
 	result := successful[0]
@@ -1300,9 +3962,9 @@ func composeLocalAgentReply(message string, run agentRun, results []agentToolRes
 				}
 			}
 		}
-		return fmt.Sprintf("我已列出当前通道可查询的受控数据表，共 %d 张，包含中文名称、内部名和表注释：%s。", len(names), strings.Join(names, "、"))
+		return fmt.Sprintf("当前可查询数据表共 %d 张：%s。", len(names), strings.Join(names, "、"))
 	case "describe_table":
-		return fmt.Sprintf("`%s` 的字段结构已读取，共 %d 个字段。", result.Table, len(result.Rows))
+		return fmt.Sprintf("`%s` 字段共 %d 个。", result.Table, len(result.Rows))
 	case "preview_table":
 		return fmt.Sprintf("已预览 `%s`，返回 %d 行数据。", result.Table, len(result.Rows))
 	case "query_readonly":
@@ -1328,14 +3990,14 @@ func composeAccessScopeReply(results []agentToolResult) string {
 		tables := strings.TrimSpace(row["tables"])
 		summary := strings.TrimSpace(row["summary"])
 		if tables == "" {
-			return "当前会话数据权限：" + mode + "。可读数据表 0 张。权限查询只读取冻结快照，不会修改通道配置。"
+			return "当前数据权限：" + mode + "，可读数据表 0 张。"
 		}
 		if summary == "" {
 			summary = tables
 		}
-		return "当前会话数据权限：" + mode + "。可读数据表 " + count + " 张：" + summary + "。权限查询只读取冻结快照，不会修改通道配置。"
+		return "当前数据权限：" + mode + "，可读数据表 " + count + " 张：" + summary + "。"
 	}
-	return "当前会话数据权限暂时无法读取。"
+	return "暂时无法读取当前数据权限。"
 }
 
 func callConfiguredAgentModel(ctx context.Context, ai aiConfig, payload agentChatRequest, run agentRun, results []agentToolResult) (string, bool, error) {
@@ -1355,11 +4017,31 @@ func callConfiguredAgentModel(ctx context.Context, ai aiConfig, payload agentCha
 	toolContext, _ := json.Marshal(results)
 	runContext, _ := json.Marshal(run)
 	authorizationInstruction := agentAuthorizationInstruction(payload.TableAccessMode, payload.AllowedTables)
+	webInstruction := agentWebAuthorizationInstruction(payload.AllowWebRead != nil && *payload.AllowWebRead)
+	imageInstruction := agentImageAuthorizationInstruction(payload.AllowImageGenerate != nil && *payload.AllowImageGenerate)
 	messages := []map[string]string{
 		{
 			"role":    "system",
-			"content": "你是 Moyi Admin 后台管理员智能体，不是单纯的数据库查询机器人。工作方式参考 Codex：先理解目标，判断是否需要工具，解释计划，调用受控工具，再给出可执行结论。只有任务涉及数据、表、统计、筛选、导出或账号权限时才使用数据工具；普通后台管理咨询不要查询数据库。权限边界：" + authorizationInstruction + " 遇到账号、权限、数量、导出问题要主动查询或生成文件；如果工具结果提示未授权，必须直接说明当前通道无权访问对应表，不要反问用户是否启用模块，也不要继续推测。只能基于系统提供的 run 与工具结果回答；不要编造数据库内容；不要泄露密钥、密码哈希、盐值或会话信息。回答要简洁、像后台管理里的执行助手。",
+			"content": "你是 Moyi Admin 后台管理员智能体。先判断是否需要工具，再直接给结论。只有任务涉及数据、表、统计、筛选、导出或账号权限时才使用数据工具；涉及官网、公开网页、文档、链接时才使用网页访问工具；明确要求海报、封面、插图、配图或文生图时才使用图片生成工具。权限边界：" + authorizationInstruction + "。网页边界：" + webInstruction + "。图片边界：" + imageInstruction + "。如果工具结果提示未授权，必须直接说明无权访问，不要继续推测。只能基于系统提供的 run 与工具结果回答；不要编造数据库内容；不要泄露密钥、密码哈希、盐值或会话信息。如果本次工具结果里没有成功返回文件，就绝对不要声称已经生成了图片、压缩包、下载链接或表格文件；如果工具结果只返回 1 个文件，就只能说 1 个。默认只用 1 到 3 句短句回答；除非用户明确要求详细说明，否则不要复述问题、不要解释计划、不要附带太多建议。",
 		},
+	}
+	if summary := strings.TrimSpace(payload.CompressedContext); summary != "" {
+		messages = append(messages, map[string]string{
+			"role":    "system",
+			"content": "这是当前会话较早历史的压缩摘要，只用于保持上下文连续和延续用户目标，不要机械复述整段摘要：" + summary,
+		})
+	}
+	if summary := strings.TrimSpace(payload.HistoricalTasks); summary != "" {
+		messages = append(messages, map[string]string{
+			"role":    "system",
+			"content": "这是当前管理员跨会话的长期任务记忆摘要，只用于帮助识别常见任务、最近操作习惯和历史上下文：" + summary,
+		})
+	}
+	if summary := strings.TrimSpace(payload.StructuredMemory.promptSummary()); summary != "" {
+		messages = append(messages, map[string]string{
+			"role":    "system",
+			"content": "这是当前会话的结构化任务记忆，优先用它理解用户正在继续什么任务、围绕哪张表、是否沿用筛选和导出格式：" + summary,
+		})
 	}
 	for _, history := range tailAgentHistory(payload.History, 6) {
 		role := strings.TrimSpace(history.Role)
@@ -1429,11 +4111,12 @@ func tailAgentHistory(history []agentChatMessage, limit int) []agentChatMessage 
 func agentTableDefinitions() []agentTableDefinition {
 	return []agentTableDefinition{
 		{
-			Name:        "install_state",
-			Type:        "metadata_table",
-			DisplayName: "系统初始化状态",
-			Description: "当前系统初始化状态、安全入口、数据库与 AI 概览",
-			Aliases:     []string{"安装状态", "初始化信息", "站点信息", "后台入口", "随机后台入口", "元数据数据库", "AI 配置", "AI配置"},
+			Name:              "install_state",
+			Type:              "metadata_table",
+			DisplayName:       "系统初始化状态",
+			Description:       "当前系统初始化状态、安全入口、数据库与 AI 概览",
+			Aliases:           []string{"install_state", "系统初始化状态", "初始化状态表"},
+			HiddenFromCatalog: true,
 		},
 		{
 			Name:        "admin_settings",
@@ -1623,6 +4306,17 @@ func agentTableDefinitionByName(name string) (agentTableDefinition, bool) {
 	return agentTableDefinition{}, false
 }
 
+func filterAgentCatalogDefinitions(definitions []agentTableDefinition) []agentTableDefinition {
+	out := make([]agentTableDefinition, 0, len(definitions))
+	for _, definition := range definitions {
+		if definition.HiddenFromCatalog {
+			continue
+		}
+		out = append(out, definition)
+	}
+	return out
+}
+
 func (p tableToolProvider) listTables() agentToolResult {
 	definitions := p.authorizedDefinitions()
 	rows := make([]map[string]string, 0, len(definitions))
@@ -1665,12 +4359,33 @@ func (p tableToolProvider) accessScopeResult() agentToolResult {
 	}
 }
 
+func (p tableToolProvider) inspectSystemConfig() agentToolResult {
+	system := p.state.System.normalized()
+	storage := p.state.Storage.normalized()
+	rows := []map[string]string{
+		{"section": "site", "key": "site_name", "value": p.state.SiteName},
+		{"section": "site", "key": "public_headline", "value": system.PublicHeadline},
+		{"section": "database", "key": "database_driver", "value": p.state.Database.DisplayName()},
+		{"section": "ai", "key": "ai_provider", "value": p.state.AI.DisplayName()},
+		{"section": "ai", "key": "ai_model", "value": p.state.AI.DisplayModel()},
+		{"section": "storage", "key": "storage_driver", "value": storage.DisplayName()},
+		{"section": "system", "key": "timezone", "value": system.Timezone},
+	}
+	return agentToolResult{
+		Name:    "inspect_system_config",
+		OK:      true,
+		Message: "已读取站点与 AI 配置概览。",
+		Columns: []string{"section", "key", "value"},
+		Rows:    rows,
+	}
+}
+
 func (p tableToolProvider) authorizedTableNames() []string {
 	if p.denyAllTables {
 		return nil
 	}
 	if len(p.allowedTables) == 0 {
-		return knownAgentTables()
+		return p.knownTableNames()
 	}
 	names := make([]string, 0, len(p.allowedTables))
 	for table := range p.allowedTables {
@@ -1680,13 +4395,98 @@ func (p tableToolProvider) authorizedTableNames() []string {
 	return names
 }
 
+func (p tableToolProvider) knownTableNames() []string {
+	definitions := p.tableDefinitions()
+	names := make([]string, 0, len(definitions))
+	for _, definition := range definitions {
+		names = append(names, definition.Name)
+	}
+	return names
+}
+
+func (p tableToolProvider) singleAuthorizedTable() string {
+	if p.denyAllTables || len(p.allowedTables) != 1 {
+		return ""
+	}
+	for table := range p.allowedTables {
+		table = normalizeAgentTableName(table)
+		if table == "" {
+			return ""
+		}
+		if p.isResolvableContextTable(table) {
+			return table
+		}
+	}
+	return ""
+}
+
+func (p tableToolProvider) knownTableSummary() string {
+	parts := make([]string, 0, len(p.tableDefinitions()))
+	for _, definition := range p.tableDefinitions() {
+		parts = append(parts, definition.DisplayName+"("+definition.Name+")")
+	}
+	return strings.Join(parts, "、")
+}
+
+func (p tableToolProvider) unknownTableResult(toolName string, table string) agentToolResult {
+	if table == "" {
+		return p.unresolvedTableResult(toolName, "操作")
+	}
+	return agentToolResult{
+		Name:  toolName,
+		OK:    false,
+		Table: table,
+		Error: "未知数据表：" + table + "。当前可查询：" + p.knownTableSummary() + "。",
+	}
+}
+
+func (p tableToolProvider) unresolvedTableResult(toolName string, action string) agentToolResult {
+	action = strings.TrimSpace(action)
+	if action == "" {
+		action = "操作"
+	}
+	summary := strings.TrimSpace(p.authorizedTableSummary())
+	detail := "这次没有识别到你要" + action + "的数据表。请直接说明表名，或先让我列出当前可查询的数据表。"
+	switch summary {
+	case "", "无授权数据表", "未授权任何数据表":
+		detail += " 当前账号没有可查询的数据表。"
+	default:
+		detail += " 当前可查询：" + summary + "。"
+	}
+	return agentToolResult{
+		Name:  toolName,
+		OK:    false,
+		Error: detail,
+	}
+}
+
 func (p tableToolProvider) countTable(table string) agentToolResult {
 	table = normalizeAgentTableName(table)
+	if table == "" {
+		return p.unresolvedTableResult("count_table", "统计")
+	}
 	if !p.isTableAuthorized(table) {
 		return p.unauthorizedTableResult("count_table", table)
 	}
 	if _, ok := p.tableColumns(table); !ok {
-		return unknownAgentTableResult("count_table", table)
+		return p.unknownTableResult("count_table", table)
+	}
+	if external, ok := p.externalAgentTableByName(table); ok {
+		count, err := p.countExternalTableRows(external)
+		if err != nil {
+			return agentToolResult{Name: "count_table", OK: false, Table: table, Error: "外部数据源统计失败：" + err.Error()}
+		}
+		return agentToolResult{
+			Name:    "count_table",
+			OK:      true,
+			Message: "`" + table + "` 数量统计完成。",
+			Table:   table,
+			Columns: []string{"table", "count"},
+			Rows: []map[string]string{{
+				"table": table,
+				"count": strconv.Itoa(count),
+			}},
+		}
 	}
 	rows := p.tableRows(table)
 	return agentToolResult{
@@ -1703,12 +4503,14 @@ func (p tableToolProvider) countTable(table string) agentToolResult {
 }
 
 func (p tableToolProvider) exportTables(message string) agentToolResult {
-	tables := inferAgentExportTables(message)
+	tables := p.inferExportTables(message)
 	if len(tables) == 0 {
-		tables = []string{inferAgentTableName(message)}
+		if table := p.inferTableName(message); table != "" {
+			tables = []string{table}
+		}
 	}
-	if len(tables) == 0 || tables[0] == "" {
-		tables = []string{"admin_users"}
+	if len(tables) == 0 {
+		return p.unresolvedTableResult("export_table", "导出")
 	}
 
 	limit := inferAgentLimit(message, 200)
@@ -1743,9 +4545,22 @@ func (p tableToolProvider) exportTables(message string) agentToolResult {
 		}
 		columns, ok := p.exportColumnsForMessage(table, message)
 		if !ok {
-			return unknownAgentTableResult("export_table", table)
+			return p.unknownTableResult("export_table", table)
 		}
-		rows := p.filterRowsForMessage(table, p.tableRows(table), message)
+		rows := []map[string]string(nil)
+		if external, ok := p.externalAgentTableByName(table); ok {
+			fetchLimit := limit
+			if len(p.inferFilters(table, message)) > 0 && fetchLimit < 10000 {
+				fetchLimit = 10000
+			}
+			externalRows, err := p.queryExternalTableRows(external, columns, fetchLimit)
+			if err != nil {
+				return agentToolResult{Name: "export_table", OK: false, Table: table, Error: "外部数据源导出失败：" + err.Error()}
+			}
+			rows = p.filterRowsForMessage(table, externalRows, message)
+		} else {
+			rows = p.filterRowsForMessage(table, p.tableRows(table), message)
+		}
 		if len(rows) > limit {
 			rows = rows[:limit]
 		}
@@ -1811,6 +4626,13 @@ func inferAgentExportFormat(message string) agentExportFormat {
 			Label:     "XLSX",
 		}
 	}
+	if containsAny(lower, "csv", "逗号分隔", "comma separated") {
+		return agentExportFormat{
+			Extension: "csv",
+			MIME:      "text/csv; charset=utf-8",
+			Label:     "CSV",
+		}
+	}
 	if strings.Contains(lower, "json") {
 		return agentExportFormat{
 			Extension: "json",
@@ -1819,9 +4641,9 @@ func inferAgentExportFormat(message string) agentExportFormat {
 		}
 	}
 	return agentExportFormat{
-		Extension: "csv",
-		MIME:      "text/csv; charset=utf-8",
-		Label:     "CSV",
+		Extension: "xlsx",
+		MIME:      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+		Label:     "XLSX",
 	}
 }
 
@@ -1833,6 +4655,14 @@ func agentExportContentType(name string) (string, bool) {
 		return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", true
 	case ".json":
 		return "application/json; charset=utf-8", true
+	case ".png":
+		return "image/png", true
+	case ".jpg", ".jpeg":
+		return "image/jpeg", true
+	case ".webp":
+		return "image/webp", true
+	case ".gif":
+		return "image/gif", true
 	default:
 		return "", false
 	}
@@ -1864,9 +4694,15 @@ func writeAgentCSV(filePath string, data agentExportData) (err error) {
 		return err
 	}
 	writer := csv.NewWriter(file)
+	multiSheet := len(data.Sheets) > 1
 	for sheetIndex, sheet := range data.Sheets {
 		if sheetIndex > 0 {
 			if err := writer.Write([]string{}); err != nil {
+				return err
+			}
+		}
+		if multiSheet {
+			if err := writer.Write([]string{"数据表：" + sheet.Table}); err != nil {
 				return err
 			}
 		}
@@ -1875,8 +4711,7 @@ func writeAgentCSV(filePath string, data agentExportData) (err error) {
 			return err
 		}
 		for _, row := range sheet.Rows {
-			record := make([]string, 0, len(sheet.Columns)+1)
-			record = append(record, sheet.Table)
+			record := make([]string, 0, len(sheet.Columns))
 			for _, column := range sheet.Columns {
 				record = append(record, row[column])
 			}
@@ -2055,8 +4890,7 @@ func agentXLSXWorksheet(sheet agentExportSheet) string {
 	header := agentExportSheetHeaders(sheet)
 	agentXLSXRow(&body, 1, header)
 	for rowIndex, row := range sheet.Rows {
-		values := make([]string, 0, len(sheet.Columns)+1)
-		values = append(values, sheet.Table)
+		values := make([]string, 0, len(sheet.Columns))
 		for _, column := range sheet.Columns {
 			values = append(values, row[column])
 		}
@@ -2073,7 +4907,7 @@ func agentExportSheetHeaders(sheet agentExportSheet) []string {
 	if len(headers) != len(sheet.Columns) {
 		headers = append([]string(nil), sheet.Columns...)
 	}
-	return append([]string{"数据表"}, headers...)
+	return headers
 }
 
 func agentXLSXRow(body *strings.Builder, rowIndex int, values []string) {
@@ -2148,12 +4982,15 @@ func (p tableToolProvider) inspectAgentDesign() agentToolResult {
 
 func (p tableToolProvider) describeTable(table string) agentToolResult {
 	table = normalizeAgentTableName(table)
+	if table == "" {
+		return p.unresolvedTableResult("describe_table", "查看字段结构")
+	}
 	if !p.isTableAuthorized(table) {
 		return p.unauthorizedTableResult("describe_table", table)
 	}
 	columns, ok := p.tableColumns(table)
 	if !ok {
-		return unknownAgentTableResult("describe_table", table)
+		return p.unknownTableResult("describe_table", table)
 	}
 
 	rows := make([]map[string]string, 0, len(columns))
@@ -2176,24 +5013,36 @@ func (p tableToolProvider) describeTable(table string) agentToolResult {
 
 func (p tableToolProvider) previewTable(table string, limit int) agentToolResult {
 	table = normalizeAgentTableName(table)
+	if table == "" {
+		return p.unresolvedTableResult("preview_table", "预览")
+	}
 	if !p.isTableAuthorized(table) {
 		return p.unauthorizedTableResult("preview_table", table)
 	}
 	columns, ok := p.tableColumns(table)
 	if !ok {
-		return unknownAgentTableResult("preview_table", table)
+		return p.unknownTableResult("preview_table", table)
 	}
 	if limit <= 0 || limit > 50 {
 		limit = 10
 	}
 
-	rows := p.tableRows(table)
-	if len(rows) > limit {
-		rows = rows[:limit]
-	}
 	columnNames := make([]string, 0, len(columns))
 	for _, column := range columns {
 		columnNames = append(columnNames, column.Name)
+	}
+	rows := []map[string]string(nil)
+	if external, ok := p.externalAgentTableByName(table); ok {
+		externalRows, err := p.queryExternalTableRows(external, columnNames, limit)
+		if err != nil {
+			return agentToolResult{Name: "preview_table", OK: false, Table: table, Error: "外部数据源预览失败：" + err.Error()}
+		}
+		rows = externalRows
+	} else {
+		rows = p.tableRows(table)
+		if len(rows) > limit {
+			rows = rows[:limit]
+		}
 	}
 
 	return agentToolResult{
@@ -2211,6 +5060,11 @@ func (p tableToolProvider) runReadOnlyQuery(sql string) agentToolResult {
 	result := agentToolResult{
 		Name: "query_readonly",
 		SQL:  sql,
+	}
+	if !p.allowReadOnlyQuery {
+		result.OK = false
+		result.Error = "当前账号未授予 `agent.sql.select`，不能执行只读 SQL 查询。"
+		return result
 	}
 	if err := validateAgentReadOnlySQL(sql); err != nil {
 		result.OK = false
@@ -2247,11 +5101,26 @@ func (p tableToolProvider) runReadOnlyQuery(sql string) agentToolResult {
 		limit = parsedLimit
 	}
 	if _, ok := p.tableColumns(table); !ok {
-		unknown := unknownAgentTableResult("query_readonly", table)
+		unknown := p.unknownTableResult("query_readonly", table)
 		unknown.SQL = sql
 		return unknown
 	}
 	if isAgentCountExpression(rawColumns) {
+		if external, ok := p.externalAgentTableByName(table); ok {
+			count, err := p.countExternalTableRows(external)
+			if err != nil {
+				result.OK = false
+				result.Table = table
+				result.Error = "外部数据源统计失败：" + err.Error()
+				return result
+			}
+			result.OK = true
+			result.Message = "只读数量查询执行完成。"
+			result.Table = table
+			result.Columns = []string{"count"}
+			result.Rows = []map[string]string{{"count": strconv.Itoa(count)}}
+			return result
+		}
 		rows := p.tableRows(table)
 		result.OK = true
 		result.Message = "只读数量查询执行完成。"
@@ -2261,19 +5130,35 @@ func (p tableToolProvider) runReadOnlyQuery(sql string) agentToolResult {
 		return result
 	}
 
-	preview := p.previewTable(table, limit)
-	if !preview.OK {
-		preview.Name = "query_readonly"
-		preview.SQL = sql
-		return preview
-	}
-
 	selectedColumns, err := p.selectColumns(table, rawColumns)
 	if err != nil {
 		result.OK = false
 		result.Table = table
 		result.Error = err.Error()
 		return result
+	}
+
+	if external, ok := p.externalAgentTableByName(table); ok {
+		rows, err := p.queryExternalTableRows(external, selectedColumns, limit)
+		if err != nil {
+			result.OK = false
+			result.Table = table
+			result.Error = "外部数据源查询失败：" + err.Error()
+			return result
+		}
+		result.OK = true
+		result.Message = "只读查询执行完成。"
+		result.Table = table
+		result.Columns = selectedColumns
+		result.Rows = rows
+		return result
+	}
+
+	preview := p.previewTable(table, limit)
+	if !preview.OK {
+		preview.Name = "query_readonly"
+		preview.SQL = sql
+		return preview
 	}
 
 	projected := make([]map[string]string, 0, len(preview.Rows))
@@ -2291,6 +5176,147 @@ func (p tableToolProvider) runReadOnlyQuery(sql string) agentToolResult {
 	result.Columns = selectedColumns
 	result.Rows = projected
 	return result
+}
+
+func (p tableToolProvider) queryExternalTableRows(table agentExternalTable, selectedColumns []string, limit int) ([]map[string]string, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+	if limit > 10000 {
+		limit = 10000
+	}
+	if len(selectedColumns) == 0 {
+		selectedColumns = make([]string, 0, len(table.Columns))
+		for _, column := range table.Columns {
+			selectedColumns = append(selectedColumns, column.Name)
+		}
+	}
+
+	rawColumns := make([]string, 0, len(selectedColumns))
+	for _, column := range selectedColumns {
+		column = strings.TrimSpace(column)
+		raw := table.RawColumns[column]
+		if raw == "" {
+			return nil, errors.New("外部表 `" + table.ID + "` 不存在字段：" + column)
+		}
+		rawColumns = append(rawColumns, raw)
+	}
+
+	db, err := openAgentExternalDataSource(table.Source)
+	if err != nil {
+		return nil, err
+	}
+	defer db.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+
+	selectParts := make([]string, 0, len(rawColumns))
+	for _, raw := range rawColumns {
+		selectParts = append(selectParts, quoteAgentExternalIdentifier(table.Source.Driver, raw))
+	}
+	query := "SELECT " + strings.Join(selectParts, ", ") + " FROM " + quoteAgentExternalTableName(table.Source.Driver, table.RawName) + " LIMIT " + strconv.Itoa(limit)
+	rows, err := db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	values := make([]any, len(rawColumns))
+	scanTargets := make([]any, len(rawColumns))
+	for i := range values {
+		scanTargets[i] = &values[i]
+	}
+	out := make([]map[string]string, 0)
+	for rows.Next() {
+		if err := rows.Scan(scanTargets...); err != nil {
+			return nil, err
+		}
+		row := make(map[string]string, len(selectedColumns))
+		for i, column := range selectedColumns {
+			row[column] = formatAgentExternalSQLValue(values[i])
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
+func (p tableToolProvider) countExternalTableRows(table agentExternalTable) (int, error) {
+	db, err := openAgentExternalDataSource(table.Source)
+	if err != nil {
+		return 0, err
+	}
+	defer db.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+
+	query := "SELECT COUNT(*) FROM " + quoteAgentExternalTableName(table.Source.Driver, table.RawName)
+	var count int
+	if err := db.QueryRowContext(ctx, query).Scan(&count); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+func openAgentExternalDataSource(source dataSourceConfig) (*sql.DB, error) {
+	source = source.normalized()
+	switch source.Driver {
+	case "sqlite":
+		if source.FilePath == "" {
+			return nil, errors.New("SQLite 文件路径为空")
+		}
+		return sql.Open("sqlite", source.FilePath)
+	case "mysql", "postgres":
+		return openNetworkSQLDatabase(networkDatabaseConfig{
+			Driver:      source.Driver,
+			DisplayName: source.DisplayName(),
+			Host:        source.Host,
+			Port:        source.Port,
+			Database:    source.Database,
+			Username:    source.Username,
+			Password:    source.Password,
+			SSLMode:     source.SSLMode,
+			Purpose:     "Agent 外部数据源只读查询",
+		})
+	default:
+		return nil, errors.New("不支持的数据源类型：" + source.Driver)
+	}
+}
+
+func quoteAgentExternalTableName(driver string, table string) string {
+	table = strings.TrimSpace(table)
+	if normalizeDatabaseDriver(driver) == "postgres" {
+		parts := strings.Split(table, ".")
+		quoted := make([]string, 0, len(parts))
+		for _, part := range parts {
+			quoted = append(quoted, quoteAgentExternalIdentifier(driver, part))
+		}
+		return strings.Join(quoted, ".")
+	}
+	return quoteAgentExternalIdentifier(driver, table)
+}
+
+func quoteAgentExternalIdentifier(driver string, identifier string) string {
+	identifier = strings.TrimSpace(identifier)
+	if normalizeDatabaseDriver(driver) == "mysql" {
+		return "`" + strings.ReplaceAll(identifier, "`", "``") + "`"
+	}
+	return `"` + strings.ReplaceAll(identifier, `"`, `""`) + `"`
+}
+
+func formatAgentExternalSQLValue(value any) string {
+	if value == nil {
+		return ""
+	}
+	switch typed := value.(type) {
+	case []byte:
+		return string(typed)
+	case time.Time:
+		return typed.Format(time.RFC3339)
+	default:
+		return fmt.Sprint(typed)
+	}
 }
 
 func (p tableToolProvider) tableColumns(table string) ([]agentTableColumn, bool) {
@@ -2566,6 +5592,9 @@ func (p tableToolProvider) tableColumns(table string) ([]agentTableColumn, bool)
 			{Name: "next_action", Type: "string", Description: "下一步动作"},
 		}, true
 	default:
+		if external, ok := p.externalAgentTableByName(table); ok {
+			return external.Columns, true
+		}
 		return nil, false
 	}
 }
@@ -2969,8 +5998,10 @@ func (p tableToolProvider) tableRows(table string) []map[string]string {
 			{"name": "describe_table", "boundary": "只读查看字段结构", "status": "已启用"},
 			{"name": "preview_table", "boundary": "最多预览 50 行，屏蔽敏感字段", "status": "已启用"},
 			{"name": "query_readonly", "boundary": "仅允许单表 SELECT，拒绝写入语句", "status": "已启用"},
+			{"name": "web_access", "boundary": "允许访问公开 http/https 页面，拒绝本机、内网和受保护地址", "status": "已启用"},
 			{"name": "agent_memory", "boundary": "会话、运行和工具结果写入元数据表", "status": "已启用"},
 			{"name": "resource_registry", "boundary": "插件扩展、资源模型和生成工具统一登记，供智能体发现", "status": "已启用"},
+			{"name": "external_data_source_reader", "boundary": "按通道授权只读查询外部 SQLite/MySQL/PostgreSQL 数据源", "status": "已启用"},
 			{"name": "resource_tool_generator", "boundary": "从资源模型生成读取结构、预览、查询和导出工具", "status": "本次接入"},
 			{"name": "insight_engine", "boundary": "基于工具结果生成洞察和建议", "status": "已启用"},
 		}
@@ -2984,7 +6015,7 @@ func (p tableToolProvider) tableRows(table string) []map[string]string {
 		return []map[string]string{
 			{"layer": "感知层", "role": "识别用户目标、页面上下文和数据范围", "status": "已启用", "next_action": "接入更多后台页面上下文"},
 			{"layer": "计划层", "role": "拆解任务、生成执行计划和建议动作", "status": "已启用", "next_action": "增加多步骤任务状态持久化"},
-			{"layer": "工具层", "role": "统一封装只读查询、结构探测和数据预览", "status": "已启用", "next_action": "接入真实 MySQL/PostgreSQL/SQLite 驱动"},
+			{"layer": "工具层", "role": "统一封装只读查询、结构探测和数据预览", "status": "已启用", "next_action": "继续补充外部数据源筛选、分页和字段脱敏策略"},
 			{"layer": "模型层", "role": "通过百炼兼容接口整理结论和追问", "status": modelStatus, "next_action": modelAction},
 			{"layer": "记忆层", "role": "沉淀会话、审计和任务结果", "status": "已启用", "next_action": "补多轮任务恢复和运行详情页"},
 			{"layer": "产出层", "role": "生成表格导出、迁移报告和操作建议", "status": "已启用", "next_action": "补更复杂筛选和多表导出"},
@@ -3088,7 +6119,7 @@ func (p tableToolProvider) exportHeadersForColumns(table string, selectedColumns
 }
 
 func (p tableToolProvider) filterRowsForMessage(table string, rows []map[string]string, message string) []map[string]string {
-	filters := inferAgentFilters(table, message)
+	filters := p.inferFilters(table, message)
 	if len(filters) == 0 {
 		return rows
 	}
@@ -3405,10 +6436,10 @@ func agentMessageHasColumnSelectionCue(message string) bool {
 		strings.Contains(message, "的")
 }
 
-func inferAgentFilters(table string, message string) map[string]string {
+func (p tableToolProvider) inferFilters(table string, message string) map[string]string {
 	lower := strings.ToLower(message)
 	filters := map[string]string{}
-	columns, ok := newTableToolProvider(installState{}, "", "").tableColumns(table)
+	columns, ok := p.tableColumns(table)
 	if ok {
 		for _, column := range columns {
 			for _, token := range agentColumnMatchTokens(table, column) {
@@ -3442,6 +6473,10 @@ func inferAgentFilters(table string, message string) map[string]string {
 		}
 	}
 	return filters
+}
+
+func inferAgentFilters(table string, message string) map[string]string {
+	return newTableToolProvider(installState{}, "", "").inferFilters(table, message)
 }
 
 func agentRowMatchesFilters(row map[string]string, filters map[string]string) bool {
@@ -3506,7 +6541,35 @@ func inferAgentExportTables(message string) []string {
 	if containsAny(lower, "所有表", "全部表", "所有数据表", "全部数据表", "all tables") {
 		return known
 	}
-	tables := inferAgentTablesFromMessage(message)
+	tables := inferAgentExplicitTablesFromMessage(message)
+	if len(tables) > 0 {
+		return tables
+	}
+	return nil
+}
+
+func (p tableToolProvider) inferExportTables(message string) []string {
+	raw := strings.TrimSpace(firstNonEmpty(p.rawMessage, message))
+	lower := strings.ToLower(raw)
+	if containsAny(lower, "所有表", "全部表", "所有数据表", "全部数据表", "all tables") {
+		return p.knownTableNames()
+	}
+	tables := p.inferExplicitTablesFromMessage(raw)
+	if len(tables) > 0 {
+		return tables
+	}
+	if p.lastExport != nil && shouldReuseLastExportContext(raw) {
+		if tables = normalizeAgentAllowedTables([]string{p.lastExport.Table}); len(tables) > 0 {
+			return tables
+		}
+	}
+	if table := p.inferTableNameFromMemory(raw); table != "" {
+		return []string{table}
+	}
+	if table := p.singleAuthorizedTable(); table != "" {
+		return []string{table}
+	}
+	tables = p.inferTablesFromMessage(message)
 	if len(tables) > 0 {
 		return tables
 	}
@@ -3535,15 +6598,79 @@ func inferAgentLimit(message string, fallback int) int {
 }
 
 func inferAgentTableName(message string) string {
-	tables := inferAgentTablesFromMessage(message)
+	tables := inferAgentExplicitTablesFromMessage(message)
 	if len(tables) > 0 {
 		return tables[0]
 	}
-	return "install_state"
+	return ""
+}
+
+func (p tableToolProvider) inferTableName(message string) string {
+	raw := strings.TrimSpace(firstNonEmpty(p.rawMessage, message))
+	tables := p.inferExplicitTablesFromMessage(raw)
+	if len(tables) > 0 {
+		return tables[0]
+	}
+	if table := p.inferTableNameFromMemory(raw); table != "" {
+		return table
+	}
+	if table := p.singleAuthorizedTable(); table != "" {
+		return table
+	}
+	tables = p.inferTablesFromMessage(message)
+	if len(tables) > 0 {
+		return tables[0]
+	}
+	return ""
+}
+
+func (p tableToolProvider) inferTableNameFromMemory(message string) string {
+	memory := p.memory.normalized()
+	if !memory.hasContext() {
+		return ""
+	}
+	lower := strings.ToLower(strings.TrimSpace(message))
+	if lower == "" {
+		return ""
+	}
+	if isAgentSystemConfigQuestion(message) || isAgentAccessScopeQuestion(message) || isAgentWebQuestion(message) || isAgentImageQuestion(message) {
+		return ""
+	}
+	if containsAny(lower, "列出当前可查询的数据表", "列出数据表", "哪些表", "什么表", "可查询的数据表", "数据权限", "权限范围") {
+		return ""
+	}
+	continuation := shouldReuseStructuredTaskMemory(message, memory) ||
+		containsAny(lower,
+			"这个", "这些", "那个", "那些", "刚才", "上一轮", "上一份", "上一个", "继续", "接着",
+			"再查", "再看", "再导", "只看", "只保留", "筛选", "过滤", "启用", "禁用", "状态", "数量", "统计",
+			"字段", "结构", "导出", "预览", "明细")
+	if !continuation && utf8.RuneCountInString(lower) > 48 {
+		return ""
+	}
+	candidates := make([]string, 0, 1+len(memory.FocusTables))
+	if memory.PrimaryTable != "" {
+		candidates = append(candidates, memory.PrimaryTable)
+	}
+	candidates = append(candidates, memory.FocusTables...)
+	for _, candidate := range normalizeAgentAllowedTables(candidates) {
+		if p.isResolvableContextTable(candidate) {
+			return candidate
+		}
+	}
+	return ""
+}
+
+func (p tableToolProvider) isResolvableContextTable(table string) bool {
+	table = normalizeAgentTableName(table)
+	if table == "" || !p.isTableAuthorized(table) {
+		return false
+	}
+	_, ok := p.tableColumns(table)
+	return ok
 }
 
 func knownAgentTables() []string {
-	definitions := agentTableDefinitions()
+	definitions := filterAgentCatalogDefinitions(agentTableDefinitions())
 	names := make([]string, 0, len(definitions))
 	for _, definition := range definitions {
 		names = append(names, definition.Name)
@@ -3557,7 +6684,11 @@ func normalizeAgentTableName(table string) string {
 
 func unknownAgentTableResult(toolName string, table string) agentToolResult {
 	if table == "" {
-		table = "install_state"
+		return agentToolResult{
+			Name:  toolName,
+			OK:    false,
+			Error: "这次没有识别到要操作的数据表，请直接说明表名，或先列出当前可查询的数据表。",
+		}
 	}
 	return agentToolResult{
 		Name:  toolName,
@@ -3573,9 +6704,20 @@ type agentTableMatch struct {
 }
 
 func inferAgentTablesFromMessage(message string) []string {
+	return inferAgentTablesFromDefinitions(message, agentTableDefinitions(), false)
+}
+
+func inferAgentExplicitTablesFromMessage(message string) []string {
+	return inferAgentTablesFromDefinitions(message, agentTableDefinitions(), true)
+}
+
+func inferAgentTablesFromDefinitions(message string, definitions []agentTableDefinition, explicitOnly bool) []string {
 	matches := make([]agentTableMatch, 0)
-	for _, definition := range agentTableDefinitions() {
+	for _, definition := range definitions {
 		score := scoreAgentTableDefinition(message, definition)
+		if explicitOnly {
+			score = scoreAgentExplicitTableDefinition(message, definition)
+		}
 		if score > 0 {
 			matches = append(matches, agentTableMatch{Name: definition.Name, Score: score})
 		}
@@ -3604,6 +6746,35 @@ func inferAgentTablesFromMessage(message string) []string {
 	return tables
 }
 
+func (p tableToolProvider) inferTablesFromMessage(message string) []string {
+	return inferAgentTablesFromDefinitions(message, p.tableDefinitions(), false)
+}
+
+func (p tableToolProvider) inferExplicitTablesFromMessage(message string) []string {
+	return inferAgentTablesFromDefinitions(message, p.tableDefinitions(), true)
+}
+
+func scoreAgentExplicitTableDefinition(message string, definition agentTableDefinition) int {
+	score := 0
+	if agentNormalizedContains(message, definition.Name) {
+		score = maxAgentScore(score, 100)
+	}
+	if agentNormalizedContains(message, definition.DisplayName) {
+		score = maxAgentScore(score, 70)
+	}
+	for _, alias := range definition.Aliases {
+		if !agentNormalizedContains(message, alias) {
+			continue
+		}
+		aliasScore := 45
+		if utf8.RuneCountInString(alias) <= 2 {
+			aliasScore = 18
+		}
+		score = maxAgentScore(score, aliasScore)
+	}
+	return score
+}
+
 func scoreAgentTableDefinition(message string, definition agentTableDefinition) int {
 	score := 0
 	if agentNormalizedContains(message, definition.Name) {
@@ -3629,8 +6800,9 @@ func scoreAgentTableDefinition(message string, definition agentTableDefinition) 
 }
 
 func agentKnownTableSummary() string {
-	parts := make([]string, 0, len(agentTableDefinitions()))
-	for _, definition := range agentTableDefinitions() {
+	definitions := filterAgentCatalogDefinitions(agentTableDefinitions())
+	parts := make([]string, 0, len(definitions))
+	for _, definition := range definitions {
 		parts = append(parts, definition.DisplayName+"("+definition.Name+")")
 	}
 	return strings.Join(parts, "、")

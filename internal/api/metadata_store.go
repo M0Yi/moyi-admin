@@ -14,7 +14,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const metadataSchemaVersion = 20
+const metadataSchemaVersion = 21
 
 func (s *installStore) sqlitePath() string {
 	path := strings.TrimSpace(s.path)
@@ -129,7 +129,13 @@ func ensureMetadataSchema(db *sql.DB) error {
 			name TEXT NOT NULL,
 			scope TEXT NOT NULL DEFAULT '',
 			status TEXT NOT NULL,
-			description TEXT NOT NULL DEFAULT ''
+			description TEXT NOT NULL DEFAULT '',
+			data_scope TEXT NOT NULL DEFAULT '',
+			allowed_tables TEXT NOT NULL DEFAULT '',
+			menu_keys TEXT NOT NULL DEFAULT '',
+			permission_keys TEXT NOT NULL DEFAULT '',
+			menus_configured INTEGER NOT NULL DEFAULT 0,
+			permissions_configured INTEGER NOT NULL DEFAULT 0
 		)`,
 		`CREATE TABLE IF NOT EXISTS admin_menus (
 			key TEXT PRIMARY KEY,
@@ -257,6 +263,41 @@ func ensureMetadataSchema(db *sql.DB) error {
 			result_json TEXT NOT NULL DEFAULT '',
 			created_at TEXT NOT NULL DEFAULT ''
 		)`,
+		`CREATE TABLE IF NOT EXISTS agent_tasks (
+			id TEXT PRIMARY KEY,
+			session_id TEXT NOT NULL DEFAULT '',
+			actor TEXT NOT NULL DEFAULT '',
+			title TEXT NOT NULL DEFAULT '',
+			goal TEXT NOT NULL DEFAULT '',
+			status TEXT NOT NULL DEFAULT '',
+			intent TEXT NOT NULL DEFAULT '',
+			primary_table TEXT NOT NULL DEFAULT '',
+			focus_tables_json TEXT NOT NULL DEFAULT '',
+			filters_json TEXT NOT NULL DEFAULT '',
+			export_format TEXT NOT NULL DEFAULT '',
+			last_tool TEXT NOT NULL DEFAULT '',
+			last_run_id TEXT NOT NULL DEFAULT '',
+			last_user_message TEXT NOT NULL DEFAULT '',
+			last_reply TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL DEFAULT '',
+			updated_at TEXT NOT NULL DEFAULT '',
+			completed_at TEXT NOT NULL DEFAULT ''
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_agent_tasks_session_updated ON agent_tasks(session_id, updated_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_agent_tasks_actor_updated ON agent_tasks(actor, updated_at DESC)`,
+		`CREATE TABLE IF NOT EXISTS agent_task_steps (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			task_id TEXT NOT NULL DEFAULT '',
+			run_id TEXT NOT NULL DEFAULT '',
+			step_index INTEGER NOT NULL DEFAULT 0,
+			title TEXT NOT NULL DEFAULT '',
+			detail TEXT NOT NULL DEFAULT '',
+			status TEXT NOT NULL DEFAULT '',
+			tool TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL DEFAULT '',
+			updated_at TEXT NOT NULL DEFAULT ''
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_agent_task_steps_task_index ON agent_task_steps(task_id, step_index)`,
 		`CREATE TABLE IF NOT EXISTS agent_channels (
 			key TEXT PRIMARY KEY,
 			provider TEXT NOT NULL DEFAULT '',
@@ -279,6 +320,7 @@ func ensureMetadataSchema(db *sql.DB) error {
 			token TEXT NOT NULL DEFAULT '',
 			display_name TEXT NOT NULL DEFAULT '',
 			agent_hint TEXT NOT NULL DEFAULT '',
+			admin_user TEXT NOT NULL DEFAULT '',
 			data_scope TEXT NOT NULL DEFAULT '',
 			allowed_tables TEXT NOT NULL DEFAULT '',
 			bound_user TEXT NOT NULL DEFAULT '',
@@ -383,6 +425,7 @@ func ensureMetadataSchema(db *sql.DB) error {
 		`INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(18, ?)`,
 		`INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(19, ?)`,
 		`INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(20, ?)`,
+		`INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES(21, ?)`,
 	}
 	for _, statement := range statements {
 		if strings.Contains(statement, "schema_migrations") && strings.Contains(statement, "?") {
@@ -431,6 +474,21 @@ func ensureMetadataSchema(db *sql.DB) error {
 		name       string
 		definition string
 	}{
+		{name: "data_scope", definition: "TEXT NOT NULL DEFAULT ''"},
+		{name: "allowed_tables", definition: "TEXT NOT NULL DEFAULT ''"},
+		{name: "menu_keys", definition: "TEXT NOT NULL DEFAULT ''"},
+		{name: "permission_keys", definition: "TEXT NOT NULL DEFAULT ''"},
+		{name: "menus_configured", definition: "INTEGER NOT NULL DEFAULT 0"},
+		{name: "permissions_configured", definition: "INTEGER NOT NULL DEFAULT 0"},
+	} {
+		if err := ensureSQLiteColumn(ctx, db, "admin_roles", column.name, column.definition); err != nil {
+			return err
+		}
+	}
+	for _, column := range []struct {
+		name       string
+		definition string
+	}{
 		{name: "bind_session", definition: "TEXT NOT NULL DEFAULT ''"},
 		{name: "bind_expires_at", definition: "TEXT NOT NULL DEFAULT ''"},
 		{name: "base_url", definition: "TEXT NOT NULL DEFAULT ''"},
@@ -444,6 +502,7 @@ func ensureMetadataSchema(db *sql.DB) error {
 		{name: "account_id", definition: "TEXT NOT NULL DEFAULT ''"},
 		{name: "openclaw_user_id", definition: "TEXT NOT NULL DEFAULT ''"},
 		{name: "sync_buffer", definition: "TEXT NOT NULL DEFAULT ''"},
+		{name: "admin_user", definition: "TEXT NOT NULL DEFAULT ''"},
 		{name: "data_scope", definition: "TEXT NOT NULL DEFAULT ''"},
 		{name: "allowed_tables", definition: "TEXT NOT NULL DEFAULT ''"},
 		{name: "last_error", definition: "TEXT NOT NULL DEFAULT ''"},
@@ -631,6 +690,7 @@ func loadInstallStateFromDB(db *sql.DB) (installState, error) {
 		return installState{}, err
 	}
 	state.AgentChannels = channels
+	ensureDefaultAgentWeChatChannelsForAdmins(&state)
 	return state, nil
 }
 
@@ -649,6 +709,7 @@ func saveInstallStateToDB(db *sql.DB, state installState) error {
 	state.Security = state.Security.normalized()
 	state.Notifications = state.Notifications.normalized()
 	state.TaskWorker = state.TaskWorker.normalized()
+	ensureDefaultAgentWeChatChannelsForAdmins(&state)
 	initialized := 0
 	if state.Initialized {
 		initialized = 1
@@ -772,9 +833,19 @@ func saveInstallStateToDB(db *sql.DB, state installState) error {
 }
 
 func loadAccessFromDB(db *sql.DB) (accessConfig, error) {
-	roles, err := queryRows(db, `SELECT key, name, scope, status, description FROM admin_roles ORDER BY key`, func(rows *sql.Rows) (adminRoleConfig, error) {
+	roles, err := queryRows(db, `SELECT key, name, scope, status, description, data_scope, allowed_tables, menu_keys, permission_keys, menus_configured, permissions_configured FROM admin_roles ORDER BY key`, func(rows *sql.Rows) (adminRoleConfig, error) {
 		var role adminRoleConfig
-		err := rows.Scan(&role.Key, &role.Name, &role.Scope, &role.Status, &role.Description)
+		var allowedTables string
+		var menuKeys string
+		var permissionKeys string
+		var menusConfigured int
+		var permissionsConfigured int
+		err := rows.Scan(&role.Key, &role.Name, &role.Scope, &role.Status, &role.Description, &role.DataScope, &allowedTables, &menuKeys, &permissionKeys, &menusConfigured, &permissionsConfigured)
+		role.AllowedTables = decodeAgentAllowedTables(allowedTables)
+		role.MenuKeys = normalizeAdminSelectionKeys([]string{menuKeys})
+		role.PermissionKeys = normalizeAdminSelectionKeys([]string{permissionKeys})
+		role.MenusConfigured = menusConfigured == 1
+		role.PermissionsConfigured = permissionsConfigured == 1
 		return role, err
 	})
 	if err != nil {
@@ -828,8 +899,16 @@ func replaceAccessRows(ctx context.Context, tx *sql.Tx, access accessConfig) err
 			return err
 		}
 	}
-	for _, role := range normalizeRoleConfigs(access.Roles) {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO admin_roles(key, name, scope, status, description) VALUES(?, ?, ?, ?, ?)`, role.Key, role.Name, role.Scope, role.Status, role.Description); err != nil {
+	for _, role := range normalizeRoleConfigsWithCatalog(access.Roles, access.Menus, access.Permissions) {
+		menusConfigured := 0
+		if role.MenusConfigured {
+			menusConfigured = 1
+		}
+		permissionsConfigured := 0
+		if role.PermissionsConfigured {
+			permissionsConfigured = 1
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO admin_roles(key, name, scope, status, description, data_scope, allowed_tables, menu_keys, permission_keys, menus_configured, permissions_configured) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, role.Key, role.Name, role.Scope, role.Status, role.Description, role.DataScope, encodeAgentAllowedTables(role.AllowedTables), strings.Join(role.MenuKeys, ","), strings.Join(role.PermissionKeys, ","), menusConfigured, permissionsConfigured); err != nil {
 			return err
 		}
 	}
@@ -959,13 +1038,13 @@ func replaceDataSourceRows(ctx context.Context, tx *sql.Tx, sources []dataSource
 }
 
 func loadAgentChannelsFromDB(db *sql.DB) (agentChannelConfig, error) {
-	rows, err := queryRows(db, `SELECT key, provider, enabled, status, bind_code, bind_session, bind_expires_at, base_url, bot_type, login_qrcode, login_session, qr_payload, qr_image_url, login_message, provider_token, account_id, openclaw_user_id, sync_buffer, token, display_name, agent_hint, data_scope, allowed_tables, bound_user, client_info, last_error, created_at, updated_at, bound_at, last_message_at, last_heartbeat_at, last_outbound_at FROM agent_channels ORDER BY key`, func(rows *sql.Rows) (agentWeChatChannelConfig, error) {
+	rows, err := queryRows(db, `SELECT key, provider, enabled, status, bind_code, bind_session, bind_expires_at, base_url, bot_type, login_qrcode, login_session, qr_payload, qr_image_url, login_message, provider_token, account_id, openclaw_user_id, sync_buffer, token, display_name, agent_hint, admin_user, data_scope, allowed_tables, bound_user, client_info, last_error, created_at, updated_at, bound_at, last_message_at, last_heartbeat_at, last_outbound_at FROM agent_channels ORDER BY key`, func(rows *sql.Rows) (agentWeChatChannelConfig, error) {
 		var key, provider string
 		var enabled int
 		var allowedTables string
 		var bindExpiresAt, createdAt, updatedAt, boundAt, lastMessageAt, lastHeartbeatAt, lastOutboundAt string
 		var channel agentWeChatChannelConfig
-		err := rows.Scan(&key, &provider, &enabled, &channel.Status, &channel.BindCode, &channel.BindSession, &bindExpiresAt, &channel.BaseURL, &channel.BotType, &channel.LoginQRCode, &channel.LoginSession, &channel.QRPayload, &channel.QRImageURL, &channel.LoginMessage, &channel.ProviderToken, &channel.AccountID, &channel.OpenClawUserID, &channel.SyncBuffer, &channel.Token, &channel.DisplayName, &channel.AgentHint, &channel.DataScope, &allowedTables, &channel.BoundUser, &channel.ClientInfo, &channel.LastError, &createdAt, &updatedAt, &boundAt, &lastMessageAt, &lastHeartbeatAt, &lastOutboundAt)
+		err := rows.Scan(&key, &provider, &enabled, &channel.Status, &channel.BindCode, &channel.BindSession, &bindExpiresAt, &channel.BaseURL, &channel.BotType, &channel.LoginQRCode, &channel.LoginSession, &channel.QRPayload, &channel.QRImageURL, &channel.LoginMessage, &channel.ProviderToken, &channel.AccountID, &channel.OpenClawUserID, &channel.SyncBuffer, &channel.Token, &channel.DisplayName, &channel.AgentHint, &channel.AdminUser, &channel.DataScope, &allowedTables, &channel.BoundUser, &channel.ClientInfo, &channel.LastError, &createdAt, &updatedAt, &boundAt, &lastMessageAt, &lastHeartbeatAt, &lastOutboundAt)
 		if key != "wechat_bind" && provider != "wechat_bind" && provider != agentWeChatProviderID {
 			return agentWeChatChannelConfig{}, nil
 		}
@@ -1005,8 +1084,8 @@ func replaceAgentChannelRows(ctx context.Context, tx *sql.Tx, channels agentChan
 		if wechat.Key == "" {
 			wechat.Key = newAgentWeChatChannelKey()
 		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO agent_channels(key, provider, enabled, status, bind_code, bind_session, bind_expires_at, base_url, bot_type, login_qrcode, login_session, qr_payload, qr_image_url, login_message, provider_token, account_id, openclaw_user_id, sync_buffer, token, display_name, agent_hint, data_scope, allowed_tables, bound_user, client_info, last_error, created_at, updated_at, bound_at, last_message_at, last_heartbeat_at, last_outbound_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			wechat.Key, agentWeChatProviderID, enabled, wechat.Status, wechat.BindCode, wechat.BindSession, formatStoreTime(wechat.BindExpiresAt), wechat.BaseURL, wechat.BotType, wechat.LoginQRCode, wechat.LoginSession, wechat.QRPayload, wechat.QRImageURL, wechat.LoginMessage, wechat.ProviderToken, wechat.AccountID, wechat.OpenClawUserID, wechat.SyncBuffer, wechat.Token, wechat.DisplayName, wechat.AgentHint, wechat.DataScope, encodeAgentAllowedTables(wechat.AllowedTables), wechat.BoundUser, wechat.ClientInfo, wechat.LastError, formatStoreTime(wechat.CreatedAt), formatStoreTime(wechat.UpdatedAt), formatStoreTime(wechat.BoundAt), formatStoreTime(wechat.LastMessageAt), formatStoreTime(wechat.LastHeartbeatAt), formatStoreTime(wechat.LastOutboundAt)); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO agent_channels(key, provider, enabled, status, bind_code, bind_session, bind_expires_at, base_url, bot_type, login_qrcode, login_session, qr_payload, qr_image_url, login_message, provider_token, account_id, openclaw_user_id, sync_buffer, token, display_name, agent_hint, admin_user, data_scope, allowed_tables, bound_user, client_info, last_error, created_at, updated_at, bound_at, last_message_at, last_heartbeat_at, last_outbound_at) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			wechat.Key, agentWeChatProviderID, enabled, wechat.Status, wechat.BindCode, wechat.BindSession, formatStoreTime(wechat.BindExpiresAt), wechat.BaseURL, wechat.BotType, wechat.LoginQRCode, wechat.LoginSession, wechat.QRPayload, wechat.QRImageURL, wechat.LoginMessage, wechat.ProviderToken, wechat.AccountID, wechat.OpenClawUserID, wechat.SyncBuffer, wechat.Token, wechat.DisplayName, wechat.AgentHint, wechat.AdminUser, wechat.DataScope, encodeAgentAllowedTables(wechat.AllowedTables), wechat.BoundUser, wechat.ClientInfo, wechat.LastError, formatStoreTime(wechat.CreatedAt), formatStoreTime(wechat.UpdatedAt), formatStoreTime(wechat.BoundAt), formatStoreTime(wechat.LastMessageAt), formatStoreTime(wechat.LastHeartbeatAt), formatStoreTime(wechat.LastOutboundAt)); err != nil {
 			return err
 		}
 	}
@@ -1825,6 +1904,186 @@ func (s *installStore) ListAgentToolResults(limit int) ([]agentToolResultRecord,
 		record.CreatedAt = parseStoreTime(createdAt)
 		return record, err
 	}, args...)
+}
+
+func (s *installStore) UpsertAgentTask(record agentTaskRecord) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.path == "" || strings.TrimSpace(record.ID) == "" {
+		return nil
+	}
+	db, err := s.openSQLiteLocked()
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	if record.CreatedAt.IsZero() {
+		record.CreatedAt = time.Now().UTC()
+	}
+	if record.UpdatedAt.IsZero() {
+		record.UpdatedAt = record.CreatedAt
+	}
+	focusTablesJSON, err := marshalStoreJSON(normalizeAgentAllowedTables(record.FocusTables))
+	if err != nil {
+		return err
+	}
+	filtersJSON, err := marshalStoreJSON(record.Filters)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, err = db.ExecContext(ctx, `INSERT INTO agent_tasks(
+		id, session_id, actor, title, goal, status, intent, primary_table, focus_tables_json, filters_json,
+		export_format, last_tool, last_run_id, last_user_message, last_reply, created_at, updated_at, completed_at
+	) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	ON CONFLICT(id) DO UPDATE SET
+		session_id=excluded.session_id,
+		actor=excluded.actor,
+		title=excluded.title,
+		goal=excluded.goal,
+		status=excluded.status,
+		intent=excluded.intent,
+		primary_table=excluded.primary_table,
+		focus_tables_json=excluded.focus_tables_json,
+		filters_json=excluded.filters_json,
+		export_format=excluded.export_format,
+		last_tool=excluded.last_tool,
+		last_run_id=excluded.last_run_id,
+		last_user_message=excluded.last_user_message,
+		last_reply=excluded.last_reply,
+		updated_at=excluded.updated_at,
+		completed_at=excluded.completed_at`,
+		record.ID,
+		record.SessionID,
+		record.Actor,
+		truncateAuditText(record.Title, 160),
+		truncateAuditText(record.Goal, 400),
+		record.Status,
+		record.Intent,
+		record.PrimaryTable,
+		focusTablesJSON,
+		filtersJSON,
+		record.ExportFormat,
+		record.LastTool,
+		record.LastRunID,
+		truncateAuditText(record.LastUserMessage, 2000),
+		truncateAuditText(record.LastReply, 4000),
+		formatStoreTime(record.CreatedAt),
+		formatStoreTime(record.UpdatedAt),
+		formatStoreTime(record.CompletedAt),
+	)
+	return err
+}
+
+func (s *installStore) ReplaceAgentTaskSteps(taskID string, steps []agentTaskStepRecord) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	taskID = strings.TrimSpace(taskID)
+	if s.path == "" || taskID == "" {
+		return nil
+	}
+	db, err := s.openSQLiteLocked()
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM agent_task_steps WHERE task_id = ?`, taskID); err != nil {
+		return err
+	}
+	for index, step := range steps {
+		createdAt := step.CreatedAt
+		if createdAt.IsZero() {
+			createdAt = time.Now().UTC()
+		}
+		updatedAt := step.UpdatedAt
+		if updatedAt.IsZero() {
+			updatedAt = createdAt
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO agent_task_steps(task_id, run_id, step_index, title, detail, status, tool, created_at, updated_at)
+			VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			taskID,
+			step.RunID,
+			index,
+			truncateAuditText(step.Title, 160),
+			truncateAuditText(step.Detail, 400),
+			step.Status,
+			step.Tool,
+			formatStoreTime(createdAt),
+			formatStoreTime(updatedAt),
+		); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func (s *installStore) ListAgentTasks(limit int) ([]agentTaskRecord, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.path == "" {
+		return nil, nil
+	}
+	db, err := s.openSQLiteLocked()
+	if err != nil {
+		return nil, err
+	}
+	defer db.Close()
+	query := `SELECT id, session_id, actor, title, goal, status, intent, primary_table, focus_tables_json, filters_json, export_format, last_tool, last_run_id, last_user_message, last_reply, created_at, updated_at, completed_at FROM agent_tasks ORDER BY updated_at DESC, id DESC`
+	args := []any{}
+	if limit > 0 {
+		query += ` LIMIT ?`
+		args = append(args, limit)
+	}
+	return queryRows(db, query, func(rows *sql.Rows) (agentTaskRecord, error) {
+		var record agentTaskRecord
+		var focusTablesJSON, filtersJSON, createdAt, updatedAt, completedAt string
+		err := rows.Scan(
+			&record.ID, &record.SessionID, &record.Actor, &record.Title, &record.Goal, &record.Status, &record.Intent,
+			&record.PrimaryTable, &focusTablesJSON, &filtersJSON, &record.ExportFormat, &record.LastTool, &record.LastRunID,
+			&record.LastUserMessage, &record.LastReply, &createdAt, &updatedAt, &completedAt,
+		)
+		record.CreatedAt = parseStoreTime(createdAt)
+		record.UpdatedAt = parseStoreTime(updatedAt)
+		record.CompletedAt = parseStoreTime(completedAt)
+		if focusTablesJSON != "" {
+			_ = json.Unmarshal([]byte(focusTablesJSON), &record.FocusTables)
+		}
+		if filtersJSON != "" {
+			_ = json.Unmarshal([]byte(filtersJSON), &record.Filters)
+		}
+		record.FocusTables = normalizeAgentAllowedTables(record.FocusTables)
+		return record, err
+	}, args...)
+}
+
+func (s *installStore) ListAgentTaskSteps(taskID string) ([]agentTaskStepRecord, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.path == "" || strings.TrimSpace(taskID) == "" {
+		return nil, nil
+	}
+	db, err := s.openSQLiteLocked()
+	if err != nil {
+		return nil, err
+	}
+	defer db.Close()
+	return queryRows(db, `SELECT id, task_id, run_id, step_index, title, detail, status, tool, created_at, updated_at FROM agent_task_steps WHERE task_id = ? ORDER BY step_index ASC, id ASC`, func(rows *sql.Rows) (agentTaskStepRecord, error) {
+		var record agentTaskStepRecord
+		var createdAt, updatedAt string
+		err := rows.Scan(&record.ID, &record.TaskID, &record.RunID, &record.StepIndex, &record.Title, &record.Detail, &record.Status, &record.Tool, &createdAt, &updatedAt)
+		record.CreatedAt = parseStoreTime(createdAt)
+		record.UpdatedAt = parseStoreTime(updatedAt)
+		return record, err
+	}, strings.TrimSpace(taskID))
 }
 
 func marshalStoreJSON(value any) (string, error) {

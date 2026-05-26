@@ -1,0 +1,125 @@
+{{!--
+This template is used for the tag page.
+--}}
+
+{{!-- This block preloads specific assets for the tag page --}}
+{{#contentFor "preload"}}
+    <link rel="preload" href="{{asset "css/listing.css"}}" as="style"/>
+{{/contentFor}}
+
+{{!-- This block loads specific styles for the tag page --}}
+{{#contentFor "styles"}}
+    <link rel="stylesheet" type="text/css" href="{{asset "css/listing.css"}}" media="screen"/>
+{{/contentFor}}
+
+{{!-- The tag below means: insert everything in this file
+into the {body} of the default.hbs template --}}
+{{!< default}}
+{{!-- Special header.hbs partial to generate the <header> tag --}}
+
+{{#tag}}
+    {{> header background=feature_image}}
+{{/tag}}
+
+<main class="main-wrap">
+    {{!-- Everything inside the #tag tags pulls data from the tag --}}
+    {{#tag}}
+
+
+        <!-- 品牌标签 -->
+        {{#match meta_description "brand"}}
+        {{!-- Inject styles of the hero image to make it responsive --}}
+            {{> brand background=feature_image}}
+            <div class="m-hero__content as-brand" data-animate="fade-down">
+                <h1 class="m-hero-title bigger">{{name}} </h1>
+                {{#if description}}
+                    <p class="m-hero-description">
+                        {{description}}
+                    </p>
+                {{/if}}
+                <div class="m-hero__meta">
+                    <ul class="m-hero-stats">
+                        <li>
+                            {{plural ../pagination.total empty=(t "No posts") singular=(t "1 post")
+                                     plural=(t "% posts")}} {{t "with this brand"}}
+                        </li>
+                    </ul>
+                </div>
+            </div>
+            </section>
+        {{else match meta_description "null"}}
+            <br><br>
+        {{else}}
+            {{!-- Inject styles of the hero image to make it responsive --}}
+            {{> hero background=feature_image}}
+            <div class="m-hero__content" data-animate="fade-down">
+                <h1 class="m-hero-title bigger">{{name}} </h1>
+                {{#if description}}
+                    <p class="m-hero-description">
+                        {{description}}
+                    </p>
+                {{/if}}
+                <div class="m-hero__meta">
+                    <ul class="m-hero-stats">
+                        <li>
+                            {{plural ../pagination.total empty=(t "No posts") singular=(t "1 post")
+                                     plural=(t "% posts")}} {{t "with this tag"}}
+                        </li>
+                    </ul>
+                </div>
+            </div>
+            </section>
+        {{/match}}
+
+    {{/tag}}
+
+    <div class="l-content">
+        <div class="l-wrapper" data-animate="fade-up">
+            <div class="l-grid centered">
+                {{!-- The tag below iterates over all the posts --}}
+                {{> "loop"}}
+            </div>
+        </div>
+        {{!-- Links to Previous/Next posts --}}
+        {{pagination}}
+    </div>
+
+    {{#tag}}
+
+        {{#match meta_description "brand"}}
+            <div class="m-heading" style="margin: 0">
+                <h1 class=" in-post">更多合作品牌</h1>
+            </div>
+
+            {{#get "tags" limit="all"}}
+                <div class="centered" style="display: flex;flex-wrap: wrap;margin: 0 -10px;justify-content: center">
+                    {{#foreach tags}}
+                        {{#match meta_description "brand"}}
+                            {{> all_brand background=feature_image url=url}}
+                        {{/match}}
+                    {{/foreach}}
+                </div>
+
+            {{/get}}
+
+        {{else match meta_description "null"}}
+
+                <div class="m-heading" style="margin: 0">
+                <h1 class=" in-post">合作品牌</h1>
+            </div>
+
+            {{#get "tags" limit="all"}}
+                <div class="centered" style="display: flex;flex-wrap: wrap;margin: 0 -10px;justify-content: center">
+                    {{#foreach tags}}
+                        {{#match meta_description "brand"}}
+                            {{> all_brand background=feature_image url=url}}
+                        {{/match}}
+                    {{/foreach}}
+                </div>
+
+            {{/get}}
+
+        {{/match}}
+    {{/tag}}
+
+</main>

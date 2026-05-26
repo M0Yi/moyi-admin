@@ -25,3 +25,6 @@ legacy-hyperf/backup_*.dump
 /data/
 *.test
 coverage.out
+
+# Imported Ghost runtime logs
+old_content/logs/

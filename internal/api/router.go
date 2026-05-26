@@ -53,6 +53,7 @@ func NewRouter(options RouterOptions) http.Handler {
 	mux.HandleFunc("GET /api/health", healthHandler)
 	mux.HandleFunc("GET /api/version", versionHandler)
 	mux.Handle("GET /assets/", http.StripPrefix("/assets/", http.FileServer(staticAssetsFS())))
+	mux.Handle("GET /content/", http.StripPrefix("/content/", http.FileServer(ghostContentFS())))
 
 	return withRequestLog(logger, mux)
 }
@@ -91,4 +92,8 @@ func staticAssetsFS() http.FileSystem {
 		}
 	}
 	return http.Dir("web/static")
+}
+
+func ghostContentFS() http.FileSystem {
+	return http.Dir(ghostContentRoot())
 }

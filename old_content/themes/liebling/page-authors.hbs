@@ -1,0 +1,72 @@
+{{!--
+This template is used for the authors page.
+You must first create a page called Authors in the dashboard to enable it.
+--}}
+
+{{!-- This block preloads specific assets for the authors page --}}
+{{#contentFor "preload"}}
+  <link rel="preload" href="{{asset "css/listing.css"}}" as="style" />
+{{/contentFor}}
+
+{{!-- This block loads specific styles for the authors page --}}
+{{#contentFor "styles"}}
+  <link rel="stylesheet" type="text/css" href="{{asset "css/listing.css"}}" media="screen" />
+{{/contentFor}}
+
+{{!-- The tag below means: insert everything in this file
+into the {body} of the default.hbs template --}}
+{{!< default}}
+
+{{!-- Special header.hbs partial to generate the <header> tag --}}
+{{#post}}
+  {{> header background=feature_image}}
+{{/post}}
+
+{{#post}}
+  <main class="main-wrap">
+    {{!-- Inject styles of the hero image to make it responsive --}}
+    {{> hero background=feature_image}}
+    <div class="m-hero__content" data-animate="fade-down">
+      <h1 class="m-hero-title bigger">{{title}}</h1>
+      {{#if custom_excerpt}}
+        <p class="m-hero-description">{{custom_excerpt}}</p>
+      {{/if}}
+    </div>
+    </section>
+    <div class="l-content">
+      <div class="l-wrapper" data-animate="fade-up">
+        {{#get 'authors' limit='all' include='count.posts' order='count.posts desc'}}
+          <div class="l-grid centered">
+            {{#foreach authors}}
+              <article class="m-article-card as-author">
+                <div class="m-article-card__picture">
+                  {{#if profile_image}}
+                    <img clasS="m-article-card__picture-background" src="{{img_url profile_image size="m"}}" loading="lazy" alt="">
+                  {{else}}
+                    <img clasS="m-article-card__picture-background" src="{{asset "images/default-avatar-rectangle.jpg"}}" loading="lazy" alt="">
+                  {{/if}}
+                  <a href="{{url}}" class="m-article-card__picture-link" aria-label="{{name}}"></a>
+                  <h3 class="m-article-card__name">{{name}}</h3>
+                </div>
+                <div class="m-article-card__info">
+                  <a href="{{url}}" class="m-article-card__info-link" aria-hidden="true" tabindex="-1">
+                    {{#if bio}}
+                      <p class="m-article-card__excerpt js-article-card-title">
+                        {{bio}}
+                      </p>
+                    {{/if}}
+                  </a>
+                  <div class="m-article-card__author-stats">
+                    <span>
+                      {{plural count.posts empty=(t "No posts") singular=(t "1 post") plural=(t "% posts")}}
+                    </span>
+                  </div>
+                </div>
+              </article>
+            {{/foreach}}
+          </div>
+        {{/get}}
+      </div>
+    </div>
+  </main>
+{{/post}}

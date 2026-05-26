@@ -22,14 +22,34 @@ import (
 	"time"
 )
 
-func TestHomeShowsInstallBeforeInitialization(t *testing.T) {
-	server := httptest.NewServer(NewRouter(RouterOptions{}))
-	defer server.Close()
+type roundTripFunc func(*http.Request) (*http.Response, error)
 
-	resp, err := http.Get(server.URL + "/")
-	if err != nil {
-		t.Fatalf("GET / failed: %v", err)
-	}
+func (fn roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return fn(req)
+}
+
+func performRouterRequest(t *testing.T, handler http.Handler, method, target string, body io.Reader) *httptest.ResponseRecorder {
+	t.Helper()
+
+	req := httptest.NewRequest(method, target, body)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, req)
+	return recorder
+}
+
+func performRouterFormRequest(t *testing.T, handler http.Handler, target string, values url.Values) *httptest.ResponseRecorder {
+	t.Helper()
+
+	req := httptest.NewRequest(http.MethodPost, target, strings.NewReader(values.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, req)
+	return recorder
+}
+
+func TestHomeShowsInstallBeforeInitialization(t *testing.T) {
+	recorder := performRouterRequest(t, NewRouter(RouterOptions{}), http.MethodGet, "http://example.com/", nil)
+	resp := recorder.Result()
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
@@ -65,13 +85,8 @@ func TestHomeShowsInstallBeforeInitialization(t *testing.T) {
 
 func TestHomeShowsPublicPageAfterInitialization(t *testing.T) {
 	stateFile := writeInstalledState(t, "Test Admin", "admin", "secret123")
-	server := httptest.NewServer(NewRouter(RouterOptions{InstallStateFile: stateFile, AdminPassword: "secret123", DisableTaskWorker: true}))
-	defer server.Close()
-
-	resp, err := http.Get(server.URL + "/")
-	if err != nil {
-		t.Fatalf("GET / failed: %v", err)
-	}
+	recorder := performRouterRequest(t, NewRouter(RouterOptions{InstallStateFile: stateFile, AdminPassword: "secret123", DisableTaskWorker: true}), http.MethodGet, "http://example.com/", nil)
+	resp := recorder.Result()
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
@@ -81,32 +96,30 @@ func TestHomeShowsPublicPageAfterInitialization(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read response: %v", err)
 	}
-	if !strings.Contains(string(body), "AI 数据工作台") {
-		t.Fatal("expected public home page title")
+	if !strings.Contains(string(body), "品牌互动案例") {
+		t.Fatal("expected public home to show work cases")
 	}
-	if !strings.Contains(string(body), "项目进展") {
-		t.Fatal("expected project progress content")
+	if !strings.Contains(string(body), "服务过的品牌与项目场景") {
+		t.Fatal("expected public home to show brand topics")
 	}
 	if !strings.Contains(string(body), "prefers-color-scheme: dark") {
 		t.Fatal("expected public home to support dark mode")
 	}
-	if !strings.Contains(string(body), "/moyi-7k3x9-admin/login") || !strings.Contains(string(body), "进入后台管理") {
-		t.Fatal("expected public home to expose debug admin entry")
+	if !strings.Contains(string(body), "/moyi-7k3x9-admin/login") || !strings.Contains(string(body), "管理入口") {
+		t.Fatal("expected public home to keep subtle debug admin entry")
 	}
-	if !strings.Contains(string(body), "默认账号") || !strings.Contains(string(body), "secret123") {
-		t.Fatal("expected public home to show debug login credentials")
+	if !strings.Contains(string(body), "湘ICP备2021005520号-1") {
+		t.Fatal("expected public home to show ICP record")
+	}
+	if strings.Contains(string(body), "默认账号") || strings.Contains(string(body), "secret123") {
+		t.Fatal("public home should not show debug login credentials")
 	}
 }
 
 func TestHomeHidesDebugEntryInProduction(t *testing.T) {
 	stateFile := writeInstalledState(t, "Test Admin", "admin", "secret123")
-	server := httptest.NewServer(NewRouter(RouterOptions{Env: "production", InstallStateFile: stateFile, AdminPassword: "secret123", DisableTaskWorker: true}))
-	defer server.Close()
-
-	resp, err := http.Get(server.URL + "/")
-	if err != nil {
-		t.Fatalf("GET / failed: %v", err)
-	}
+	recorder := performRouterRequest(t, NewRouter(RouterOptions{Env: "production", InstallStateFile: stateFile, AdminPassword: "secret123", DisableTaskWorker: true}), http.MethodGet, "http://example.com/", nil)
+	resp := recorder.Result()
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -119,18 +132,8 @@ func TestHomeHidesDebugEntryInProduction(t *testing.T) {
 }
 
 func TestAdminEntryRedirectsToInstallBeforeInitialization(t *testing.T) {
-	server := httptest.NewServer(NewRouter(RouterOptions{}))
-	defer server.Close()
-
-	client := server.Client()
-	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
-		return http.ErrUseLastResponse
-	}
-
-	resp, err := client.Get(server.URL + "/moyi-7k3x9-admin")
-	if err != nil {
-		t.Fatalf("GET hidden admin entry failed: %v", err)
-	}
+	recorder := performRouterRequest(t, NewRouter(RouterOptions{}), http.MethodGet, "http://example.com/moyi-7k3x9-admin", nil)
+	resp := recorder.Result()
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusFound {
@@ -142,13 +145,8 @@ func TestAdminEntryRedirectsToInstallBeforeInitialization(t *testing.T) {
 }
 
 func TestAdminInstallPage(t *testing.T) {
-	server := httptest.NewServer(NewRouter(RouterOptions{}))
-	defer server.Close()
-
-	resp, err := http.Get(server.URL + "/moyi-7k3x9-admin/install")
-	if err != nil {
-		t.Fatalf("GET hidden admin install failed: %v", err)
-	}
+	recorder := performRouterRequest(t, NewRouter(RouterOptions{}), http.MethodGet, "http://example.com/moyi-7k3x9-admin/install", nil)
+	resp := recorder.Result()
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
@@ -187,52 +185,51 @@ func TestAdminInstallPage(t *testing.T) {
 func TestAdminInstallSubmitCreatesInitialState(t *testing.T) {
 	stateFile := filepath.Join(t.TempDir(), "install_state.json")
 	sqlitePath := filepath.Join(filepath.Dir(stateFile), "moyi-admin.db")
-	server := httptest.NewServer(NewRouter(RouterOptions{InstallStateFile: stateFile, DisableTaskWorker: true}))
-	defer server.Close()
-	aiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/compatible-mode/v1/chat/completions" {
-			t.Fatalf("unexpected AI check path %q", r.URL.Path)
-		}
-		if got := r.Header.Get("Authorization"); got != "Bearer sk-test-bailian" {
-			t.Fatalf("unexpected AI authorization header %q", got)
-		}
-		_, _ = io.Copy(io.Discard, r.Body)
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ok"}}]}`))
-	}))
-	defer aiServer.Close()
-
-	client := server.Client()
-	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
-		return http.ErrUseLastResponse
+	originalAIClient := aiCheckHTTPClient
+	aiCheckHTTPClient = &http.Client{
+		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			if r.URL.Path != "/compatible-mode/v1/chat/completions" {
+				t.Fatalf("unexpected AI check path %q", r.URL.Path)
+			}
+			if got := r.Header.Get("Authorization"); got != "Bearer sk-test-bailian" {
+				t.Fatalf("unexpected AI authorization header %q", got)
+			}
+			_, _ = io.Copy(io.Discard, r.Body)
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body:       io.NopCloser(strings.NewReader(`{"choices":[{"message":{"content":"ok"}}]}`)),
+			}, nil
+		}),
 	}
+	defer func() {
+		aiCheckHTTPClient = originalAIClient
+	}()
 
-	resp, err := client.PostForm(server.URL+"/moyi-7k3x9-admin/install", url.Values{
+	resp := performRouterFormRequest(t, NewRouter(RouterOptions{InstallStateFile: stateFile, DisableTaskWorker: true}), "http://example.com/moyi-7k3x9-admin/install", url.Values{
 		"site_name":             {"Test Admin"},
 		"db_driver":             {"sqlite"},
 		"db_file_path":          {sqlitePath},
 		"ai_provider":           {"bailian"},
 		"ai_api_key":            {"sk-test-bailian"},
-		"ai_base_url":           {aiServer.URL + "/compatible-mode/v1"},
+		"ai_base_url":           {"https://mock-bailian.local/compatible-mode/v1"},
 		"ai_chat_model":         {"qwen-plus"},
 		"username":              {"root_user"},
 		"password":              {"secret123"},
 		"password_confirmation": {"secret123"},
 	})
-	if err != nil {
-		t.Fatalf("POST hidden admin install failed: %v", err)
-	}
-	defer resp.Body.Close()
+	result := resp.Result()
+	defer result.Body.Close()
 
-	if resp.StatusCode != http.StatusFound {
-		t.Fatalf("expected status 302, got %d", resp.StatusCode)
+	if result.StatusCode != http.StatusFound {
+		t.Fatalf("expected status 302, got %d", result.StatusCode)
 	}
 
 	state, err := newInstallStore(stateFile).Load()
 	if err != nil {
 		t.Fatalf("load install state: %v", err)
 	}
-	if location := resp.Header.Get("Location"); location != state.AdminEntry+"/login?installed=1" {
+	if location := result.Header.Get("Location"); location != state.AdminEntry+"/login?installed=1" {
 		t.Fatalf("expected redirect to generated login success, got %q; state entry %q", location, state.AdminEntry)
 	}
 	if !state.Initialized {
@@ -964,7 +961,7 @@ func TestAdminLoginAllowsInitializedCredentials(t *testing.T) {
 	if !strings.Contains(bodyText, "Go AI 管理台") {
 		t.Fatal("expected admin management shell")
 	}
-	if !strings.Contains(bodyText, "数据源") || !strings.Contains(bodyText, "AI 智能体") || !strings.Contains(bodyText, "用户权限") {
+	if !strings.Contains(bodyText, "数据源") || !strings.Contains(bodyText, "AI 智能体") || !strings.Contains(bodyText, "访问控制") {
 		t.Fatal("expected admin navigation entries")
 	}
 
@@ -985,14 +982,17 @@ func TestAdminLoginAllowsInitializedCredentials(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read AI page response: %v", err)
 	}
-	if !strings.Contains(string(aiBody), "默认模型服务") {
-		t.Fatal("expected AI management page")
+	if !strings.Contains(string(aiBody), "直接说你的问题") {
+		t.Fatal("expected focused AI chat page")
 	}
-	if !strings.Contains(string(aiBody), "智能体工作台") {
-		t.Fatal("expected AI workbench panel")
+	if !strings.Contains(string(aiBody), "智能助理") {
+		t.Fatal("expected focused AI assistant shell")
 	}
 	if !strings.Contains(string(aiBody), "/ai/chat") {
 		t.Fatal("expected AI chat endpoint in page")
+	}
+	if !strings.Contains(string(aiBody), "/ai/tasks") {
+		t.Fatal("expected AI task page link in page")
 	}
 }
 
@@ -1354,6 +1354,61 @@ func TestAdminDataSourceTestWritesSchemaSnapshot(t *testing.T) {
 	}
 }
 
+func TestAdminDataSourceSaveAndTestWritesSchemaSnapshot(t *testing.T) {
+	stateFile := writeInstalledState(t, "Test Admin", "admin", "secret123")
+	sourcePath := filepath.Join(filepath.Dir(stateFile), "business.db")
+	db, err := sql.Open("sqlite", sourcePath)
+	if err != nil {
+		t.Fatalf("open sqlite data source fixture: %v", err)
+	}
+	if _, err := db.Exec(`CREATE TABLE report_orders (id INTEGER PRIMARY KEY, order_no TEXT NOT NULL, amount REAL)`); err != nil {
+		_ = db.Close()
+		t.Fatalf("create sqlite data source fixture: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close sqlite data source fixture: %v", err)
+	}
+
+	server := httptest.NewServer(NewRouter(RouterOptions{InstallStateFile: stateFile, DisableTaskWorker: true}))
+	defer server.Close()
+	client := server.Client()
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	sessionCookie := loginTestAdmin(t, client, server.URL)
+
+	saveTestResp, err := postFormWithCookie(t, client, server.URL+"/moyi-7k3x9-admin/data-sources/save", sessionCookie, url.Values{
+		"name":               {"reporting_main"},
+		"driver":             {"sqlite"},
+		"file_path":          {sourcePath},
+		"role":               {"报表数据源"},
+		"data_source_action": {"save_test"},
+	})
+	if err != nil {
+		t.Fatalf("POST data source save and test failed: %v", err)
+	}
+	saveTestResp.Body.Close()
+	if saveTestResp.StatusCode != http.StatusFound {
+		t.Fatalf("expected data source save and test redirect, got %d", saveTestResp.StatusCode)
+	}
+
+	store := newInstallStore(stateFile)
+	state, err := store.Load()
+	if err != nil {
+		t.Fatalf("load state after data source save and test: %v", err)
+	}
+	if len(state.DataSources) != 1 || state.DataSources[0].Status != "available" || !strings.Contains(state.DataSources[0].SchemaSummary, "report_orders") {
+		t.Fatalf("expected saved data source to be tested and available, got %+v", state.DataSources)
+	}
+	snapshots, err := store.ListSchemaSnapshots(5)
+	if err != nil {
+		t.Fatalf("list schema snapshots: %v", err)
+	}
+	if len(snapshots) != 1 || snapshots[0].DataSourceName != "reporting_main" || !strings.Contains(snapshots[0].SchemaJSON, "report_orders") {
+		t.Fatalf("expected save and test to write schema snapshot, got %+v", snapshots)
+	}
+}
+
 func TestAdminAccessManagementCreatesTogglesDeletesAndAuthenticatesUser(t *testing.T) {
 	stateFile := writeInstalledState(t, "Test Admin", "admin", "secret123")
 	server := httptest.NewServer(NewRouter(RouterOptions{InstallStateFile: stateFile}))
@@ -1410,24 +1465,53 @@ func TestAdminAccessManagementCreatesTogglesDeletesAndAuthenticatesUser(t *testi
 		t.Fatal("expected ops session cookie")
 	}
 
-	pageReq, err := http.NewRequest(http.MethodGet, server.URL+"/moyi-7k3x9-admin/users", nil)
-	if err != nil {
-		t.Fatalf("create users page request: %v", err)
+	fetchAdminPage := func(path string) string {
+		req, err := http.NewRequest(http.MethodGet, server.URL+path, nil)
+		if err != nil {
+			t.Fatalf("create admin page request %s: %v", path, err)
+		}
+		req.AddCookie(sessionCookie)
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("GET admin page %s failed: %v", path, err)
+		}
+		defer resp.Body.Close()
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			t.Fatalf("read admin page %s: %v", path, err)
+		}
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("expected admin page %s 200, got %d body %s", path, resp.StatusCode, body)
+		}
+		return string(body)
 	}
-	pageReq.AddCookie(sessionCookie)
-	pageResp, err := client.Do(pageReq)
-	if err != nil {
-		t.Fatalf("GET users page failed: %v", err)
-	}
-	defer pageResp.Body.Close()
-	pageBody, err := io.ReadAll(pageResp.Body)
-	if err != nil {
-		t.Fatalf("read users page: %v", err)
-	}
-	pageText := string(pageBody)
-	for _, expected := range []string{"新增管理员", "ops_user", "运维管理员", "后台会话", "在线", "菜单与权限", "agent.sql.select", "admin.sessions.manage"} {
+	pageText := fetchAdminPage("/moyi-7k3x9-admin/users")
+	for _, expected := range []string{"新增管理员", "ops_user", "运维管理员", "访问控制", "管理员账号"} {
 		if !strings.Contains(pageText, expected) {
 			t.Fatalf("expected users page to contain %q", expected)
+		}
+	}
+	for _, unexpected := range []string{"后台会话", "菜单与权限", "agent.sql.select"} {
+		if strings.Contains(pageText, unexpected) {
+			t.Fatalf("expected users page to keep %q on its own page", unexpected)
+		}
+	}
+	groupText := fetchAdminPage("/moyi-7k3x9-admin/users/groups")
+	for _, expected := range []string{"用户组权限", "agent-table-picker", "智能体只读访问"} {
+		if !strings.Contains(groupText, expected) {
+			t.Fatalf("expected user groups page to contain %q", expected)
+		}
+	}
+	sessionText := fetchAdminPage("/moyi-7k3x9-admin/users/sessions")
+	for _, expected := range []string{"会话列表", "在线会话"} {
+		if !strings.Contains(sessionText, expected) {
+			t.Fatalf("expected user sessions page to contain %q", expected)
+		}
+	}
+	permissionText := fetchAdminPage("/moyi-7k3x9-admin/users/permissions")
+	for _, expected := range []string{"菜单与权限", "agent.sql.select", "admin.sessions.manage"} {
+		if !strings.Contains(permissionText, expected) {
+			t.Fatalf("expected permissions page to contain %q", expected)
 		}
 	}
 	sessions, err := newInstallStore(stateFile).ListAdminSessions(10)
@@ -1503,6 +1587,326 @@ func TestAdminAccessManagementCreatesTogglesDeletesAndAuthenticatesUser(t *testi
 	}
 	if len(state.Access.Users) != 0 {
 		t.Fatalf("expected access user deleted, got %+v", state.Access.Users)
+	}
+}
+
+func TestAdminRoleSaveCreatesNewRole(t *testing.T) {
+	stateFile := writeInstalledState(t, "Test Admin", "admin", "secret123")
+	server := httptest.NewServer(NewRouter(RouterOptions{InstallStateFile: stateFile}))
+	defer server.Close()
+
+	client := server.Client()
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	sessionCookie := loginTestAdmin(t, client, server.URL)
+
+	saveResp, err := postFormWithCookie(t, client, server.URL+"/moyi-7k3x9-admin/users/roles/save", sessionCookie, url.Values{
+		"role_key":             {"finance_reader"},
+		"role_name":            {"财务只读"},
+		"role_scope":           {"财务对账与报表查看"},
+		"role_status":          {"enabled"},
+		"role_description":     {"允许财务查看指定管理表和导出结果"},
+		"role_menu_keys":       {"ai, user_permissions"},
+		"role_permission_keys": {"agent.tables.read, agent.sql.select"},
+		"role_data_scope":      {"tables"},
+		"role_allowed_tables":  {"admin_users, upload_files"},
+	})
+	if err != nil {
+		t.Fatalf("POST role save failed: %v", err)
+	}
+	saveResp.Body.Close()
+	if saveResp.StatusCode != http.StatusFound {
+		t.Fatalf("expected role save redirect, got %d", saveResp.StatusCode)
+	}
+
+	state, err := newInstallStore(stateFile).Load()
+	if err != nil {
+		t.Fatalf("load state after role save: %v", err)
+	}
+	role, ok := findAdminRoleConfig(state.Access.normalized(state).Roles, "finance_reader")
+	if !ok {
+		t.Fatal("expected newly created role to be persisted")
+	}
+	if role.Name != "财务只读" || role.Scope != "财务对账与报表查看" || role.Description != "允许财务查看指定管理表和导出结果" {
+		t.Fatalf("unexpected created role metadata: %+v", role)
+	}
+	if got := strings.Join(role.AllowedTables, ","); got != "admin_users,upload_files" {
+		t.Fatalf("unexpected created role tables %q", got)
+	}
+	if got := strings.Join(role.MenuKeys, ","); got != "ai,user_permissions" {
+		t.Fatalf("unexpected created role menus %q", got)
+	}
+	if got := strings.Join(role.PermissionKeys, ","); got != "agent.tables.read,agent.sql.select" {
+		t.Fatalf("unexpected created role permissions %q", got)
+	}
+
+	req, err := http.NewRequest(http.MethodGet, server.URL+"/moyi-7k3x9-admin/users/groups", nil)
+	if err != nil {
+		t.Fatalf("create groups page request: %v", err)
+	}
+	req.AddCookie(sessionCookie)
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("GET groups page failed: %v", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read groups page: %v", err)
+	}
+	text := string(body)
+	for _, expected := range []string{"新增用户组", "finance_reader", "财务只读"} {
+		if !strings.Contains(text, expected) {
+			t.Fatalf("expected groups page to contain %q", expected)
+		}
+	}
+}
+
+func TestLimitedRoleRestrictsMenusPagesAndAIChat(t *testing.T) {
+	stateFile := writeInstalledState(t, "Test Admin", "admin", "secret123")
+	server := httptest.NewServer(NewRouter(RouterOptions{InstallStateFile: stateFile}))
+	defer server.Close()
+
+	client := server.Client()
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	adminCookie := loginTestAdmin(t, client, server.URL)
+
+	roleResp, err := postFormWithCookie(t, client, server.URL+"/moyi-7k3x9-admin/users/roles/save", adminCookie, url.Values{
+		"role_key":             {"limited_ai"},
+		"role_name":            {"受限 AI"},
+		"role_scope":           {"仅允许进入 AI 页面并读取一张表"},
+		"role_status":          {"enabled"},
+		"role_description":     {"测试菜单、动作权限和数据表白名单的联动拦截"},
+		"role_menu_keys":       {"ai"},
+		"role_permission_keys": {"agent.tables.read, agent.sql.select"},
+		"role_data_scope":      {"tables"},
+		"role_allowed_tables":  {"data_sources"},
+	})
+	if err != nil {
+		t.Fatalf("POST limited role save failed: %v", err)
+	}
+	roleResp.Body.Close()
+	if roleResp.StatusCode != http.StatusFound {
+		t.Fatalf("expected limited role save redirect, got %d", roleResp.StatusCode)
+	}
+
+	userResp, err := postFormWithCookie(t, client, server.URL+"/moyi-7k3x9-admin/users/save", adminCookie, url.Values{
+		"username":     {"limited_user"},
+		"display_name": {"受限账号"},
+		"role":         {"limited_ai"},
+		"status":       {"enabled"},
+		"password":     {"limited123"},
+	})
+	if err != nil {
+		t.Fatalf("POST limited user save failed: %v", err)
+	}
+	userResp.Body.Close()
+	if userResp.StatusCode != http.StatusFound {
+		t.Fatalf("expected limited user save redirect, got %d", userResp.StatusCode)
+	}
+
+	limitedCookie := loginTestUser(t, client, server.URL, "limited_user", "limited123")
+
+	reqAI, err := http.NewRequest(http.MethodGet, server.URL+"/moyi-7k3x9-admin/ai", nil)
+	if err != nil {
+		t.Fatalf("create ai page request: %v", err)
+	}
+	reqAI.AddCookie(limitedCookie)
+	respAI, err := client.Do(reqAI)
+	if err != nil {
+		t.Fatalf("GET ai page failed: %v", err)
+	}
+	defer respAI.Body.Close()
+	if respAI.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(respAI.Body)
+		t.Fatalf("expected ai page 200, got %d body %s", respAI.StatusCode, body)
+	}
+	aiBody, err := io.ReadAll(respAI.Body)
+	if err != nil {
+		t.Fatalf("read ai page: %v", err)
+	}
+	aiText := string(aiBody)
+	if !strings.Contains(aiText, "AI 智能体") {
+		t.Fatalf("expected ai page to contain AI menu")
+	}
+	for _, unexpected := range []string{"用户组权限", "系统设置", "文件管理"} {
+		if strings.Contains(aiText, unexpected) {
+			t.Fatalf("expected restricted ai page to hide %q", unexpected)
+		}
+	}
+
+	reqGroups, err := http.NewRequest(http.MethodGet, server.URL+"/moyi-7k3x9-admin/users/groups", nil)
+	if err != nil {
+		t.Fatalf("create groups page request: %v", err)
+	}
+	reqGroups.AddCookie(limitedCookie)
+	respGroups, err := client.Do(reqGroups)
+	if err != nil {
+		t.Fatalf("GET groups page failed: %v", err)
+	}
+	defer respGroups.Body.Close()
+	if respGroups.StatusCode != http.StatusForbidden {
+		body, _ := io.ReadAll(respGroups.Body)
+		t.Fatalf("expected groups page 403, got %d body %s", respGroups.StatusCode, body)
+	}
+
+	chatReq, err := http.NewRequest(http.MethodPost, server.URL+"/moyi-7k3x9-admin/ai/chat", strings.NewReader(`{"message":"我们后台有几个管理员账号？"}`))
+	if err != nil {
+		t.Fatalf("create ai chat request: %v", err)
+	}
+	chatReq.Header.Set("Content-Type", "application/json")
+	chatReq.AddCookie(limitedCookie)
+	chatResp, err := client.Do(chatReq)
+	if err != nil {
+		t.Fatalf("POST ai chat failed: %v", err)
+	}
+	defer chatResp.Body.Close()
+	if chatResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(chatResp.Body)
+		t.Fatalf("expected ai chat 200, got %d body %s", chatResp.StatusCode, body)
+	}
+	var parsed agentChatResponse
+	if err := json.NewDecoder(chatResp.Body).Decode(&parsed); err != nil {
+		t.Fatalf("decode ai chat response: %v", err)
+	}
+	if !strings.Contains(parsed.Reply, "未授权") {
+		t.Fatalf("expected restricted ai reply to mention unauthorized access, got %+v", parsed)
+	}
+	if len(parsed.ToolResults) == 0 || parsed.ToolResults[0].OK {
+		t.Fatalf("expected restricted ai tool result to be denied, got %+v", parsed.ToolResults)
+	}
+}
+
+func TestReadOnlyRoleHidesMutationEntrancesAcrossAdminPages(t *testing.T) {
+	stateFile := writeInstalledState(t, "Test Admin", "admin", "secret123")
+	server := httptest.NewServer(NewRouter(RouterOptions{InstallStateFile: stateFile}))
+	defer server.Close()
+
+	client := server.Client()
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	adminCookie := loginTestAdmin(t, client, server.URL)
+
+	roleResp, err := postFormWithCookie(t, client, server.URL+"/moyi-7k3x9-admin/users/roles/save", adminCookie, url.Values{
+		"role_key":         {"readonly_ops"},
+		"role_name":        {"只读运维"},
+		"role_scope":       {"只允许查看后台页面，不允许执行写操作"},
+		"role_status":      {"enabled"},
+		"role_description": {"验证页面级操作入口显隐"},
+		"role_menu_keys":   {"ai, data_sources, files, tasks, settings, wechat_agent"},
+		"role_data_scope":  {"none"},
+	})
+	if err != nil {
+		t.Fatalf("POST readonly role save failed: %v", err)
+	}
+	roleResp.Body.Close()
+	if roleResp.StatusCode != http.StatusFound {
+		t.Fatalf("expected readonly role save redirect, got %d", roleResp.StatusCode)
+	}
+
+	userResp, err := postFormWithCookie(t, client, server.URL+"/moyi-7k3x9-admin/users/save", adminCookie, url.Values{
+		"username":     {"readonly_user"},
+		"display_name": {"只读账号"},
+		"role":         {"readonly_ops"},
+		"status":       {"enabled"},
+		"password":     {"readonly123"},
+	})
+	if err != nil {
+		t.Fatalf("POST readonly user save failed: %v", err)
+	}
+	userResp.Body.Close()
+	if userResp.StatusCode != http.StatusFound {
+		t.Fatalf("expected readonly user save redirect, got %d", userResp.StatusCode)
+	}
+
+	readonlyCookie := loginTestUser(t, client, server.URL, "readonly_user", "readonly123")
+	cases := []struct {
+		name       string
+		path       string
+		statusCode int
+		mustHave   []string
+		mustMiss   []string
+	}{
+		{
+			name:       "ai page hides data prompts",
+			path:       "/moyi-7k3x9-admin/ai",
+			statusCode: http.StatusOK,
+			mustHave:   []string{"当前账号可以整理公开网页资料，但不能读取后台数据。"},
+			mustMiss:   []string{"把管理员账号的账号、角色、状态整理成 XLSX 文件发给我", "把数据源配置整理成 JSON 文件发给我", "我们后台有几个管理员账号？"},
+		},
+		{
+			name:       "data sources page hides mutation controls",
+			path:       "/moyi-7k3x9-admin/data-sources",
+			statusCode: http.StatusOK,
+			mustHave:   []string{"当前账号只有查看权限，可看连接状态和结构摘要，但不能新增、测试或删除数据源。"},
+			mustMiss:   []string{"data-data-source-create-toggle", "data-data-source-delete", "data-data-source-test"},
+		},
+		{
+			name:       "files page hides upload and delete",
+			path:       "/moyi-7k3x9-admin/files",
+			statusCode: http.StatusOK,
+			mustHave:   []string{"当前账号可以预览和下载文件，但不能上传或删除文件。"},
+			mustMiss:   []string{"data-file-create-toggle", "data-file-delete"},
+		},
+		{
+			name:       "tasks page hides task operations",
+			path:       "/moyi-7k3x9-admin/tasks",
+			statusCode: http.StatusOK,
+			mustHave:   []string{"当前账号可以查看任务队列和日志，但不能创建、执行、重试或取消任务。", "自动执行属于系统设置权限，当前账号只能查看，不能修改。"},
+			mustMiss:   []string{"data-task-create-toggle", "data-task-run", "data-task-retry", "data-task-cancel", "执行下一个任务", "批量执行就绪任务"},
+		},
+		{
+			name:       "settings page keeps password form but shows readonly note",
+			path:       "/moyi-7k3x9-admin/settings",
+			statusCode: http.StatusOK,
+			mustHave:   []string{"当前账号只有查看权限，不能修改基础信息、存储、AI、通知和自动队列设置。", "更新密码"},
+			mustMiss:   []string{"发送测试通知"},
+		},
+		{
+			name:       "wechat page hides mutation controls",
+			path:       "/moyi-7k3x9-admin/wechat-agent",
+			statusCode: http.StatusOK,
+			mustHave:   []string{"当前账号可以查看通道状态和聊天记录，但不能修改二维码、令牌或通道状态。"},
+			mustMiss:   []string{"agentChannelCreate", `name="wechat_channel_action" value="add"`, `name="wechat_channel_action" value="reset_token"`, `name="wechat_channel_action" value="regenerate"`},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req, err := http.NewRequest(http.MethodGet, server.URL+tc.path, nil)
+			if err != nil {
+				t.Fatalf("create request failed: %v", err)
+			}
+			req.AddCookie(readonlyCookie)
+			resp, err := client.Do(req)
+			if err != nil {
+				t.Fatalf("GET %s failed: %v", tc.path, err)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != tc.statusCode {
+				body, _ := io.ReadAll(resp.Body)
+				t.Fatalf("expected %s status %d, got %d body %s", tc.path, tc.statusCode, resp.StatusCode, body)
+			}
+			body, err := io.ReadAll(resp.Body)
+			if err != nil {
+				t.Fatalf("read %s body failed: %v", tc.path, err)
+			}
+			text := string(body)
+			for _, expected := range tc.mustHave {
+				if !strings.Contains(text, expected) {
+					t.Fatalf("expected %s to contain %q", tc.path, expected)
+				}
+			}
+			for _, unexpected := range tc.mustMiss {
+				if strings.Contains(text, unexpected) {
+					t.Fatalf("expected %s to hide %q", tc.path, unexpected)
+				}
+			}
+		})
 	}
 }
 
@@ -1595,7 +1999,7 @@ func TestAdminSettingsUpdatesSystemAndStorage(t *testing.T) {
 		t.Fatalf("read public home after system settings: %v", err)
 	}
 	homeText := string(homeBody)
-	for _, expected := range []string{"Moyi Ops 正在迁移基础设施", "公共首页展示真实项目进展。", "迁移进展"} {
+	for _, expected := range []string{"品牌互动案例", "服务过的品牌与项目场景", "联系合作"} {
 		if !strings.Contains(homeText, expected) {
 			t.Fatalf("expected public home to contain %q", expected)
 		}
@@ -1882,7 +2286,7 @@ func TestAdminBackgroundTasksCanEnqueueAndRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read tasks page: %v", err)
 	}
-	for _, expected := range []string{"后台任务", "创建任务", "系统体检", "执行下一个任务", "自动执行", "保存自动执行设置"} {
+	for _, expected := range []string{"后台任务", "队列操作", "系统体检", "执行下一个任务", "自动执行", "保存自动执行设置"} {
 		if !strings.Contains(string(pageBody), expected) {
 			t.Fatalf("expected tasks page to contain %q", expected)
 		}
@@ -2261,6 +2665,37 @@ func TestAdminNotificationsSendRuntimeEvents(t *testing.T) {
 	}
 	if !chatParsed.OK || chatParsed.ModelUsed {
 		t.Fatalf("expected local fallback response, got %+v", chatParsed)
+	}
+	if chatParsed.Run.Mode != string(agentIntentSystemConfig) {
+		t.Fatalf("expected system config mode, got %+v", chatParsed.Run)
+	}
+	if len(chatParsed.ToolResults) != 1 || chatParsed.ToolResults[0].Name != "inspect_system_config" {
+		t.Fatalf("expected system config tool result, got %+v", chatParsed.ToolResults)
+	}
+	if strings.Contains(chatParsed.Reply, "install_state") {
+		t.Fatalf("expected system config reply not to mention install_state, got %q", chatParsed.Reply)
+	}
+
+	modelChatReq, err := http.NewRequest(http.MethodPost, server.URL+"/moyi-7k3x9-admin/ai/chat", bytes.NewBufferString(`{"message":"给出 Moyi Admin 智能体构造方案"}`))
+	if err != nil {
+		t.Fatalf("create AI model chat request: %v", err)
+	}
+	modelChatReq.Header.Set("Content-Type", "application/json")
+	modelChatReq.AddCookie(sessionCookie)
+	modelChatResp, err := client.Do(modelChatReq)
+	if err != nil {
+		t.Fatalf("POST AI model chat for notification failed: %v", err)
+	}
+	defer modelChatResp.Body.Close()
+	if modelChatResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected AI model fallback status 200, got %d", modelChatResp.StatusCode)
+	}
+	var modelChatParsed agentChatResponse
+	if err := json.NewDecoder(modelChatResp.Body).Decode(&modelChatParsed); err != nil {
+		t.Fatalf("decode AI model fallback response: %v", err)
+	}
+	if !modelChatParsed.OK || modelChatParsed.ModelUsed {
+		t.Fatalf("expected local fallback after model error, got %+v", modelChatParsed)
 	}
 
 	uploadResp, err := postMultipartWithCookie(t, client, server.URL+"/moyi-7k3x9-admin/files/upload", sessionCookie, "blocked.exe", []byte("blocked"))
@@ -2770,6 +3205,7 @@ func TestAdminAgentChatListsGuardedTables(t *testing.T) {
 	foundMenus := false
 	foundMetadataType := false
 	foundBackgroundTasks := false
+	foundInstallState := false
 	for _, row := range parsed.ToolResults[0].Rows {
 		if row["name"] == "admin_menus" {
 			foundMenus = true
@@ -2780,12 +3216,18 @@ func TestAdminAgentChatListsGuardedTables(t *testing.T) {
 		if row["name"] == "background_tasks" && row["type"] == "metadata_table" {
 			foundBackgroundTasks = true
 		}
+		if row["name"] == "install_state" {
+			foundInstallState = true
+		}
 	}
 	if !foundMenus || !foundMetadataType || !foundBackgroundTasks {
 		t.Fatalf("expected real metadata tables in list_tables result, got %+v", parsed.ToolResults[0].Rows)
 	}
-	if !strings.Contains(parsed.Reply, "install_state") {
-		t.Fatalf("expected reply to mention install_state, got %q", parsed.Reply)
+	if foundInstallState {
+		t.Fatalf("expected install_state to be hidden from public table catalog, got %+v", parsed.ToolResults[0].Rows)
+	}
+	if strings.Contains(parsed.Reply, "install_state") {
+		t.Fatalf("expected reply not to mention install_state, got %q", parsed.Reply)
 	}
 	runs, err := newInstallStore(stateFile).ListAgentRuns(5)
 	if err != nil {
@@ -2800,6 +3242,94 @@ func TestAdminAgentChatListsGuardedTables(t *testing.T) {
 	}
 	if len(tools) != 1 || tools[0].Name != "list_tables" || !tools[0].OK {
 		t.Fatalf("expected persisted agent tool result, got %+v", tools)
+	}
+}
+
+func TestAgentSessionContextCompressesOlderRuns(t *testing.T) {
+	stateFile := writeInstalledState(t, "Test Admin", "admin", "secret123")
+	admin := newAdminServer("/moyi-7k3x9-admin", "admin", "secret123", "session-secret", stateFile, "test")
+
+	startedAt := time.Now().UTC().Add(-15 * time.Minute)
+	for i := 1; i <= 7; i++ {
+		runID := fmt.Sprintf("run-memory-%d", i)
+		message := fmt.Sprintf("第%d个问题：请继续跟进管理员账号导出", i)
+		reply := fmt.Sprintf("第%d个回答：已处理管理员账号导出需求", i)
+		toolResults := []agentToolResult{
+			{Name: "preview_table", OK: true, Table: "admin_users", Message: "已预览 `admin_users`。"},
+		}
+		if i%2 == 0 {
+			toolResults = []agentToolResult{
+				{
+					Name:    "export_table",
+					OK:      true,
+					Table:   "admin_users",
+					Message: "已导出 1 张表、2 行数据，格式为 CSV。",
+					File: &agentFileResult{
+						Name:        fmt.Sprintf("memory-export-%d.csv", i),
+						URL:         fmt.Sprintf("/moyi-7k3x9-admin/ai/files/memory-export-%d.csv", i),
+						MIME:        "text/csv; charset=utf-8",
+						Size:        256,
+						Description: "导出格式：CSV；导出表：admin_users",
+					},
+				},
+			}
+		}
+		if err := admin.store.AppendAgentRun(agentRunRecord{
+			ID:         runID,
+			SessionID:  "session-memory",
+			Actor:      "admin",
+			Mode:       string(agentIntentExport),
+			Goal:       "连续跟进管理员账号导出",
+			Message:    message,
+			Reply:      reply,
+			Status:     "ok",
+			ModelUsed:  false,
+			ToolCount:  len(toolResults),
+			FileCount:  len(toolResults),
+			DurationMS: 25,
+			StartedAt:  startedAt.Add(time.Duration(i) * time.Minute),
+			Run: agentRun{
+				ID:   runID,
+				Mode: string(agentIntentExport),
+				Goal: "连续跟进管理员账号导出",
+			},
+			ToolResults: toolResults,
+		}); err != nil {
+			t.Fatalf("append memory agent run %d: %v", i, err)
+		}
+	}
+
+	ctx := admin.agentSessionContext("session-memory", "admin")
+	if ctx.CompressedContext == "" {
+		t.Fatal("expected compressed context for long-running session")
+	}
+	if ctx.Memory.PrimaryTable != "admin_users" {
+		t.Fatalf("expected structured memory primary table admin_users, got %+v", ctx.Memory)
+	}
+	if ctx.Memory.LastIntent != string(agentIntentExport) {
+		t.Fatalf("expected structured memory last intent export, got %+v", ctx.Memory)
+	}
+	if ctx.Memory.LastFileName == "" || ctx.Memory.ExportFormat != "CSV" {
+		t.Fatalf("expected structured memory to preserve recent export info, got %+v", ctx.Memory)
+	}
+	if len(ctx.History) == 0 || len(ctx.History) > 8 {
+		t.Fatalf("expected recent raw history only, got %+v", ctx.History)
+	}
+	historyText := ""
+	for _, item := range ctx.History {
+		historyText += item.Content + "\n"
+	}
+	if !strings.Contains(historyText, "第7个问题") || !strings.Contains(historyText, "第6个问题") {
+		t.Fatalf("expected recent questions to stay in raw history, got %q", historyText)
+	}
+	if strings.Contains(historyText, "第1个问题") || strings.Contains(historyText, "第2个问题") {
+		t.Fatalf("expected older questions to be compressed instead of kept raw, got %q", historyText)
+	}
+	if !strings.Contains(ctx.CompressedContext, "第1个问题") || !strings.Contains(ctx.CompressedContext, "第2个问题") {
+		t.Fatalf("expected compressed context to contain older questions, got %q", ctx.CompressedContext)
+	}
+	if strings.Contains(ctx.CompressedContext, "第7个问题") {
+		t.Fatalf("expected newest questions to stay out of compressed context, got %q", ctx.CompressedContext)
 	}
 }
 
@@ -2872,8 +3402,8 @@ func TestAgentWeChatBindingChannelExchangesCodeAndChats(t *testing.T) {
 		t.Fatalf("read wechat agent page: %v", err)
 	}
 	pageHTML := string(pageBody)
-	if !strings.Contains(pageHTML, "OpenClaw Weixin 通道") || !strings.Contains(pageHTML, "/wechat-agent/channels") {
-		t.Fatal("expected wechat agent page to expose openclaw-weixin channel")
+	if !strings.Contains(pageHTML, "微信 Agent 通道") || !strings.Contains(pageHTML, "/wechat-agent/channels") || !strings.Contains(pageHTML, "admin 的微信 Agent") {
+		t.Fatal("expected wechat agent page to expose current admin default wechat channel")
 	}
 	if strings.Contains(pageHTML, "接入接口") || strings.Contains(pageHTML, "/api/agent/channels/openclaw-weixin/session") {
 		t.Fatal("expected wechat agent page not to expose internal channel APIs")
@@ -2903,7 +3433,10 @@ func TestAgentWeChatBindingChannelExchangesCodeAndChats(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load state after wechat channel settings: %v", err)
 	}
-	wechat := state.AgentChannels.normalized().WeChat
+	wechat, _, ok := findAgentWeChatChannelByAdminUser(state.AgentChannels, "admin")
+	if !ok {
+		t.Fatal("expected admin default wechat channel after regenerate")
+	}
 	token := wechat.Token
 	if !wechat.Enabled || token == "" || wechat.LoginQRCode != "qr-token-1" || wechat.QRPayload != "https://weixin.qq.com/x/openclaw-login" || !strings.HasPrefix(wechat.QRImageURL, "data:image/png;base64,") {
 		t.Fatalf("expected pending openclaw weixin login QR, got %+v", wechat)
@@ -2969,7 +3502,10 @@ func TestAgentWeChatBindingChannelExchangesCodeAndChats(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load state after openclaw login poll: %v", err)
 	}
-	wechat = state.AgentChannels.normalized().WeChat
+	wechat, _, ok = findAgentWeChatChannelByAdminUser(state.AgentChannels, "admin")
+	if !ok {
+		t.Fatal("expected admin default wechat channel after login poll")
+	}
 	if !strings.HasPrefix(token, agentWeChatTokenPrefix) {
 		t.Fatalf("expected wechat agent token, got %q", token)
 	}
@@ -3183,7 +3719,7 @@ func TestAgentWeChatMessagesPagePaginatesNewestFirst(t *testing.T) {
 	}
 }
 
-func TestAgentWeChatChannelManagementAddsAndDisablesMultiple(t *testing.T) {
+func TestAgentWeChatChannelManagementRejectsManualAddAndDisablesDefault(t *testing.T) {
 	stateFile := writeInstalledState(t, "Test Admin", "admin", "secret123")
 	store := newInstallStore(stateFile)
 	server := httptest.NewServer(NewRouter(RouterOptions{InstallStateFile: stateFile, DisableTaskWorker: true}))
@@ -3194,66 +3730,53 @@ func TestAgentWeChatChannelManagementAddsAndDisablesMultiple(t *testing.T) {
 		return http.ErrUseLastResponse
 	}
 	sessionCookie := loginTestAdmin(t, client, server.URL)
-	channelForms := []struct {
-		name   string
-		tables string
-	}{
-		{name: "微信通道 A", tables: "admin_users, admin_roles"},
-		{name: "微信通道 B", tables: "data_sources"},
+	resp, err := postFormWithCookie(t, client, server.URL+"/moyi-7k3x9-admin/wechat-agent/channels", sessionCookie, url.Values{
+		"wechat_channel_enabled": {"1"},
+		"wechat_channel_name":    {"微信通道 A"},
+		"wechat_admin_user":      {"admin"},
+		"wechat_base_url":        {"https://ilinkai.weixin.qq.com"},
+		"wechat_bot_type":        {"3"},
+		"wechat_channel_action":  {"add"},
+	})
+	if err != nil {
+		t.Fatalf("POST add wechat channel failed: %v", err)
 	}
-	for _, form := range channelForms {
-		resp, err := postFormWithCookie(t, client, server.URL+"/moyi-7k3x9-admin/wechat-agent/channels", sessionCookie, url.Values{
-			"wechat_channel_enabled": {"1"},
-			"wechat_channel_name":    {form.name},
-			"wechat_base_url":        {"https://ilinkai.weixin.qq.com"},
-			"wechat_bot_type":        {"3"},
-			"wechat_allowed_tables":  {form.tables},
-			"wechat_channel_action":  {"add"},
-		})
-		if err != nil {
-			t.Fatalf("POST add wechat channel failed: %v", err)
-		}
-		resp.Body.Close()
-		if resp.StatusCode != http.StatusFound {
-			t.Fatalf("expected add redirect, got %d", resp.StatusCode)
-		}
+	location := resp.Header.Get("Location")
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusFound {
+		t.Fatalf("expected add redirect, got %d", resp.StatusCode)
+	}
+	decodedLocation, err := url.QueryUnescape(location)
+	if err != nil {
+		t.Fatalf("decode add redirect location: %v", err)
+	}
+	if !strings.Contains(decodedLocation, "不能手动新增") {
+		t.Fatalf("expected add action to be rejected, got location %q", decodedLocation)
 	}
 
 	state, err := store.Load()
 	if err != nil {
-		t.Fatalf("load state after adding wechat channels: %v", err)
+		t.Fatalf("load state after rejected add: %v", err)
 	}
 	channels := state.AgentChannels.normalized()
-	if len(channels.WeChats) != 2 {
-		t.Fatalf("expected two wechat channels, got %+v", channels.WeChats)
+	if len(channels.WeChats) != 1 {
+		t.Fatalf("expected only bootstrap default wechat channel, got %+v", channels.WeChats)
 	}
-	if channels.WeChats[0].Key == "" || channels.WeChats[1].Key == "" || channels.WeChats[0].Key == channels.WeChats[1].Key {
-		t.Fatalf("expected stable unique wechat channel keys, got %+v", channels.WeChats)
+	channelA, _, ok := findAgentWeChatChannelByAdminUser(channels, "admin")
+	if !ok {
+		t.Fatal("expected bootstrap default wechat channel for admin")
 	}
-	channelA := agentWeChatChannelConfig{}
-	channelB := agentWeChatChannelConfig{}
-	for _, channel := range channels.WeChats {
-		switch channel.DisplayName {
-		case "微信通道 A":
-			channelA = channel
-		case "微信通道 B":
-			channelB = channel
-		}
-	}
-	if got := strings.Join(channelA.AllowedTables, ","); got != "admin_users,admin_roles" {
-		t.Fatalf("expected channel A allowed tables to persist, got %q", got)
-	}
-	if got := strings.Join(channelB.AllowedTables, ","); got != "data_sources" {
-		t.Fatalf("expected channel B allowed tables to persist, got %q", got)
+	if channelA.AdminUser != "admin" || len(channelA.AllowedTables) != 0 || channelA.DataScope != agentTableAccessNone {
+		t.Fatalf("expected default channel to bind admin account without channel table permissions, got %+v", channelA)
 	}
 
 	editResp, err := postFormWithCookie(t, client, server.URL+"/moyi-7k3x9-admin/wechat-agent/channels", sessionCookie, url.Values{
-		"wechat_channel_key":     {channelB.Key},
+		"wechat_channel_key":     {channelA.Key},
 		"wechat_channel_enabled": {"1"},
-		"wechat_channel_name":    {channelB.DisplayName},
-		"wechat_base_url":        {channelB.BaseURL},
-		"wechat_bot_type":        {channelB.BotType},
-		"wechat_allowed_tables":  {"orders, admin_users\nanalytics.events, orders"},
+		"wechat_channel_name":    {"管理员微信通道"},
+		"wechat_admin_user":      {"admin"},
+		"wechat_base_url":        {"https://ilinkai.weixin.qq.com"},
+		"wechat_bot_type":        {"3"},
 		"wechat_channel_action":  {"save"},
 	})
 	if err != nil {
@@ -3268,12 +3791,12 @@ func TestAgentWeChatChannelManagementAddsAndDisablesMultiple(t *testing.T) {
 		t.Fatalf("load state after editing wechat channel: %v", err)
 	}
 	channels = state.AgentChannels.normalized()
-	channelB, _, ok := findAgentWeChatChannelByKey(channels, channelB.Key)
+	channelA, _, ok = findAgentWeChatChannelByKey(channels, channelA.Key)
 	if !ok {
-		t.Fatalf("expected edited wechat channel B to remain present")
+		t.Fatalf("expected edited default wechat channel to remain present")
 	}
-	if got := strings.Join(channelB.AllowedTables, ","); got != "orders,admin_users,analytics.events" {
-		t.Fatalf("expected edited custom allowed tables to persist, got %q", got)
+	if channelA.DisplayName != "管理员微信通道" || channelA.AdminUser != "admin" || len(channelA.AllowedTables) != 0 {
+		t.Fatalf("expected edited channel to keep admin binding and no channel tables, got %+v", channelA)
 	}
 
 	pageReq, err := http.NewRequest(http.MethodGet, server.URL+"/moyi-7k3x9-admin/wechat-agent", nil)
@@ -3291,12 +3814,12 @@ func TestAgentWeChatChannelManagementAddsAndDisablesMultiple(t *testing.T) {
 		t.Fatalf("read wechat agent page: %v", err)
 	}
 	pageHTML := string(pageBody)
-	for _, expected := range []string{"微信通道 A", "微信通道 B", "禁用通道", "2 个通道", "点击展开配置", "数据权限", "指定数据表", "常用授权", "admin_users, admin_roles", "orders, admin_users, analytics.events"} {
+	for _, expected := range []string{"管理员微信通道", "禁用通道", "1 个通道", "关联管理员", "用户组权限", "超级管理员", "全部已登记表（只读）", "不能手动新增"} {
 		if !strings.Contains(pageHTML, expected) {
 			t.Fatalf("expected wechat agent page to contain %q", expected)
 		}
 	}
-	for _, unexpected := range []string{"等待二维码", "二维码内容", "留空表示全部已登记数据表"} {
+	for _, unexpected := range []string{"等待二维码", "二维码内容", "留空表示全部已登记数据表", "常用授权", "授权数据表"} {
 		if strings.Contains(pageHTML, unexpected) {
 			t.Fatalf("expected wechat agent page not to reserve empty QR content %q", unexpected)
 		}
@@ -3305,10 +3828,10 @@ func TestAgentWeChatChannelManagementAddsAndDisablesMultiple(t *testing.T) {
 	disableResp, err := postFormWithCookie(t, client, server.URL+"/moyi-7k3x9-admin/wechat-agent/channels", sessionCookie, url.Values{
 		"wechat_channel_key":     {channelA.Key},
 		"wechat_channel_enabled": {"1"},
-		"wechat_channel_name":    {channelA.DisplayName},
+		"wechat_channel_name":    {"管理员微信通道"},
+		"wechat_admin_user":      {"admin"},
 		"wechat_base_url":        {channelA.BaseURL},
 		"wechat_bot_type":        {channelA.BotType},
-		"wechat_allowed_tables":  {strings.Join(channelA.AllowedTables, ",")},
 		"wechat_channel_action":  {"disable"},
 	})
 	if err != nil {
@@ -3324,18 +3847,14 @@ func TestAgentWeChatChannelManagementAddsAndDisablesMultiple(t *testing.T) {
 	}
 	channels = state.AgentChannels.normalized()
 	disabledA, _, ok := findAgentWeChatChannelByKey(channels, channelA.Key)
-	if !ok || disabledA.DisplayName != "微信通道 A" || disabledA.Enabled || disabledA.Status != "disabled" {
-		t.Fatalf("expected first wechat channel to be disabled and retained, got %+v", disabledA)
+	if !ok || disabledA.DisplayName != "管理员微信通道" || disabledA.Enabled || disabledA.Status != "disabled" {
+		t.Fatalf("expected default wechat channel to be disabled and retained, got %+v", disabledA)
 	}
-	if got := strings.Join(disabledA.AllowedTables, ","); got != "admin_users,admin_roles" {
-		t.Fatalf("expected disabled channel to retain allowed tables, got %q", got)
+	if disabledA.AdminUser != "admin" || len(disabledA.AllowedTables) != 0 {
+		t.Fatalf("expected disabled channel to retain admin binding only, got %+v", disabledA)
 	}
 	if disabledA.Token != "" || disabledA.ProviderToken != "" || disabledA.AccountID != "" {
 		t.Fatalf("expected disabled channel runtime credentials to be cleared, got %+v", disabledA)
-	}
-	enabledB, _, ok := findAgentWeChatChannelByKey(channels, channelB.Key)
-	if !ok || enabledB.DisplayName != "微信通道 B" || !enabledB.Enabled {
-		t.Fatalf("expected second wechat channel to remain enabled, got %+v", enabledB)
 	}
 }
 
@@ -3368,6 +3887,14 @@ func TestAgentWeChatChannelTableAuthorizationRestrictsChatTools(t *testing.T) {
 		t.Fatalf("load installed state: %v", err)
 	}
 	token := newAgentWeChatToken()
+	state.Access.Users = append(state.Access.Users, adminAccountConfig{
+		Username:    "wx_limited",
+		DisplayName: "受限微信管理员",
+		Role:        "agent_reader",
+		Status:      "enabled",
+		Source:      "access_config",
+		CreatedAt:   time.Now().UTC(),
+	})
 	state.AgentChannels.WeChats = []agentWeChatChannelConfig{
 		{
 			Key:           "wechat_limited",
@@ -3380,7 +3907,7 @@ func TestAgentWeChatChannelTableAuthorizationRestrictsChatTools(t *testing.T) {
 			Token:         token,
 			DisplayName:   "受限微信通道",
 			AgentHint:     agentWeChatDefaultHint,
-			AllowedTables: []string{"data_sources"},
+			AdminUser:     "wx_limited",
 		},
 	}
 	if err := store.Save(state); err != nil {
@@ -3430,11 +3957,130 @@ func TestAgentWeChatChannelTableAuthorizationRestrictsChatTools(t *testing.T) {
 	if !ok {
 		t.Fatal("expected limited wechat channel to remain present")
 	}
-	if got := strings.Join(wechat.AllowedTables, ","); got != "data_sources" {
-		t.Fatalf("direct message must not rewrite allowed tables, got %q", got)
+	if wechat.AdminUser != "wx_limited" || len(wechat.AllowedTables) != 0 || wechat.DataScope != agentTableAccessNone {
+		t.Fatalf("direct message must keep admin binding without channel-level tables, got %+v", wechat)
 	}
-	if wechat.DataScope != agentTableAccessTables {
-		t.Fatalf("direct message must not rewrite data scope, got %q", wechat.DataScope)
+}
+
+func TestAgentWeChatUsesBoundAdminRoleTablePermissions(t *testing.T) {
+	stateFile := writeInstalledState(t, "Test Admin", "admin", "secret123")
+	store := newInstallStore(stateFile)
+	state, err := store.Load()
+	if err != nil {
+		t.Fatalf("load installed state: %v", err)
+	}
+	token := newAgentWeChatToken()
+	state.Access.Users = append(state.Access.Users, adminAccountConfig{
+		Username:    "wx_agent",
+		DisplayName: "微信代理管理员",
+		Role:        "agent_reader",
+		Status:      "enabled",
+		Source:      "access_config",
+		CreatedAt:   time.Now().UTC(),
+	})
+	state.AgentChannels.WeChats = []agentWeChatChannelConfig{
+		{
+			Key:           "wechat_role_bound",
+			Enabled:       true,
+			Status:        "bound",
+			BaseURL:       agentWeChatDefaultBaseURL,
+			BotType:       "3",
+			ProviderToken: "provider-token-role-bound",
+			AccountID:     "bot-role-bound@im.bot",
+			Token:         token,
+			DisplayName:   "用户组权限通道",
+			AgentHint:     agentWeChatDefaultHint,
+			AdminUser:     "wx_agent",
+		},
+	}
+	if err := store.Save(state); err != nil {
+		t.Fatalf("save role-bound wechat channel: %v", err)
+	}
+
+	server := httptest.NewServer(NewRouter(RouterOptions{InstallStateFile: stateFile, DisableTaskWorker: true}))
+	defer server.Close()
+	client := server.Client()
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	postMessage := func(messageID string) agentWeChatMessageResponse {
+		req, err := http.NewRequest(http.MethodPost, server.URL+"/api/agent/messages", bytes.NewBufferString(`{"Body":"我们后台有几个管理员账号？","From":"wx-user-role@im.wechat","To":"bot-role-bound@im.bot","AccountId":"bot-role-bound@im.bot","MessageSid":"`+messageID+`"}`))
+		if err != nil {
+			t.Fatalf("create role-bound wechat message request: %v", err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+token)
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("POST role-bound wechat agent message failed: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			t.Fatalf("expected role-bound wechat message 200, got %d: %s", resp.StatusCode, body)
+		}
+		var parsed agentWeChatMessageResponse
+		if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
+			t.Fatalf("decode role-bound wechat response: %v", err)
+		}
+		return parsed
+	}
+
+	denied := postMessage("msg-role-denied")
+	if len(denied.ToolResults) == 0 || denied.ToolResults[0].OK || !strings.Contains(denied.Reply, "未授权") {
+		t.Fatalf("expected bound admin role to deny admin_users before group grant, got %+v", denied)
+	}
+
+	sessionCookie := loginTestAdmin(t, client, server.URL)
+	roleResp, err := postFormWithCookie(t, client, server.URL+"/moyi-7k3x9-admin/users/roles/save", sessionCookie, url.Values{
+		"role_key":             {"agent_reader"},
+		"role_name":            {"智能体只读访问"},
+		"role_scope":           {"微信 Agent 授权测试"},
+		"role_status":          {"enabled"},
+		"role_description":     {"允许微信 Agent 读取指定管理表"},
+		"role_menu_keys":       {"dashboard, ai"},
+		"role_permission_keys": {"agent.tables.read, agent.sql.select, agent.secrets.mask"},
+		"role_data_scope":      {"tables"},
+		"role_allowed_tables":  {"admin_users"},
+	})
+	if err != nil {
+		t.Fatalf("POST role permission save failed: %v", err)
+	}
+	roleResp.Body.Close()
+	if roleResp.StatusCode != http.StatusFound {
+		t.Fatalf("expected role permission save redirect, got %d", roleResp.StatusCode)
+	}
+	state, err = store.Load()
+	if err != nil {
+		t.Fatalf("reload state after role permission save: %v", err)
+	}
+	roleAfterSave, ok := findAdminRoleConfig(state.Access.normalized(state).Roles, "agent_reader")
+	if !ok {
+		t.Fatal("expected agent_reader role after save")
+	}
+	if got := strings.Join(roleAfterSave.PermissionKeys, ","); got != "agent.tables.read,agent.sql.select,agent.secrets.mask" {
+		t.Fatalf("expected saved role permissions, got %+v", roleAfterSave)
+	}
+	scopeAfterSave := agentScopeForAdminAccount(state, "wx_agent")
+	if scopeAfterSave.Mode != agentTableAccessTables || strings.Join(scopeAfterSave.Tables, ",") != "admin_users" {
+		t.Fatalf("expected saved bound role scope to allow admin_users, got %+v", scopeAfterSave)
+	}
+
+	allowed := postMessage("msg-role-allowed")
+	if len(allowed.ToolResults) == 0 || !allowed.ToolResults[0].OK || strings.Contains(allowed.Reply, "未授权") {
+		t.Fatalf("expected bound admin role grant to allow admin_users, got %+v", allowed)
+	}
+	state, err = store.Load()
+	if err != nil {
+		t.Fatalf("reload state after role-bound permission test: %v", err)
+	}
+	wechat, _, ok := findAgentWeChatChannelByKey(state.AgentChannels.normalized(), "wechat_role_bound")
+	if !ok || wechat.AdminUser != "wx_agent" || len(wechat.AllowedTables) != 0 {
+		t.Fatalf("wechat channel should keep admin binding without channel-level tables, got %+v", wechat)
+	}
+	role, ok := findAdminRoleConfig(state.Access.normalized(state).Roles, "agent_reader")
+	if !ok || strings.Join(role.AllowedTables, ",") != "admin_users" {
+		t.Fatalf("expected role-level table grant to persist, got %+v", role)
 	}
 }
 
@@ -3446,6 +4092,23 @@ func TestAgentWeChatEmptyAuthorizationDoesNotDefaultToAllTables(t *testing.T) {
 		t.Fatalf("load installed state: %v", err)
 	}
 	token := newAgentWeChatToken()
+	state.Access.Roles = append(state.Access.Roles, adminRoleConfig{
+		Key:            "wechat_no_data",
+		Name:           "微信无数据权限",
+		Scope:          "仅微信通道，无数据读取",
+		Status:         "enabled",
+		Description:    "允许接收微信消息，但不授予任何数据表读取权限",
+		MenuKeys:       []string{"wechat_agent"},
+		PermissionKeys: []string{},
+	})
+	state.Access.Users = append(state.Access.Users, adminAccountConfig{
+		Username:    "wx_no_data",
+		DisplayName: "无数据微信管理员",
+		Role:        "wechat_no_data",
+		Status:      "enabled",
+		Source:      "access_config",
+		CreatedAt:   time.Now().UTC(),
+	})
 	state.AgentChannels.WeChats = []agentWeChatChannelConfig{
 		{
 			Key:           "wechat_no_data",
@@ -3458,6 +4121,7 @@ func TestAgentWeChatEmptyAuthorizationDoesNotDefaultToAllTables(t *testing.T) {
 			Token:         token,
 			DisplayName:   "未授权数据通道",
 			AgentHint:     agentWeChatDefaultHint,
+			AdminUser:     "wx_no_data",
 		},
 	}
 	if err := store.Save(state); err != nil {
@@ -3542,6 +4206,25 @@ func TestAgentScopeQuestionReportsAuthorizationWithoutModelOrUserTables(t *testi
 	}
 }
 
+func TestFinalizeAgentReplyPrefersConciseDefault(t *testing.T) {
+	reply := "第一句先给结论。第二句补充结果。第三句说明下一步。第四句是多余展开。"
+	got := finalizeAgentReply("帮我看一下", reply)
+	if strings.Contains(got, "第四句") {
+		t.Fatalf("expected default reply to be shortened, got %q", got)
+	}
+	if !strings.Contains(got, "第一句") || !strings.Contains(got, "第三句") {
+		t.Fatalf("expected concise reply to keep key sentences, got %q", got)
+	}
+}
+
+func TestFinalizeAgentReplyKeepsDetailedWhenRequested(t *testing.T) {
+	reply := "第一句先给结论。第二句补充结果。第三句说明下一步。第四句继续展开。"
+	got := finalizeAgentReply("详细说说这个问题", reply)
+	if got != reply {
+		t.Fatalf("expected detailed request to keep full reply, got %q", got)
+	}
+}
+
 func TestAgentWeChatWorkerPreservesAuthorizationAndBlocksUnauthorizedExport(t *testing.T) {
 	stateFile := writeInstalledState(t, "Test Admin", "admin", "secret123")
 	store := newInstallStore(stateFile)
@@ -3582,6 +4265,25 @@ func TestAgentWeChatWorkerPreservesAuthorizationAndBlocksUnauthorizedExport(t *t
 	if err != nil {
 		t.Fatalf("load installed state: %v", err)
 	}
+	state.Access.Roles = append(state.Access.Roles, adminRoleConfig{
+		Key:            "wechat_export_reader",
+		Name:           "微信导出受限角色",
+		Scope:          "仅允许访问数据源登记表",
+		Status:         "enabled",
+		Description:    "用于验证微信 Agent 导出时会继承管理员的受限数据范围",
+		MenuKeys:       []string{"wechat_agent"},
+		PermissionKeys: []string{"agent.tables.read", "agent.sql.select"},
+		DataScope:      agentTableAccessTables,
+		AllowedTables:  []string{"data_sources"},
+	})
+	state.Access.Users = append(state.Access.Users, adminAccountConfig{
+		Username:    "wx_limited_export",
+		DisplayName: "受限导出管理员",
+		Role:        "wechat_export_reader",
+		Status:      "enabled",
+		Source:      "access_config",
+		CreatedAt:   time.Now().UTC(),
+	})
 	state.AgentChannels.WeChats = []agentWeChatChannelConfig{
 		{
 			Key:           "wechat_limited_export",
@@ -3595,8 +4297,7 @@ func TestAgentWeChatWorkerPreservesAuthorizationAndBlocksUnauthorizedExport(t *t
 			Token:         newAgentWeChatToken(),
 			DisplayName:   "受限导出通道",
 			AgentHint:     agentWeChatDefaultHint,
-			DataScope:     agentTableAccessTables,
-			AllowedTables: []string{"data_sources"},
+			AdminUser:     "wx_limited_export",
 		},
 	}
 	state.AgentChannels.WeChat = agentWeChatChannelConfig{}
@@ -3625,11 +4326,15 @@ func TestAgentWeChatWorkerPreservesAuthorizationAndBlocksUnauthorizedExport(t *t
 	if !ok {
 		t.Fatalf("expected limited channel to remain present")
 	}
-	if wechat.DataScope != agentTableAccessTables {
-		t.Fatalf("expected worker to preserve data scope, got %q", wechat.DataScope)
+	if wechat.AdminUser != "wx_limited_export" {
+		t.Fatalf("expected worker to preserve bound admin user, got %+v", wechat)
 	}
-	if got := strings.Join(wechat.AllowedTables, ","); got != "data_sources" {
-		t.Fatalf("expected worker to preserve allowed tables, got %q", got)
+	if wechat.DataScope != agentTableAccessNone || len(wechat.AllowedTables) != 0 {
+		t.Fatalf("expected worker to keep channel-level scope empty, got %+v", wechat)
+	}
+	scope := agentScopeForAdminAccount(state, "wx_limited_export")
+	if scope.Mode != agentTableAccessTables || strings.Join(scope.Tables, ",") != "data_sources" {
+		t.Fatalf("expected bound admin scope to remain data_sources, got %+v", scope)
 	}
 	if wechat.SyncBuffer != "buf-limited-2" {
 		t.Fatalf("expected runtime sync buffer to update, got %q", wechat.SyncBuffer)
@@ -4172,7 +4877,10 @@ func TestAgentWeChatWorkerPollsProviderAndReplies(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reload state after worker: %v", err)
 	}
-	wechat := state.AgentChannels.normalized().WeChat
+	wechat, _, ok := findAgentWeChatChannelByKey(state.AgentChannels.normalized(), agentWeChatChannelKey)
+	if !ok {
+		t.Fatalf("expected worker channel %q", agentWeChatChannelKey)
+	}
 	if wechat.SyncBuffer != "buf-2" || wechat.LastMessageAt.IsZero() || wechat.LastOutboundAt.IsZero() || wechat.LastError != "" {
 		t.Fatalf("expected worker to persist channel progress, got %+v", wechat)
 	}
@@ -4219,6 +4927,24 @@ func TestAgentWeChatWorkerPollsMultipleChannels(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load installed state: %v", err)
 	}
+	state.Access.Users = append(state.Access.Users,
+		adminAccountConfig{
+			Username:    "wechat_a_admin",
+			DisplayName: "微信管理员 A",
+			Role:        "super_admin",
+			Status:      "enabled",
+			Source:      "access_config",
+			CreatedAt:   time.Now().UTC(),
+		},
+		adminAccountConfig{
+			Username:    "wechat_b_admin",
+			DisplayName: "微信管理员 B",
+			Role:        "super_admin",
+			Status:      "enabled",
+			Source:      "access_config",
+			CreatedAt:   time.Now().UTC(),
+		},
+	)
 	state.AgentChannels.WeChats = []agentWeChatChannelConfig{
 		{
 			Key:           "wechat_a",
@@ -4232,7 +4958,7 @@ func TestAgentWeChatWorkerPollsMultipleChannels(t *testing.T) {
 			Token:         newAgentWeChatToken(),
 			DisplayName:   "微信通道 A",
 			AgentHint:     agentWeChatDefaultHint,
-			DataScope:     agentTableAccessAll,
+			AdminUser:     "wechat_a_admin",
 		},
 		{
 			Key:           "wechat_b",
@@ -4246,7 +4972,7 @@ func TestAgentWeChatWorkerPollsMultipleChannels(t *testing.T) {
 			Token:         newAgentWeChatToken(),
 			DisplayName:   "微信通道 B",
 			AgentHint:     agentWeChatDefaultHint,
-			DataScope:     agentTableAccessAll,
+			AdminUser:     "wechat_b_admin",
 		},
 	}
 	state.AgentChannels.WeChat = agentWeChatChannelConfig{}
@@ -4418,9 +5144,184 @@ func TestAgentWeChatWorkerSendsExportFileAsWeixinAttachment(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reload state after export worker: %v", err)
 	}
-	wechat := state.AgentChannels.normalized().WeChat
+	wechat, _, ok := findAgentWeChatChannelByKey(state.AgentChannels.normalized(), agentWeChatChannelKey)
+	if !ok {
+		t.Fatalf("expected export worker channel %q", agentWeChatChannelKey)
+	}
 	if wechat.LastOutboundAt.IsZero() || wechat.LastError != "" {
 		t.Fatalf("expected successful file outbound status, got %+v", wechat)
+	}
+}
+
+func TestAgentWeChatWorkerSendsGeneratedImageAsWeixinImage(t *testing.T) {
+	stateFile := writeInstalledState(t, "Test Admin", "admin", "secret123")
+	store := newInstallStore(stateFile)
+
+	imageBytes := []byte{
+		0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+		0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+		0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+		0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53,
+		0xde, 0x00, 0x00, 0x00, 0x0c, 0x49, 0x44, 0x41,
+		0x54, 0x08, 0xd7, 0x63, 0xf8, 0xcf, 0xc0, 0x00,
+		0x00, 0x03, 0x01, 0x01, 0x00, 0xc9, 0xfe, 0x92,
+		0xef, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e,
+		0x44, 0xae, 0x42, 0x60, 0x82,
+	}
+	mock := newMockBailianImageServer(t, imageBytes)
+	defer mock.Close()
+	configureTestAIConfig(t, stateFile, aiConfig{
+		Provider:   "bailian",
+		APIKey:     "sk-image-test",
+		BaseURL:    mock.URL + "/compatible-mode/v1",
+		ChatModel:  "qwen-plus",
+		ImageModel: "qwen-image-2.0-pro",
+	})
+
+	oldCDNBaseURL := agentWeChatCDNBaseURL
+	defer func() {
+		agentWeChatCDNBaseURL = oldCDNBaseURL
+	}()
+
+	var cdnUploadRequests int
+	var expectedCipherSize int
+	cdn := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/upload" {
+			http.NotFound(w, r)
+			return
+		}
+		cdnUploadRequests++
+		if r.URL.Query().Get("encrypted_query_param") != "upload-param-image-1" || r.URL.Query().Get("filekey") == "" {
+			t.Fatalf("unexpected image CDN upload query: %s", r.URL.RawQuery)
+		}
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read image CDN upload body: %v", err)
+		}
+		if len(body) != expectedCipherSize || len(body)%16 != 0 {
+			t.Fatalf("expected encrypted image CDN body size %d aligned to 16, got %d", expectedCipherSize, len(body))
+		}
+		w.Header().Set("x-encrypted-param", "download-param-image-1")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer cdn.Close()
+	agentWeChatCDNBaseURL = cdn.URL
+
+	var getUpdatesRequests int
+	var getUploadURLRequests int
+	var textMessages []string
+	var imageItems []agentWeChatProviderImageItem
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/ilink/bot/getupdates":
+			getUpdatesRequests++
+			_, _ = w.Write([]byte(`{"ret":0,"get_updates_buf":"buf-image-2","msgs":[{"message_id":"provider-msg-image","from_user_id":"wx-user-image@im.wechat","to_user_id":"bot-1@im.bot","session_id":"session-image","message_type":1,"message_state":2,"context_token":"ctx-image","item_list":[{"type":1,"text_item":{"text":"帮我生成一张蓝绿色科技感的后台海报"}}]}]}`))
+		case "/ilink/bot/getuploadurl":
+			getUploadURLRequests++
+			if r.Header.Get("Authorization") != "Bearer provider-token-1" {
+				t.Fatalf("unexpected image getuploadurl authorization: %s", r.Header.Get("Authorization"))
+			}
+			var payload agentWeChatGetUploadURLRequest
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				t.Fatalf("decode image getuploadurl request: %v", err)
+			}
+			if payload.MediaType != 1 || payload.ToUserID != "wx-user-image@im.wechat" || !payload.NoNeedThumb || payload.RawSize <= 0 || payload.RawFileMD5 == "" || payload.AESKey == "" || payload.FileKey == "" {
+				t.Fatalf("unexpected image getuploadurl payload: %+v", payload)
+			}
+			expectedCipherSize = payload.FileSize
+			_, _ = w.Write([]byte(`{"ret":0,"upload_full_url":"` + cdn.URL + `/upload?encrypted_query_param=upload-param-image-1&filekey=` + payload.FileKey + `&taskid=task-image-1"}`))
+		case "/ilink/bot/sendmessage":
+			var payload agentWeChatSendMessageRequest
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				t.Fatalf("decode image sendmessage request: %v", err)
+			}
+			if payload.Message.FromUserID != "" || payload.Message.ToUserID != "wx-user-image@im.wechat" || payload.Message.ContextToken != "ctx-image" {
+				t.Fatalf("unexpected image sendmessage envelope: %+v", payload.Message)
+			}
+			if len(payload.Message.ItemList) != 1 {
+				t.Fatalf("expected one image message item, got %+v", payload.Message.ItemList)
+			}
+			item := payload.Message.ItemList[0]
+			switch item.Type {
+			case 1:
+				if item.TextItem == nil {
+					t.Fatalf("expected image caption text item, got %+v", item)
+				}
+				textMessages = append(textMessages, item.TextItem.Text)
+			case 2:
+				if item.ImageItem == nil {
+					t.Fatalf("expected image item, got %+v", item)
+				}
+				imageItems = append(imageItems, *item.ImageItem)
+			default:
+				t.Fatalf("unexpected image message item type: %+v", item)
+			}
+			_, _ = w.Write([]byte(`{"ret":0}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer provider.Close()
+
+	state, err := store.Load()
+	if err != nil {
+		t.Fatalf("load installed state: %v", err)
+	}
+	state.AgentChannels.WeChat = agentWeChatChannelConfig{
+		Enabled:        true,
+		Status:         "bound",
+		BaseURL:        provider.URL,
+		BotType:        "3",
+		AdminUser:      "admin",
+		ProviderToken:  "provider-token-1",
+		AccountID:      "bot-1@im.bot",
+		OpenClawUserID: "wx-user-image@im.wechat",
+		SyncBuffer:     "buf-image-1",
+		Token:          newAgentWeChatToken(),
+		DisplayName:    agentWeChatDefaultName,
+		AgentHint:      agentWeChatDefaultHint,
+		DataScope:      agentTableAccessAll,
+		BoundUser:      "wx-user-image@im.wechat",
+		BoundAt:        time.Now().UTC(),
+	}
+	if err := store.Save(state); err != nil {
+		t.Fatalf("save wechat image channel: %v", err)
+	}
+
+	admin := newAdminServer("/moyi-7k3x9-admin", "admin", "secret123", "", stateFile, "test")
+	ran, _ := admin.runAgentWeChatChannelPollOnce(context.Background())
+	if !ran {
+		t.Fatal("expected worker to poll image message")
+	}
+	if getUpdatesRequests != 1 || getUploadURLRequests != 1 || cdnUploadRequests != 1 {
+		t.Fatalf("expected image getupdates/getuploadurl/cdn once, got %d/%d/%d", getUpdatesRequests, getUploadURLRequests, cdnUploadRequests)
+	}
+	if len(textMessages) != 1 {
+		t.Fatalf("expected one text hint before image, got %+v", textMessages)
+	}
+	if !strings.Contains(textMessages[0], "图片已经生成好了") {
+		t.Fatalf("expected image hint text, got %q", textMessages[0])
+	}
+	if len(imageItems) != 1 {
+		t.Fatalf("expected one image message item, got %+v", imageItems)
+	}
+	imageItem := imageItems[0]
+	if imageItem.Media == nil || imageItem.Media.EncryptQueryParam != "download-param-image-1" || imageItem.Media.AESKey == "" || imageItem.Media.EncryptType != 1 {
+		t.Fatalf("expected wechat image CDN media, got %+v", imageItem)
+	}
+	if imageItem.AESKey == "" || imageItem.MidSize <= 0 || imageItem.HDSize <= 0 {
+		t.Fatalf("expected image item metadata, got %+v", imageItem)
+	}
+	state, err = store.Load()
+	if err != nil {
+		t.Fatalf("reload state after image worker: %v", err)
+	}
+	wechat, _, ok := findAgentWeChatChannelByKey(state.AgentChannels.normalized(), agentWeChatChannelKey)
+	if !ok {
+		t.Fatalf("expected image worker channel %q", agentWeChatChannelKey)
+	}
+	if wechat.LastOutboundAt.IsZero() || wechat.LastError != "" {
+		t.Fatalf("expected successful image outbound status, got %+v", wechat)
 	}
 }
 
@@ -4584,7 +5485,7 @@ func TestAdminAgentChatSkipsDataToolsForGeneralAdminTask(t *testing.T) {
 	if len(parsed.ToolResults) != 0 {
 		t.Fatalf("expected no data tools for general admin task, got %+v", parsed.ToolResults)
 	}
-	if !strings.Contains(parsed.Reply, "后台管理员助理") {
+	if !strings.Contains(parsed.Reply, "不需要查表") {
 		t.Fatalf("expected admin role reply, got %q", parsed.Reply)
 	}
 }
@@ -4623,8 +5524,11 @@ func TestAdminAgentChatExportsTableFile(t *testing.T) {
 	if parsed.Run.Mode != string(agentIntentExport) {
 		t.Fatalf("expected export mode, got %q", parsed.Run.Mode)
 	}
-	if len(parsed.Files) != 1 || parsed.Files[0].URL == "" {
+	if len(parsed.Files) != 1 || parsed.Files[0].URL == "" || !strings.HasSuffix(parsed.Files[0].Name, ".xlsx") {
 		t.Fatalf("expected generated file, got %+v", parsed.Files)
+	}
+	if parsed.Files[0].MIME != "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" {
+		t.Fatalf("expected default export mime to be xlsx, got %+v", parsed.Files[0])
 	}
 	if len(parsed.ToolResults) != 1 || parsed.ToolResults[0].Name != "export_table" || parsed.ToolResults[0].File == nil {
 		t.Fatalf("expected export_table tool with file, got %+v", parsed.ToolResults)
@@ -4647,14 +5551,943 @@ func TestAdminAgentChatExportsTableFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read export file: %v", err)
 	}
+	xlsx, err := zip.NewReader(bytes.NewReader(fileBody), int64(len(fileBody)))
+	if err != nil {
+		t.Fatalf("expected valid xlsx zip: %v", err)
+	}
+	workbook := readZipPartForTest(t, xlsx, "xl/workbook.xml")
+	worksheet := readZipPartForTest(t, xlsx, "xl/worksheets/sheet1.xml")
+	if !strings.Contains(workbook, `name="admin_users"`) {
+		t.Fatalf("expected xlsx workbook to use table name as sheet name, got %q", workbook)
+	}
+	for _, expected := range []string{"登录账号", "所属角色", "账号启用状态", "admin", "超级管理员"} {
+		if !strings.Contains(worksheet, expected) {
+			t.Fatalf("expected xlsx admin user content to contain %q, got %q", expected, worksheet)
+		}
+	}
+	for _, unexpected := range []string{">数据表<", ">admin_users<", ">username<"} {
+		if strings.Contains(worksheet, unexpected) {
+			t.Fatalf("expected xlsx default export to omit repeated table column, got %q", worksheet)
+		}
+	}
+}
+
+func TestAdminAgentChatExportsCSVWithoutRepeatedTableColumn(t *testing.T) {
+	stateFile := writeInstalledState(t, "Test Admin", "admin", "secret123")
+	server := httptest.NewServer(NewRouter(RouterOptions{InstallStateFile: stateFile}))
+	defer server.Close()
+
+	client := server.Client()
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	sessionCookie := loginTestAdmin(t, client, server.URL)
+
+	body := bytes.NewBufferString(`{"message":"把管理员账号的账号、角色、状态整理成 CSV 文件发给我"}`)
+	req, err := http.NewRequest(http.MethodPost, server.URL+"/moyi-7k3x9-admin/ai/chat", body)
+	if err != nil {
+		t.Fatalf("create csv export request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(sessionCookie)
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("POST AI chat failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", resp.StatusCode)
+	}
+
+	var parsed agentChatResponse
+	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
+		t.Fatalf("decode AI chat response: %v", err)
+	}
+	if len(parsed.Files) != 1 || !strings.HasSuffix(parsed.Files[0].Name, ".csv") {
+		t.Fatalf("expected generated csv file, got %+v", parsed.Files)
+	}
+
+	fileReq, err := http.NewRequest(http.MethodGet, server.URL+parsed.Files[0].URL, nil)
+	if err != nil {
+		t.Fatalf("create csv download request: %v", err)
+	}
+	fileReq.AddCookie(sessionCookie)
+	fileResp, err := client.Do(fileReq)
+	if err != nil {
+		t.Fatalf("download csv export file failed: %v", err)
+	}
+	defer fileResp.Body.Close()
+	if fileResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected csv file status 200, got %d", fileResp.StatusCode)
+	}
+	fileBody, err := io.ReadAll(fileResp.Body)
+	if err != nil {
+		t.Fatalf("read csv export file: %v", err)
+	}
 	fileText := string(fileBody)
 	for _, expected := range []string{"登录账号", "所属角色", "账号启用状态", "admin", "超级管理员"} {
 		if !strings.Contains(fileText, expected) {
 			t.Fatalf("expected CSV admin user content to contain %q, got %q", expected, fileText)
 		}
 	}
-	if strings.Contains(fileText, "username") || strings.Contains(fileText, "role,status") {
-		t.Fatalf("expected CSV headers to prefer field comments, got %q", fileText)
+	for _, unexpected := range []string{"数据表", "admin_users", "username", "role,status"} {
+		if strings.Contains(fileText, unexpected) {
+			t.Fatalf("expected explicit csv export to omit repeated table column and raw field names, got %q", fileText)
+		}
+	}
+}
+
+func TestAdminAgentChatFetchesPublicWebPage(t *testing.T) {
+	prevAllowPrivate := agentAllowPrivateWebTargets
+	agentAllowPrivateWebTargets = true
+	defer func() {
+		agentAllowPrivateWebTargets = prevAllowPrivate
+	}()
+
+	webServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = io.WriteString(w, `<!doctype html><html><head><title>公开测试页面</title></head><body><h1>公开测试页面</h1><p>这是测试页面，用来验证后台智能体的网页访问能力。</p></body></html>`)
+	}))
+	defer webServer.Close()
+
+	stateFile := writeInstalledState(t, "Test Admin", "admin", "secret123")
+	server := httptest.NewServer(NewRouter(RouterOptions{InstallStateFile: stateFile}))
+	defer server.Close()
+
+	client := server.Client()
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	sessionCookie := loginTestAdmin(t, client, server.URL)
+
+	body := bytes.NewBufferString(fmt.Sprintf(`{"message":"访问 %s 并总结要点"}`, webServer.URL))
+	req, err := http.NewRequest(http.MethodPost, server.URL+"/moyi-7k3x9-admin/ai/chat", body)
+	if err != nil {
+		t.Fatalf("create web fetch request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(sessionCookie)
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("POST AI web fetch failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected web fetch 200, got %d body %s", resp.StatusCode, body)
+	}
+
+	var parsed agentChatResponse
+	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
+		t.Fatalf("decode web fetch response: %v", err)
+	}
+	if parsed.Run.Mode != string(agentIntentWebAccess) {
+		t.Fatalf("expected web access mode, got %q", parsed.Run.Mode)
+	}
+	if len(parsed.ToolResults) != 1 || parsed.ToolResults[0].Name != "web_fetch" || !parsed.ToolResults[0].OK {
+		t.Fatalf("expected successful web_fetch result, got %+v", parsed.ToolResults)
+	}
+	if len(parsed.ToolResults[0].Rows) != 1 {
+		t.Fatalf("expected web_fetch row payload, got %+v", parsed.ToolResults[0].Rows)
+	}
+	row := parsed.ToolResults[0].Rows[0]
+	if row["title"] != "公开测试页面" {
+		t.Fatalf("expected parsed title, got %+v", row)
+	}
+	if !strings.Contains(row["content"], "这是测试页面") {
+		t.Fatalf("expected parsed content to include page text, got %+v", row)
+	}
+}
+
+func TestAIRoleGetsWebAccessByDefault(t *testing.T) {
+	prevAllowPrivate := agentAllowPrivateWebTargets
+	agentAllowPrivateWebTargets = true
+	defer func() {
+		agentAllowPrivateWebTargets = prevAllowPrivate
+	}()
+
+	webServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = io.WriteString(w, `<!doctype html><html><head><title>默认联网权限测试</title></head><body><p>这个页面用于验证 AI 菜单角色会自动获得公开网页访问能力。</p></body></html>`)
+	}))
+	defer webServer.Close()
+
+	stateFile := writeInstalledState(t, "Test Admin", "admin", "secret123")
+	server := httptest.NewServer(NewRouter(RouterOptions{InstallStateFile: stateFile}))
+	defer server.Close()
+
+	client := server.Client()
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	adminCookie := loginTestAdmin(t, client, server.URL)
+
+	roleResp, err := postFormWithCookie(t, client, server.URL+"/moyi-7k3x9-admin/users/roles/save", adminCookie, url.Values{
+		"role_key":         {"web_default"},
+		"role_name":        {"网页默认权限"},
+		"role_scope":       {"只有 AI 菜单，也应默认允许公开网页访问"},
+		"role_status":      {"enabled"},
+		"role_description": {"验证 AI 角色默认附带联网读取权限"},
+		"role_menu_keys":   {"ai"},
+		"role_data_scope":  {"none"},
+	})
+	if err != nil {
+		t.Fatalf("POST default web role save failed: %v", err)
+	}
+	roleResp.Body.Close()
+	if roleResp.StatusCode != http.StatusFound {
+		t.Fatalf("expected default web role redirect, got %d", roleResp.StatusCode)
+	}
+
+	userResp, err := postFormWithCookie(t, client, server.URL+"/moyi-7k3x9-admin/users/save", adminCookie, url.Values{
+		"username":     {"web_user"},
+		"display_name": {"联网默认账号"},
+		"role":         {"web_default"},
+		"status":       {"enabled"},
+		"password":     {"web12345"},
+	})
+	if err != nil {
+		t.Fatalf("POST default web user save failed: %v", err)
+	}
+	userResp.Body.Close()
+	if userResp.StatusCode != http.StatusFound {
+		t.Fatalf("expected default web user redirect, got %d", userResp.StatusCode)
+	}
+
+	roleUserCookie := loginTestUser(t, client, server.URL, "web_user", "web12345")
+	body := bytes.NewBufferString(fmt.Sprintf(`{"message":"访问 %s 并告诉我页面讲了什么"}`, webServer.URL))
+	req, err := http.NewRequest(http.MethodPost, server.URL+"/moyi-7k3x9-admin/ai/chat", body)
+	if err != nil {
+		t.Fatalf("create default web access request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(roleUserCookie)
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("POST default web access failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected default web access 200, got %d body %s", resp.StatusCode, body)
+	}
+
+	var parsed agentChatResponse
+	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
+		t.Fatalf("decode default web access response: %v", err)
+	}
+	if len(parsed.ToolResults) != 1 || parsed.ToolResults[0].Name != "web_fetch" || !parsed.ToolResults[0].OK {
+		t.Fatalf("expected AI role to get default web access, got %+v", parsed.ToolResults)
+	}
+	if parsed.Run.Metadata["web_authorization"] != "enabled" {
+		t.Fatalf("expected web authorization metadata enabled, got %+v", parsed.Run.Metadata)
+	}
+}
+
+func TestAdminAgentChatGeneratesImageFile(t *testing.T) {
+	imageBytes := []byte{
+		0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+		0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+		0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+		0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53,
+		0xde, 0x00, 0x00, 0x00, 0x0c, 0x49, 0x44, 0x41,
+		0x54, 0x08, 0xd7, 0x63, 0xf8, 0xcf, 0xc0, 0x00,
+		0x00, 0x03, 0x01, 0x01, 0x00, 0xc9, 0xfe, 0x92,
+		0xef, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e,
+		0x44, 0xae, 0x42, 0x60, 0x82,
+	}
+	mock := newMockBailianImageServer(t, imageBytes)
+	defer mock.Close()
+
+	stateFile := writeInstalledState(t, "Test Admin", "admin", "secret123")
+	configureTestAIConfig(t, stateFile, aiConfig{
+		Provider:   "bailian",
+		APIKey:     "sk-image-test",
+		BaseURL:    mock.URL + "/compatible-mode/v1",
+		ChatModel:  "qwen-plus",
+		ImageModel: "qwen-image-2.0-pro",
+	})
+	server := httptest.NewServer(NewRouter(RouterOptions{InstallStateFile: stateFile}))
+	defer server.Close()
+
+	client := server.Client()
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	sessionCookie := loginTestAdmin(t, client, server.URL)
+
+	body := bytes.NewBufferString(`{"message":"帮我生成一张蓝绿色科技感的后台海报"}`)
+	req, err := http.NewRequest(http.MethodPost, server.URL+"/moyi-7k3x9-admin/ai/chat", body)
+	if err != nil {
+		t.Fatalf("create image request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(sessionCookie)
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("POST image request failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected image generation 200, got %d body %s", resp.StatusCode, body)
+	}
+
+	var parsed agentChatResponse
+	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
+		t.Fatalf("decode image response: %v", err)
+	}
+	if parsed.Run.Mode != string(agentIntentImage) {
+		t.Fatalf("expected image mode, got %q", parsed.Run.Mode)
+	}
+	if parsed.Run.Metadata["image_authorization"] != "enabled" {
+		t.Fatalf("expected image authorization enabled, got %+v", parsed.Run.Metadata)
+	}
+	if len(parsed.ToolResults) != 1 || parsed.ToolResults[0].Name != "generate_image" || !parsed.ToolResults[0].OK {
+		t.Fatalf("expected generate_image tool result, got %+v", parsed.ToolResults)
+	}
+	if len(parsed.Files) != 1 || parsed.Files[0].URL == "" || !strings.HasSuffix(parsed.Files[0].Name, ".png") {
+		t.Fatalf("expected generated png file, got %+v", parsed.Files)
+	}
+	if parsed.Files[0].MIME != "image/png" {
+		t.Fatalf("expected image/png mime, got %+v", parsed.Files[0])
+	}
+	if parsed.Files[0].OriginalPrompt != "帮我生成一张蓝绿色科技感的后台海报" {
+		t.Fatalf("expected original prompt to be preserved, got %+v", parsed.Files[0])
+	}
+	if !strings.Contains(parsed.Files[0].Prompt, "用户原始需求：帮我生成一张蓝绿色科技感的后台海报") {
+		t.Fatalf("expected rewritten image prompt to include original request, got %+v", parsed.Files[0])
+	}
+	if !strings.Contains(parsed.Files[0].Prompt, "不要出现任何文字") {
+		t.Fatalf("expected rewritten image prompt to include no-text guardrail, got %+v", parsed.Files[0])
+	}
+
+	fileReq, err := http.NewRequest(http.MethodGet, server.URL+parsed.Files[0].URL, nil)
+	if err != nil {
+		t.Fatalf("create image download request: %v", err)
+	}
+	fileReq.AddCookie(sessionCookie)
+	fileResp, err := client.Do(fileReq)
+	if err != nil {
+		t.Fatalf("download image failed: %v", err)
+	}
+	defer fileResp.Body.Close()
+	if fileResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected image file status 200, got %d", fileResp.StatusCode)
+	}
+	if got := fileResp.Header.Get("Content-Type"); got != "image/png" {
+		t.Fatalf("expected image content type, got %q", got)
+	}
+	fileBody, err := io.ReadAll(fileResp.Body)
+	if err != nil {
+		t.Fatalf("read image file: %v", err)
+	}
+	if !bytes.Equal(fileBody, imageBytes) {
+		t.Fatalf("expected downloaded image bytes to match mock payload")
+	}
+}
+
+func TestAdminAgentChatTreatsOverviewIntroChartAsSingleImageTask(t *testing.T) {
+	imageBytes := []byte{
+		0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+		0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+		0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+		0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53,
+		0xde, 0x00, 0x00, 0x00, 0x0c, 0x49, 0x44, 0x41,
+		0x54, 0x08, 0xd7, 0x63, 0xf8, 0xcf, 0xc0, 0x00,
+		0x00, 0x03, 0x01, 0x01, 0x00, 0xc9, 0xfe, 0x92,
+		0xef, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e,
+		0x44, 0xae, 0x42, 0x60, 0x82,
+	}
+	mock := newMockBailianImageServer(t, imageBytes)
+	defer mock.Close()
+
+	stateFile := writeInstalledState(t, "Test Admin", "admin", "secret123")
+	configureTestAIConfig(t, stateFile, aiConfig{
+		Provider:   "bailian",
+		APIKey:     "sk-image-test",
+		BaseURL:    mock.URL + "/compatible-mode/v1",
+		ChatModel:  "qwen-plus",
+		ImageModel: "qwen-image-2.0-pro",
+	})
+	server := httptest.NewServer(NewRouter(RouterOptions{InstallStateFile: stateFile}))
+	defer server.Close()
+
+	client := server.Client()
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	sessionCookie := loginTestAdmin(t, client, server.URL)
+
+	body := bytes.NewBufferString(`{"message":"应该按照角色这里 4 个角色 都需要做成介绍，展示我们的每一个角色都能干么的介绍图"}`)
+	req, err := http.NewRequest(http.MethodPost, server.URL+"/moyi-7k3x9-admin/ai/chat", body)
+	if err != nil {
+		t.Fatalf("create overview image request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(sessionCookie)
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("POST overview image request failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected overview image generation 200, got %d body %s", resp.StatusCode, body)
+	}
+
+	var parsed agentChatResponse
+	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
+		t.Fatalf("decode overview image response: %v", err)
+	}
+	if parsed.Run.Mode != string(agentIntentImage) {
+		t.Fatalf("expected overview prompt to be treated as image task, got %q", parsed.Run.Mode)
+	}
+	if len(parsed.ToolResults) != 1 || parsed.ToolResults[0].Name != "generate_image" || !parsed.ToolResults[0].OK {
+		t.Fatalf("expected overview prompt to call generate_image once, got %+v", parsed.ToolResults)
+	}
+	if len(parsed.Files) != 1 || parsed.Files[0].URL == "" {
+		t.Fatalf("expected overview prompt to return a single previewable image file, got %+v", parsed.Files)
+	}
+	if parsed.ModelUsed {
+		t.Fatalf("expected file-backed image reply to avoid freeform model narration")
+	}
+}
+
+func TestAdminAgentChatCanReattachLastImagePreview(t *testing.T) {
+	imageBytes := []byte{
+		0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+		0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+		0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+		0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53,
+		0xde, 0x00, 0x00, 0x00, 0x0c, 0x49, 0x44, 0x41,
+		0x54, 0x08, 0xd7, 0x63, 0xf8, 0xcf, 0xc0, 0x00,
+		0x00, 0x03, 0x01, 0x01, 0x00, 0xc9, 0xfe, 0x92,
+		0xef, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e,
+		0x44, 0xae, 0x42, 0x60, 0x82,
+	}
+	mock := newMockBailianImageServer(t, imageBytes)
+	defer mock.Close()
+
+	stateFile := writeInstalledState(t, "Test Admin", "admin", "secret123")
+	configureTestAIConfig(t, stateFile, aiConfig{
+		Provider:   "bailian",
+		APIKey:     "sk-image-test",
+		BaseURL:    mock.URL + "/compatible-mode/v1",
+		ChatModel:  "qwen-plus",
+		ImageModel: "qwen-image-2.0-pro",
+	})
+	server := httptest.NewServer(NewRouter(RouterOptions{InstallStateFile: stateFile}))
+	defer server.Close()
+
+	client := server.Client()
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	sessionCookie := loginTestAdmin(t, client, server.URL)
+
+	firstBody := bytes.NewBufferString(`{"message":"帮我生成一张蓝绿色科技感的后台海报"}`)
+	firstReq, err := http.NewRequest(http.MethodPost, server.URL+"/moyi-7k3x9-admin/ai/chat", firstBody)
+	if err != nil {
+		t.Fatalf("create first image request: %v", err)
+	}
+	firstReq.Header.Set("Content-Type", "application/json")
+	firstReq.AddCookie(sessionCookie)
+	firstResp, err := client.Do(firstReq)
+	if err != nil {
+		t.Fatalf("POST first image request failed: %v", err)
+	}
+	defer firstResp.Body.Close()
+	if firstResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(firstResp.Body)
+		t.Fatalf("expected first image generation 200, got %d body %s", firstResp.StatusCode, body)
+	}
+
+	var firstParsed agentChatResponse
+	if err := json.NewDecoder(firstResp.Body).Decode(&firstParsed); err != nil {
+		t.Fatalf("decode first image response: %v", err)
+	}
+	if firstParsed.SessionID == "" || len(firstParsed.Files) != 1 {
+		t.Fatalf("expected first image response to contain session and file, got %+v", firstParsed)
+	}
+
+	secondBody := bytes.NewBufferString(fmt.Sprintf(`{"session_id":%q,"message":"你把图发给我啊，展示给我啊！"}`, firstParsed.SessionID))
+	secondReq, err := http.NewRequest(http.MethodPost, server.URL+"/moyi-7k3x9-admin/ai/chat", secondBody)
+	if err != nil {
+		t.Fatalf("create second image request: %v", err)
+	}
+	secondReq.Header.Set("Content-Type", "application/json")
+	secondReq.AddCookie(sessionCookie)
+	secondResp, err := client.Do(secondReq)
+	if err != nil {
+		t.Fatalf("POST second image request failed: %v", err)
+	}
+	defer secondResp.Body.Close()
+	if secondResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(secondResp.Body)
+		t.Fatalf("expected second image response 200, got %d body %s", secondResp.StatusCode, body)
+	}
+
+	var secondParsed agentChatResponse
+	if err := json.NewDecoder(secondResp.Body).Decode(&secondParsed); err != nil {
+		t.Fatalf("decode second image response: %v", err)
+	}
+	if len(secondParsed.ToolResults) != 0 {
+		t.Fatalf("expected image resend request to avoid new tool execution, got %+v", secondParsed.ToolResults)
+	}
+	if len(secondParsed.Files) != 1 {
+		t.Fatalf("expected image resend request to attach previous image, got %+v", secondParsed.Files)
+	}
+	if secondParsed.Files[0].Name != firstParsed.Files[0].Name || secondParsed.Files[0].URL != firstParsed.Files[0].URL {
+		t.Fatalf("expected image resend request to reuse previous file, first=%+v second=%+v", firstParsed.Files[0], secondParsed.Files[0])
+	}
+	if !strings.Contains(secondParsed.Reply, "重新附上") {
+		t.Fatalf("expected image resend reply to explain preview reuse, got %q", secondParsed.Reply)
+	}
+}
+
+func TestAIRoleGetsImageGenerateByDefault(t *testing.T) {
+	imageBytes := []byte{
+		0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+		0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+		0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+		0x08, 0x02, 0x00, 0x00, 0x00, 0x90, 0x77, 0x53,
+		0xde, 0x00, 0x00, 0x00, 0x0c, 0x49, 0x44, 0x41,
+		0x54, 0x08, 0xd7, 0x63, 0xf8, 0xcf, 0xc0, 0x00,
+		0x00, 0x03, 0x01, 0x01, 0x00, 0xc9, 0xfe, 0x92,
+		0xef, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e,
+		0x44, 0xae, 0x42, 0x60, 0x82,
+	}
+	mock := newMockBailianImageServer(t, imageBytes)
+	defer mock.Close()
+
+	stateFile := writeInstalledState(t, "Test Admin", "admin", "secret123")
+	configureTestAIConfig(t, stateFile, aiConfig{
+		Provider:   "bailian",
+		APIKey:     "sk-image-test",
+		BaseURL:    mock.URL + "/compatible-mode/v1",
+		ChatModel:  "qwen-plus",
+		ImageModel: "qwen-image-2.0-pro",
+	})
+	server := httptest.NewServer(NewRouter(RouterOptions{InstallStateFile: stateFile}))
+	defer server.Close()
+
+	client := server.Client()
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	adminCookie := loginTestAdmin(t, client, server.URL)
+
+	roleResp, err := postFormWithCookie(t, client, server.URL+"/moyi-7k3x9-admin/users/roles/save", adminCookie, url.Values{
+		"role_key":         {"image_default"},
+		"role_name":        {"图片默认权限"},
+		"role_scope":       {"只有 AI 菜单，也应默认允许图片创作"},
+		"role_status":      {"enabled"},
+		"role_description": {"验证 AI 角色默认附带图片创作权限"},
+		"role_menu_keys":   {"ai"},
+		"role_data_scope":  {"none"},
+	})
+	if err != nil {
+		t.Fatalf("POST default image role save failed: %v", err)
+	}
+	roleResp.Body.Close()
+	if roleResp.StatusCode != http.StatusFound {
+		t.Fatalf("expected default image role redirect, got %d", roleResp.StatusCode)
+	}
+
+	userResp, err := postFormWithCookie(t, client, server.URL+"/moyi-7k3x9-admin/users/save", adminCookie, url.Values{
+		"username":     {"image_user"},
+		"display_name": {"图片默认账号"},
+		"role":         {"image_default"},
+		"status":       {"enabled"},
+		"password":     {"image12345"},
+	})
+	if err != nil {
+		t.Fatalf("POST default image user save failed: %v", err)
+	}
+	userResp.Body.Close()
+	if userResp.StatusCode != http.StatusFound {
+		t.Fatalf("expected default image user redirect, got %d", userResp.StatusCode)
+	}
+
+	roleUserCookie := loginTestUser(t, client, server.URL, "image_user", "image12345")
+	body := bytes.NewBufferString(`{"message":"帮我生成一张简洁的系统公告封面图"}`)
+	req, err := http.NewRequest(http.MethodPost, server.URL+"/moyi-7k3x9-admin/ai/chat", body)
+	if err != nil {
+		t.Fatalf("create default image request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(roleUserCookie)
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("POST default image access failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected default image access 200, got %d body %s", resp.StatusCode, body)
+	}
+
+	var parsed agentChatResponse
+	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
+		t.Fatalf("decode default image response: %v", err)
+	}
+	if len(parsed.ToolResults) != 1 || parsed.ToolResults[0].Name != "generate_image" || !parsed.ToolResults[0].OK {
+		t.Fatalf("expected AI role to get default image access, got %+v", parsed.ToolResults)
+	}
+	if parsed.Run.Metadata["image_authorization"] != "enabled" {
+		t.Fatalf("expected image authorization metadata enabled, got %+v", parsed.Run.Metadata)
+	}
+	if len(parsed.Files) != 1 || !strings.HasSuffix(parsed.Files[0].Name, ".png") {
+		t.Fatalf("expected default image role to receive image file, got %+v", parsed.Files)
+	}
+	if parsed.Files[0].OriginalPrompt != "帮我生成一张简洁的系统公告封面图" {
+		t.Fatalf("expected original prompt to be preserved for default image role, got %+v", parsed.Files[0])
+	}
+	if !strings.Contains(parsed.Files[0].Prompt, "封面主视觉") {
+		t.Fatalf("expected rewritten image prompt to reflect cover purpose, got %+v", parsed.Files[0])
+	}
+}
+
+func TestAdminAgentChatReusesLastExportContextForFormatFollowUp(t *testing.T) {
+	stateFile := writeInstalledState(t, "Test Admin", "admin", "secret123")
+	server := httptest.NewServer(NewRouter(RouterOptions{InstallStateFile: stateFile}))
+	defer server.Close()
+
+	client := server.Client()
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	adminCookie := loginTestAdmin(t, client, server.URL)
+
+	roleResp, err := postFormWithCookie(t, client, server.URL+"/moyi-7k3x9-admin/users/roles/save", adminCookie, url.Values{
+		"role_key":             {"export_followup"},
+		"role_name":            {"导出续写测试"},
+		"role_scope":           {"验证智能体导出 follow-up 继续沿用上一份上下文"},
+		"role_status":          {"enabled"},
+		"role_description":     {"仅允许进入 AI 页面并导出管理员账号表"},
+		"role_menu_keys":       {"ai"},
+		"role_permission_keys": {"agent.tables.read, agent.sql.select"},
+		"role_data_scope":      {"tables"},
+		"role_allowed_tables":  {"admin_users"},
+	})
+	if err != nil {
+		t.Fatalf("POST export followup role save failed: %v", err)
+	}
+	roleResp.Body.Close()
+	if roleResp.StatusCode != http.StatusFound {
+		t.Fatalf("expected export followup role redirect, got %d", roleResp.StatusCode)
+	}
+
+	userResp, err := postFormWithCookie(t, client, server.URL+"/moyi-7k3x9-admin/users/save", adminCookie, url.Values{
+		"username":     {"export_user"},
+		"display_name": {"导出续写账号"},
+		"role":         {"export_followup"},
+		"status":       {"enabled"},
+		"password":     {"follow123"},
+	})
+	if err != nil {
+		t.Fatalf("POST export followup user save failed: %v", err)
+	}
+	userResp.Body.Close()
+	if userResp.StatusCode != http.StatusFound {
+		t.Fatalf("expected export followup user redirect, got %d", userResp.StatusCode)
+	}
+
+	limitedCookie := loginTestUser(t, client, server.URL, "export_user", "follow123")
+
+	firstReq, err := http.NewRequest(http.MethodPost, server.URL+"/moyi-7k3x9-admin/ai/chat", strings.NewReader(`{"message":"把管理员账号导出 csv 发给我"}`))
+	if err != nil {
+		t.Fatalf("create first export request: %v", err)
+	}
+	firstReq.Header.Set("Content-Type", "application/json")
+	firstReq.AddCookie(limitedCookie)
+	firstResp, err := client.Do(firstReq)
+	if err != nil {
+		t.Fatalf("POST first export failed: %v", err)
+	}
+	defer firstResp.Body.Close()
+	if firstResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(firstResp.Body)
+		t.Fatalf("expected first export 200, got %d body %s", firstResp.StatusCode, body)
+	}
+
+	var firstParsed agentChatResponse
+	if err := json.NewDecoder(firstResp.Body).Decode(&firstParsed); err != nil {
+		t.Fatalf("decode first export response: %v", err)
+	}
+	if firstParsed.SessionID == "" {
+		t.Fatal("expected first export session id")
+	}
+	if len(firstParsed.ToolResults) != 1 || !firstParsed.ToolResults[0].OK || firstParsed.ToolResults[0].Name != "export_table" {
+		t.Fatalf("expected successful first export tool, got %+v", firstParsed.ToolResults)
+	}
+	if len(firstParsed.Files) != 1 || !strings.HasSuffix(firstParsed.Files[0].Name, ".csv") {
+		t.Fatalf("expected first export csv file, got %+v", firstParsed.Files)
+	}
+
+	secondReqBody := fmt.Sprintf(`{"session_id":%q,"message":"转为xlsx格式吧"}`, firstParsed.SessionID)
+	secondReq, err := http.NewRequest(http.MethodPost, server.URL+"/moyi-7k3x9-admin/ai/chat", strings.NewReader(secondReqBody))
+	if err != nil {
+		t.Fatalf("create second export request: %v", err)
+	}
+	secondReq.Header.Set("Content-Type", "application/json")
+	secondReq.AddCookie(limitedCookie)
+	secondResp, err := client.Do(secondReq)
+	if err != nil {
+		t.Fatalf("POST second export failed: %v", err)
+	}
+	defer secondResp.Body.Close()
+	if secondResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(secondResp.Body)
+		t.Fatalf("expected second export 200, got %d body %s", secondResp.StatusCode, body)
+	}
+
+	var secondParsed agentChatResponse
+	if err := json.NewDecoder(secondResp.Body).Decode(&secondParsed); err != nil {
+		t.Fatalf("decode second export response: %v", err)
+	}
+	if len(secondParsed.ToolResults) != 1 || !secondParsed.ToolResults[0].OK || secondParsed.ToolResults[0].Name != "export_table" {
+		t.Fatalf("expected successful second export tool, got %+v", secondParsed.ToolResults)
+	}
+	if secondParsed.ToolResults[0].Table != "admin_users" {
+		t.Fatalf("expected follow-up export to keep admin_users, got %+v", secondParsed.ToolResults[0])
+	}
+	if len(secondParsed.Files) != 1 || !strings.HasSuffix(secondParsed.Files[0].Name, ".xlsx") {
+		t.Fatalf("expected second export xlsx file, got %+v", secondParsed.Files)
+	}
+	if firstParsed.CurrentTask == nil || secondParsed.CurrentTask == nil {
+		t.Fatalf("expected task snapshots on both requests, got first=%+v second=%+v", firstParsed.CurrentTask, secondParsed.CurrentTask)
+	}
+	if firstParsed.CurrentTask.ID == "" || secondParsed.CurrentTask.ID == "" {
+		t.Fatalf("expected task ids on both requests, got first=%+v second=%+v", firstParsed.CurrentTask, secondParsed.CurrentTask)
+	}
+	if secondParsed.CurrentTask.ID != firstParsed.CurrentTask.ID {
+		t.Fatalf("expected follow-up to keep same task id, got first=%q second=%q", firstParsed.CurrentTask.ID, secondParsed.CurrentTask.ID)
+	}
+	if secondParsed.CurrentTask.ExportFormat != "XLSX" {
+		t.Fatalf("expected current task export format XLSX, got %+v", secondParsed.CurrentTask)
+	}
+}
+
+func TestAdminAgentChatUsesStructuredTaskMemoryForShortFollowUp(t *testing.T) {
+	stateFile := writeInstalledState(t, "Test Admin", "admin", "secret123")
+	server := httptest.NewServer(NewRouter(RouterOptions{InstallStateFile: stateFile}))
+	defer server.Close()
+
+	client := server.Client()
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	sessionCookie := loginTestAdmin(t, client, server.URL)
+
+	firstReq, err := http.NewRequest(http.MethodPost, server.URL+"/moyi-7k3x9-admin/ai/chat", strings.NewReader(`{"message":"把管理员账号导出 csv 发给我"}`))
+	if err != nil {
+		t.Fatalf("create first structured-memory request: %v", err)
+	}
+	firstReq.Header.Set("Content-Type", "application/json")
+	firstReq.AddCookie(sessionCookie)
+	firstResp, err := client.Do(firstReq)
+	if err != nil {
+		t.Fatalf("POST first structured-memory request failed: %v", err)
+	}
+	defer firstResp.Body.Close()
+	if firstResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(firstResp.Body)
+		t.Fatalf("expected first structured-memory request 200, got %d body %s", firstResp.StatusCode, body)
+	}
+
+	var firstParsed agentChatResponse
+	if err := json.NewDecoder(firstResp.Body).Decode(&firstParsed); err != nil {
+		t.Fatalf("decode first structured-memory response: %v", err)
+	}
+	if firstParsed.SessionID == "" {
+		t.Fatal("expected session id for structured-memory follow-up")
+	}
+	if len(firstParsed.ToolResults) != 1 || firstParsed.ToolResults[0].Table != "admin_users" {
+		t.Fatalf("expected first export to target admin_users, got %+v", firstParsed.ToolResults)
+	}
+
+	secondReqBody := fmt.Sprintf(`{"session_id":%q,"message":"只看启用的"}`, firstParsed.SessionID)
+	secondReq, err := http.NewRequest(http.MethodPost, server.URL+"/moyi-7k3x9-admin/ai/chat", strings.NewReader(secondReqBody))
+	if err != nil {
+		t.Fatalf("create second structured-memory request: %v", err)
+	}
+	secondReq.Header.Set("Content-Type", "application/json")
+	secondReq.AddCookie(sessionCookie)
+	secondResp, err := client.Do(secondReq)
+	if err != nil {
+		t.Fatalf("POST second structured-memory request failed: %v", err)
+	}
+	defer secondResp.Body.Close()
+	if secondResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(secondResp.Body)
+		t.Fatalf("expected second structured-memory request 200, got %d body %s", secondResp.StatusCode, body)
+	}
+
+	var secondParsed agentChatResponse
+	if err := json.NewDecoder(secondResp.Body).Decode(&secondParsed); err != nil {
+		t.Fatalf("decode second structured-memory response: %v", err)
+	}
+	if secondParsed.Run.Mode != string(agentIntentExport) {
+		t.Fatalf("expected short follow-up to continue export mode, got %+v", secondParsed.Run)
+	}
+	if len(secondParsed.ToolResults) != 1 || secondParsed.ToolResults[0].Name != "export_table" {
+		t.Fatalf("expected short follow-up to still export, got %+v", secondParsed.ToolResults)
+	}
+	if secondParsed.ToolResults[0].Table != "admin_users" {
+		t.Fatalf("expected short follow-up to keep admin_users context, got %+v", secondParsed.ToolResults[0])
+	}
+	if got := secondParsed.ToolResults[0].Rows[0]["rows"]; got != "1" {
+		t.Fatalf("expected short follow-up export to keep enabled filter and return 1 row, got %+v", secondParsed.ToolResults[0].Rows)
+	}
+}
+
+func TestAdminAgentChatReusesPriorTableForLongerFollowUpWithoutRepeatingTableName(t *testing.T) {
+	stateFile := writeInstalledState(t, "Test Admin", "admin", "secret123")
+	server := httptest.NewServer(NewRouter(RouterOptions{InstallStateFile: stateFile}))
+	defer server.Close()
+
+	client := server.Client()
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	sessionCookie := loginTestAdmin(t, client, server.URL)
+
+	firstReq, err := http.NewRequest(http.MethodPost, server.URL+"/moyi-7k3x9-admin/ai/chat", strings.NewReader(`{"message":"预览后台管理员账号"}`))
+	if err != nil {
+		t.Fatalf("create first contextual-table request: %v", err)
+	}
+	firstReq.Header.Set("Content-Type", "application/json")
+	firstReq.AddCookie(sessionCookie)
+	firstResp, err := client.Do(firstReq)
+	if err != nil {
+		t.Fatalf("POST first contextual-table request failed: %v", err)
+	}
+	defer firstResp.Body.Close()
+	if firstResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(firstResp.Body)
+		t.Fatalf("expected first contextual-table request 200, got %d body %s", firstResp.StatusCode, body)
+	}
+
+	var firstParsed agentChatResponse
+	if err := json.NewDecoder(firstResp.Body).Decode(&firstParsed); err != nil {
+		t.Fatalf("decode first contextual-table response: %v", err)
+	}
+	if firstParsed.SessionID == "" {
+		t.Fatal("expected session id for contextual table follow-up")
+	}
+	if len(firstParsed.ToolResults) == 0 || firstParsed.ToolResults[0].Table != "admin_users" {
+		t.Fatalf("expected first preview to target admin_users, got %+v", firstParsed.ToolResults)
+	}
+
+	secondReqBody := fmt.Sprintf(`{"session_id":%q,"message":"把状态是启用的单独导出来给我就行"}`, firstParsed.SessionID)
+	secondReq, err := http.NewRequest(http.MethodPost, server.URL+"/moyi-7k3x9-admin/ai/chat", strings.NewReader(secondReqBody))
+	if err != nil {
+		t.Fatalf("create second contextual-table request: %v", err)
+	}
+	secondReq.Header.Set("Content-Type", "application/json")
+	secondReq.AddCookie(sessionCookie)
+	secondResp, err := client.Do(secondReq)
+	if err != nil {
+		t.Fatalf("POST second contextual-table request failed: %v", err)
+	}
+	defer secondResp.Body.Close()
+	if secondResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(secondResp.Body)
+		t.Fatalf("expected second contextual-table request 200, got %d body %s", secondResp.StatusCode, body)
+	}
+
+	var secondParsed agentChatResponse
+	if err := json.NewDecoder(secondResp.Body).Decode(&secondParsed); err != nil {
+		t.Fatalf("decode second contextual-table response: %v", err)
+	}
+	if secondParsed.Run.Mode != string(agentIntentExport) {
+		t.Fatalf("expected longer follow-up to continue into export mode, got %+v", secondParsed.Run)
+	}
+	if len(secondParsed.ToolResults) != 1 || secondParsed.ToolResults[0].Name != "export_table" {
+		t.Fatalf("expected longer follow-up to export, got %+v", secondParsed.ToolResults)
+	}
+	if secondParsed.ToolResults[0].Table != "admin_users" {
+		t.Fatalf("expected longer follow-up to reuse admin_users context, got %+v", secondParsed.ToolResults[0])
+	}
+	if len(secondParsed.Files) != 1 {
+		t.Fatalf("expected contextual export file, got %+v", secondParsed.Files)
+	}
+}
+
+func TestAdminAgentChatCarriesOpenTaskIntoNewSession(t *testing.T) {
+	stateFile := writeInstalledState(t, "Test Admin", "admin", "secret123")
+	server := httptest.NewServer(NewRouter(RouterOptions{InstallStateFile: stateFile}))
+	defer server.Close()
+
+	client := server.Client()
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	sessionCookie := loginTestAdmin(t, client, server.URL)
+
+	firstReq, err := http.NewRequest(http.MethodPost, server.URL+"/moyi-7k3x9-admin/ai/chat", strings.NewReader(`{"message":"把管理员账号导出 csv 发给我"}`))
+	if err != nil {
+		t.Fatalf("create first carry-over request: %v", err)
+	}
+	firstReq.Header.Set("Content-Type", "application/json")
+	firstReq.AddCookie(sessionCookie)
+	firstResp, err := client.Do(firstReq)
+	if err != nil {
+		t.Fatalf("POST first carry-over request failed: %v", err)
+	}
+	defer firstResp.Body.Close()
+	if firstResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(firstResp.Body)
+		t.Fatalf("expected first carry-over request 200, got %d body %s", firstResp.StatusCode, body)
+	}
+
+	var firstParsed agentChatResponse
+	if err := json.NewDecoder(firstResp.Body).Decode(&firstParsed); err != nil {
+		t.Fatalf("decode first carry-over response: %v", err)
+	}
+	if firstParsed.CurrentTask == nil || firstParsed.CurrentTask.ID == "" {
+		t.Fatalf("expected first request to create task snapshot, got %+v", firstParsed.CurrentTask)
+	}
+	if firstParsed.SessionID == "" {
+		t.Fatal("expected first carry-over session id")
+	}
+
+	secondReq, err := http.NewRequest(http.MethodPost, server.URL+"/moyi-7k3x9-admin/ai/chat", strings.NewReader(`{"message":"转为xlsx格式吧"}`))
+	if err != nil {
+		t.Fatalf("create second carry-over request: %v", err)
+	}
+	secondReq.Header.Set("Content-Type", "application/json")
+	secondReq.AddCookie(sessionCookie)
+	secondResp, err := client.Do(secondReq)
+	if err != nil {
+		t.Fatalf("POST second carry-over request failed: %v", err)
+	}
+	defer secondResp.Body.Close()
+	if secondResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(secondResp.Body)
+		t.Fatalf("expected second carry-over request 200, got %d body %s", secondResp.StatusCode, body)
+	}
+
+	var secondParsed agentChatResponse
+	if err := json.NewDecoder(secondResp.Body).Decode(&secondParsed); err != nil {
+		t.Fatalf("decode second carry-over response: %v", err)
+	}
+	if secondParsed.SessionID == "" || secondParsed.SessionID == firstParsed.SessionID {
+		t.Fatalf("expected second request to use a fresh session id, got first=%q second=%q", firstParsed.SessionID, secondParsed.SessionID)
+	}
+	if len(secondParsed.ToolResults) != 1 || !secondParsed.ToolResults[0].OK || secondParsed.ToolResults[0].Name != "export_table" {
+		t.Fatalf("expected second carry-over request to export table, got %+v", secondParsed.ToolResults)
+	}
+	if secondParsed.ToolResults[0].Table != "admin_users" {
+		t.Fatalf("expected carry-over task to keep admin_users, got %+v", secondParsed.ToolResults[0])
+	}
+	if len(secondParsed.Files) != 1 || !strings.HasSuffix(secondParsed.Files[0].Name, ".xlsx") {
+		t.Fatalf("expected carry-over follow-up to export xlsx, got %+v", secondParsed.Files)
+	}
+	if secondParsed.CurrentTask == nil || secondParsed.CurrentTask.ID != firstParsed.CurrentTask.ID {
+		t.Fatalf("expected carry-over follow-up to reuse open task, got first=%+v second=%+v", firstParsed.CurrentTask, secondParsed.CurrentTask)
 	}
 }
 
@@ -4717,12 +6550,18 @@ func TestAdminAgentChatExportsXLSXFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected valid xlsx zip: %v", err)
 	}
+	workbook := readZipPartForTest(t, xlsx, "xl/workbook.xml")
 	worksheet := readZipPartForTest(t, xlsx, "xl/worksheets/sheet1.xml")
-	if !strings.Contains(worksheet, "admin_users") || !strings.Contains(worksheet, "登录账号") || !strings.Contains(worksheet, "超级管理员") {
+	if !strings.Contains(workbook, `name="admin_users"`) {
+		t.Fatalf("expected xlsx workbook to use table name as sheet name, got %q", workbook)
+	}
+	if !strings.Contains(worksheet, "登录账号") || !strings.Contains(worksheet, "超级管理员") {
 		t.Fatalf("expected xlsx worksheet content, got %q", worksheet)
 	}
-	if strings.Contains(worksheet, ">username<") {
-		t.Fatalf("expected xlsx headers to prefer field comments, got %q", worksheet)
+	for _, unexpected := range []string{">数据表<", ">admin_users<", ">username<"} {
+		if strings.Contains(worksheet, unexpected) {
+			t.Fatalf("expected xlsx headers to prefer field comments and omit repeated table column, got %q", worksheet)
+		}
 	}
 }
 
@@ -4859,6 +6698,156 @@ func TestAdminAgentChatMatchesTableAndFieldComments(t *testing.T) {
 	}
 }
 
+func TestAdminAgentChatQueriesExternalSQLiteDataSource(t *testing.T) {
+	stateFile, tableID := writeInstalledStateWithExternalSQLiteDataSource(t)
+	server := httptest.NewServer(NewRouter(RouterOptions{InstallStateFile: stateFile, DisableTaskWorker: true}))
+	defer server.Close()
+
+	client := server.Client()
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	sessionCookie := loginTestAdmin(t, client, server.URL)
+
+	body := bytes.NewBufferString(`{"message":"预览订单表数据"}`)
+	req, err := http.NewRequest(http.MethodPost, server.URL+"/moyi-7k3x9-admin/ai/chat", body)
+	if err != nil {
+		t.Fatalf("create external data source preview request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(sessionCookie)
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("POST AI chat failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", resp.StatusCode)
+	}
+
+	var parsed agentChatResponse
+	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
+		t.Fatalf("decode AI chat response: %v", err)
+	}
+	if len(parsed.ToolResults) != 1 || parsed.ToolResults[0].Name != "preview_table" || !parsed.ToolResults[0].OK {
+		t.Fatalf("expected successful external preview, got %+v", parsed.ToolResults)
+	}
+	if parsed.ToolResults[0].Table != tableID {
+		t.Fatalf("expected external table %q, got %q", tableID, parsed.ToolResults[0].Table)
+	}
+	if got := parsed.ToolResults[0].Rows[0]["order_no"]; got != "NO-1001" {
+		t.Fatalf("expected external order row, got %+v", parsed.ToolResults[0].Rows)
+	}
+}
+
+func TestAdminAgentChatExternalDataSourceRespectsAllowedTables(t *testing.T) {
+	stateFile, tableID := writeInstalledStateWithExternalSQLiteDataSource(t)
+	store := newInstallStore(stateFile)
+	state, err := store.Load()
+	if err != nil {
+		t.Fatalf("load state: %v", err)
+	}
+	admin := &adminServer{store: store}
+
+	denied := admin.runAgentChat(context.Background(), state, agentChatRequest{
+		Message:         "预览订单表数据",
+		TableAccessMode: agentTableAccessTables,
+		AllowedTables:   []string{"data_sources"},
+	})
+	if len(denied.ToolResults) != 1 || denied.ToolResults[0].OK || !strings.Contains(denied.ToolResults[0].Error, "未授权") {
+		t.Fatalf("expected external table to be denied, got %+v", denied.ToolResults)
+	}
+
+	allowed := admin.runAgentChat(context.Background(), state, agentChatRequest{
+		Message:         "预览订单表数据",
+		TableAccessMode: agentTableAccessTables,
+		AllowedTables:   []string{tableID},
+	})
+	if len(allowed.ToolResults) != 1 || !allowed.ToolResults[0].OK || allowed.ToolResults[0].Table != tableID {
+		t.Fatalf("expected authorized external table preview, got %+v", allowed.ToolResults)
+	}
+}
+
+func TestAdminAgentChatFallsBackToSingleAuthorizedTableForPreview(t *testing.T) {
+	stateFile, tableID := writeInstalledStateWithExternalSQLiteDataSource(t)
+	store := newInstallStore(stateFile)
+	state, err := store.Load()
+	if err != nil {
+		t.Fatalf("load state: %v", err)
+	}
+	admin := &adminServer{store: store}
+
+	response := admin.runAgentChat(context.Background(), state, agentChatRequest{
+		Message:         "预览一下",
+		TableAccessMode: agentTableAccessTables,
+		AllowedTables:   []string{tableID},
+	})
+	if len(response.ToolResults) != 1 || !response.ToolResults[0].OK {
+		t.Fatalf("expected single-table fallback preview to succeed, got %+v", response.ToolResults)
+	}
+	if response.ToolResults[0].Name != "preview_table" || response.ToolResults[0].Table != tableID {
+		t.Fatalf("expected single-table fallback preview to target %q, got %+v", tableID, response.ToolResults[0])
+	}
+}
+
+func TestAdminAgentChatFallsBackToSingleAuthorizedTableForExport(t *testing.T) {
+	stateFile, tableID := writeInstalledStateWithExternalSQLiteDataSource(t)
+	store := newInstallStore(stateFile)
+	state, err := store.Load()
+	if err != nil {
+		t.Fatalf("load state: %v", err)
+	}
+	admin := &adminServer{store: store}
+
+	response := admin.runAgentChat(context.Background(), state, agentChatRequest{
+		Message:         "导出来给我",
+		TableAccessMode: agentTableAccessTables,
+		AllowedTables:   []string{tableID},
+	})
+	if len(response.ToolResults) != 1 || !response.ToolResults[0].OK {
+		t.Fatalf("expected single-table fallback export to succeed, got %+v", response.ToolResults)
+	}
+	if response.ToolResults[0].Name != "export_table" || response.ToolResults[0].Table != tableID {
+		t.Fatalf("expected single-table fallback export to target %q, got %+v", tableID, response.ToolResults[0])
+	}
+	if len(response.Files) != 1 {
+		t.Fatalf("expected single-table fallback export file, got %+v", response.Files)
+	}
+}
+
+func TestAdminUserGroupsShowVisualTablePermissionPicker(t *testing.T) {
+	stateFile, tableID := writeInstalledStateWithExternalSQLiteDataSource(t)
+	server := httptest.NewServer(NewRouter(RouterOptions{InstallStateFile: stateFile, DisableTaskWorker: true}))
+	defer server.Close()
+
+	client := server.Client()
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	sessionCookie := loginTestAdmin(t, client, server.URL)
+
+	req, err := http.NewRequest(http.MethodGet, server.URL+"/moyi-7k3x9-admin/users/groups", nil)
+	if err != nil {
+		t.Fatalf("create users page request: %v", err)
+	}
+	req.AddCookie(sessionCookie)
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("GET users page failed: %v", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read wechat agent page: %v", err)
+	}
+	html := string(body)
+	for _, expected := range []string{"用户组权限", "agent-table-picker", "核心管理", "外部数据源：business_main", tableID} {
+		if !strings.Contains(html, expected) {
+			t.Fatalf("expected permission picker to contain %q, got %s", expected, html)
+		}
+	}
+}
+
 func TestAdminAgentChatDescribesTableByComment(t *testing.T) {
 	stateFile := writeInstalledState(t, "Test Admin", "admin", "secret123")
 	server := httptest.NewServer(NewRouter(RouterOptions{InstallStateFile: stateFile}))
@@ -4889,6 +6878,90 @@ func TestAdminAgentChatDescribesTableByComment(t *testing.T) {
 	}
 	if len(parsed.ToolResults) != 1 || parsed.ToolResults[0].Name != "describe_table" || parsed.ToolResults[0].Table != "admin_permissions" {
 		t.Fatalf("expected admin_permissions describe from table comment, got %+v", parsed.ToolResults)
+	}
+}
+
+func TestAdminAgentChatDoesNotFallbackToInstallStateWhenTableIsMissing(t *testing.T) {
+	stateFile := writeInstalledState(t, "Test Admin", "admin", "secret123")
+	server := httptest.NewServer(NewRouter(RouterOptions{InstallStateFile: stateFile}))
+	defer server.Close()
+
+	client := server.Client()
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	sessionCookie := loginTestAdmin(t, client, server.URL)
+
+	body := bytes.NewBufferString(`{"message":"查看一下明细"}`)
+	req, err := http.NewRequest(http.MethodPost, server.URL+"/moyi-7k3x9-admin/ai/chat", body)
+	if err != nil {
+		t.Fatalf("create missing-table preview request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(sessionCookie)
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("POST AI chat failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var parsed agentChatResponse
+	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
+		t.Fatalf("decode AI chat response: %v", err)
+	}
+	if len(parsed.ToolResults) != 1 || parsed.ToolResults[0].Name != "preview_table" || parsed.ToolResults[0].OK {
+		t.Fatalf("expected blocked preview without table fallback, got %+v", parsed.ToolResults)
+	}
+	if parsed.ToolResults[0].Table != "" {
+		t.Fatalf("expected empty table when message does not resolve to a table, got %+v", parsed.ToolResults[0])
+	}
+	if !strings.Contains(parsed.ToolResults[0].Error, "请直接说明表名") {
+		t.Fatalf("expected explicit clarification prompt, got %+v", parsed.ToolResults[0])
+	}
+	if strings.Contains(parsed.ToolResults[0].Error, "未知数据表：install_state") {
+		t.Fatalf("expected no install_state fallback in error, got %+v", parsed.ToolResults[0])
+	}
+}
+
+func TestAdminAgentChatExportRequiresExplicitTableWhenCannotInferTarget(t *testing.T) {
+	stateFile := writeInstalledState(t, "Test Admin", "admin", "secret123")
+	server := httptest.NewServer(NewRouter(RouterOptions{InstallStateFile: stateFile}))
+	defer server.Close()
+
+	client := server.Client()
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	sessionCookie := loginTestAdmin(t, client, server.URL)
+
+	body := bytes.NewBufferString(`{"message":"导出一下"}`)
+	req, err := http.NewRequest(http.MethodPost, server.URL+"/moyi-7k3x9-admin/ai/chat", body)
+	if err != nil {
+		t.Fatalf("create missing-table export request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(sessionCookie)
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("POST AI chat failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var parsed agentChatResponse
+	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
+		t.Fatalf("decode AI chat response: %v", err)
+	}
+	if len(parsed.ToolResults) != 1 || parsed.ToolResults[0].Name != "export_table" || parsed.ToolResults[0].OK {
+		t.Fatalf("expected blocked export without inferred table, got %+v", parsed.ToolResults)
+	}
+	if parsed.ToolResults[0].Table != "" {
+		t.Fatalf("expected empty export table when target table is missing, got %+v", parsed.ToolResults[0])
+	}
+	if len(parsed.Files) != 0 {
+		t.Fatalf("expected no export files when table target is missing, got %+v", parsed.Files)
+	}
+	if !strings.Contains(parsed.ToolResults[0].Error, "没有识别到你要导出的数据表") {
+		t.Fatalf("expected explicit export clarification, got %+v", parsed.ToolResults[0])
 	}
 }
 
@@ -5207,13 +7280,19 @@ func TestAdminMenuPagesExposeClosedLoopActions(t *testing.T) {
 		{path: "/foundation", describe: "基础服务", markers: []string{"基础服务迁移盘点", "Go 端现状", "下一步"}},
 		{path: "/data-sources", describe: "数据源", markers: []string{"保存数据源", "探测能力", "数据源列表"}},
 		{path: "/extensions", describe: "能力扩展", markers: []string{"插件扩展包", "AI 工具生成", "导出清单"}},
-		{path: "/ai", describe: "AI 智能体", markers: []string{"智能体工作台", "/ai/chat", "最近运行"}},
-		{path: "/wechat-agent", describe: "微信 Agent", markers: []string{"微信 Agent 通道", "聊天记录", "新增微信 Agent"}},
-		{path: "/wechat-agent/messages", describe: "微信记录", markers: []string{"微信 Agent 聊天记录", "导出 CSV", "通道管理"}},
-		{path: "/users", describe: "用户权限", markers: []string{"新增管理员", "管理员账号", "后台会话"}},
+		{path: "/ai", describe: "智能助理", markers: []string{"智能助理", "/ai/chat", "/ai/tasks", "新会话"}},
+		{path: "/ai/tasks", describe: "任务中心", markers: []string{"当前任务", "最近任务", "跨会话任务记录"}},
+		{path: "/ai/runs", describe: "对话记录", markers: []string{"最近运行", "最近对话与结果记录", "工具"}},
+		{path: "/ai/capabilities", describe: "使用说明", markers: []string{"模型与入口", "智能体能力", "常用任务模板"}},
+		{path: "/wechat-agent", describe: "微信 Agent", markers: []string{"微信 Agent", "通道", "每个管理员账号都会自动生成一条专属微信 Agent 通道"}},
+		{path: "/wechat-agent/messages", describe: "微信聊天", markers: []string{"微信聊天", "微信 Agent 聊天记录", "导出 CSV"}},
+		{path: "/users", describe: "管理员账号", markers: []string{"新增管理员", "管理员账号", "访问控制"}},
+		{path: "/users/groups", describe: "用户组权限", markers: []string{"用户组权限", "保存用户组权限", "agent-table-picker"}},
+		{path: "/users/sessions", describe: "登录会话", markers: []string{"会话列表", "在线会话", "来源 IP"}},
+		{path: "/users/permissions", describe: "菜单权限", markers: []string{"菜单与权限", "agent.sql.select", "admin.sessions.manage"}},
 		{path: "/settings", describe: "系统设置", markers: []string{"保存基础信息", "保存并检查 AI", "保存自动队列设置"}},
-		{path: "/files", describe: "文件管理", markers: []string{"上传文件", "文件列表", "存储概览"}},
-		{path: "/tasks", describe: "后台任务", markers: []string{"创建任务", "自动执行", "任务列表"}},
+		{path: "/files", describe: "文件管理", markers: []string{"上传文件", "文件列表", "文件详情"}},
+		{path: "/tasks", describe: "后台任务", markers: []string{"队列操作", "自动执行", "任务队列"}},
 		{path: "/notifications", describe: "通知事件", markers: []string{"通知事件", "通知设置", "通知概览"}},
 		{path: "/audit", describe: "审计日志", markers: []string{"审计事件", "导出 CSV", "筛选日志"}},
 	}
@@ -5242,6 +7321,138 @@ func TestAdminMenuPagesExposeClosedLoopActions(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestEveryAdminGetsDefaultWeChatAgentChannel(t *testing.T) {
+	stateFile := writeInstalledState(t, "Test Admin", "admin", "secret123")
+	store := newInstallStore(stateFile)
+	state, err := store.Load()
+	if err != nil {
+		t.Fatalf("load state: %v", err)
+	}
+	adminChannel, _, ok := findAgentWeChatChannelByAdminUser(state.AgentChannels, "admin")
+	if !ok {
+		t.Fatal("expected bootstrap admin default wechat channel")
+	}
+	if adminChannel.AdminUser != "admin" || !adminChannel.Enabled || adminChannel.Token == "" {
+		t.Fatalf("expected bootstrap admin default wechat channel to be enabled with token, got %+v", adminChannel)
+	}
+
+	server := httptest.NewServer(NewRouter(RouterOptions{InstallStateFile: stateFile, DisableTaskWorker: true}))
+	defer server.Close()
+	client := server.Client()
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	sessionCookie := loginTestAdmin(t, client, server.URL)
+	resp, err := postFormWithCookie(t, client, server.URL+"/moyi-7k3x9-admin/users/save", sessionCookie, url.Values{
+		"username":     {"ops_user"},
+		"display_name": {"运维管理员"},
+		"role":         {"agent_reader"},
+		"status":       {"enabled"},
+		"password":     {"ops12345"},
+	})
+	if err != nil {
+		t.Fatalf("POST admin user save failed: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusFound {
+		t.Fatalf("expected admin user save redirect, got %d", resp.StatusCode)
+	}
+
+	state, err = store.Load()
+	if err != nil {
+		t.Fatalf("reload state: %v", err)
+	}
+	opsChannel, _, ok := findAgentWeChatChannelByAdminUser(state.AgentChannels, "ops_user")
+	if !ok {
+		t.Fatal("expected ops_user default wechat channel")
+	}
+	if opsChannel.AdminUser != "ops_user" || !opsChannel.Enabled || opsChannel.Token == "" {
+		t.Fatalf("expected ops_user default wechat channel to be enabled with token, got %+v", opsChannel)
+	}
+	if !strings.Contains(opsChannel.DisplayName, "运维管理员") {
+		t.Fatalf("expected ops_user default channel display name to include admin display name, got %+v", opsChannel)
+	}
+
+	loginResp, err := client.PostForm(server.URL+"/moyi-7k3x9-admin/login", url.Values{
+		"username": {"ops_user"},
+		"password": {"ops12345"},
+	})
+	if err != nil {
+		t.Fatalf("POST ops login failed: %v", err)
+	}
+	var opsCookie *http.Cookie
+	for _, cookie := range loginResp.Cookies() {
+		if cookie.Name == adminSessionCookie {
+			opsCookie = cookie
+			break
+		}
+	}
+	loginResp.Body.Close()
+	if loginResp.StatusCode != http.StatusFound || opsCookie == nil {
+		t.Fatalf("expected ops login session cookie, got status=%d cookie=%v", loginResp.StatusCode, opsCookie != nil)
+	}
+	pageReq, err := http.NewRequest(http.MethodGet, server.URL+"/moyi-7k3x9-admin/ai", nil)
+	if err != nil {
+		t.Fatalf("create ai page request: %v", err)
+	}
+	pageReq.AddCookie(opsCookie)
+	pageResp, err := client.Do(pageReq)
+	if err != nil {
+		t.Fatalf("GET ai page failed: %v", err)
+	}
+	body, err := io.ReadAll(pageResp.Body)
+	pageResp.Body.Close()
+	if err != nil {
+		t.Fatalf("read ai page failed: %v", err)
+	}
+	pageHTML := string(body)
+	if !strings.Contains(pageHTML, "运维管理员 的微信 Agent") {
+		t.Fatalf("expected ai page to surface current admin wechat channel, got %s", pageHTML)
+	}
+}
+
+func TestWeChatAdminSidebarHighlightsOnlyCurrentPage(t *testing.T) {
+	stateFile := writeInstalledState(t, "Test Admin", "admin", "secret123")
+	server := httptest.NewServer(NewRouter(RouterOptions{InstallStateFile: stateFile, DisableTaskWorker: true}))
+	defer server.Close()
+
+	client := server.Client()
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	sessionCookie := loginTestAdmin(t, client, server.URL)
+
+	checkPage := func(path string, activeHref string, inactiveHref string) {
+		req, err := http.NewRequest(http.MethodGet, server.URL+"/moyi-7k3x9-admin"+path, nil)
+		if err != nil {
+			t.Fatalf("create request for %s: %v", path, err)
+		}
+		req.AddCookie(sessionCookie)
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("GET %s failed: %v", path, err)
+		}
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			t.Fatalf("read %s response: %v", path, err)
+		}
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("expected %s status 200, got %d", path, resp.StatusCode)
+		}
+		html := string(body)
+		if strings.Count(html, `class="active" href="`+activeHref+`"`) != 1 {
+			t.Fatalf("expected %s sidebar to activate %s exactly once, got %s", path, activeHref, html)
+		}
+		if strings.Contains(html, `class="active" href="`+inactiveHref+`"`) {
+			t.Fatalf("expected %s sidebar not to activate %s, got %s", path, inactiveHref, html)
+		}
+	}
+
+	checkPage("/wechat-agent", "/moyi-7k3x9-admin/wechat-agent", "/moyi-7k3x9-admin/wechat-agent/messages")
+	checkPage("/wechat-agent/messages", "/moyi-7k3x9-admin/wechat-agent/messages", "/moyi-7k3x9-admin/wechat-agent")
 }
 
 func TestAdminWorkspaceRequiresLoginAfterInitialization(t *testing.T) {
@@ -5397,12 +7608,115 @@ func writeInstalledState(t *testing.T, siteName string, username string, passwor
 	return stateFile
 }
 
+func configureTestAIConfig(t *testing.T, stateFile string, ai aiConfig) {
+	t.Helper()
+	store := newInstallStore(stateFile)
+	state, err := store.Load()
+	if err != nil {
+		t.Fatalf("load install state for ai config: %v", err)
+	}
+	state.AI = ai.sanitized()
+	if err := store.Save(state); err != nil {
+		t.Fatalf("save install state with ai config: %v", err)
+	}
+}
+
+func newMockBailianImageServer(t *testing.T, imageBytes []byte) *httptest.Server {
+	t.Helper()
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/services/aigc/multimodal-generation/generation":
+			if got := r.Header.Get("Authorization"); !strings.HasPrefix(got, "Bearer ") {
+				t.Fatalf("expected bearer auth for image generation, got %q", got)
+			}
+			var payload map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				t.Fatalf("decode mock image payload: %v", err)
+			}
+			if payload["model"] != "qwen-image-2.0-pro" {
+				t.Fatalf("expected image model qwen-image-2.0-pro, got %#v", payload["model"])
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, fmt.Sprintf(`{"output":{"choices":[{"message":{"content":[{"type":"image","image":"%s/generated/mock.png"}]}}]}}`, server.URL))
+		case r.Method == http.MethodGet && r.URL.Path == "/generated/mock.png":
+			w.Header().Set("Content-Type", "image/png")
+			_, _ = w.Write(imageBytes)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	return server
+}
+
+func writeInstalledStateWithExternalSQLiteDataSource(t *testing.T) (string, string) {
+	t.Helper()
+
+	stateFile := writeInstalledState(t, "Test Admin", "admin", "secret123")
+	sourcePath := filepath.Join(filepath.Dir(stateFile), "business.db")
+	db, err := sql.Open("sqlite", sourcePath)
+	if err != nil {
+		t.Fatalf("open sqlite data source fixture: %v", err)
+	}
+	if _, err := db.Exec(`CREATE TABLE orders (id INTEGER PRIMARY KEY, order_no TEXT NOT NULL, amount REAL NOT NULL)`); err != nil {
+		_ = db.Close()
+		t.Fatalf("create sqlite data source fixture: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO orders(order_no, amount) VALUES ('NO-1001', 88.5), ('NO-1002', 42.25)`); err != nil {
+		_ = db.Close()
+		t.Fatalf("insert sqlite data source fixture: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close sqlite data source fixture: %v", err)
+	}
+
+	store := newInstallStore(stateFile)
+	state, err := store.Load()
+	if err != nil {
+		t.Fatalf("load installed state: %v", err)
+	}
+	state.DataSources = []dataSourceConfig{{
+		Name:          "business_main",
+		Driver:        "sqlite",
+		FilePath:      sourcePath,
+		Role:          "订单业务库",
+		Status:        "available",
+		LastMessage:   "SQLite 文件可读取，发现 1 张表、3 个字段。",
+		SchemaSummary: "orders(订单表): id 主键、order_no 订单编号、amount 订单金额",
+		LastCheckedAt: time.Now().UTC(),
+	}}
+	if err := store.Save(state); err != nil {
+		t.Fatalf("save state with data source: %v", err)
+	}
+	if err := store.AppendSchemaSnapshot(adminSchemaSnapshotRecord{
+		DataSourceName: "business_main",
+		Driver:         "SQLite",
+		Target:         sourcePath,
+		Summary:        "发现 1 张表、3 个字段",
+		TableCount:     1,
+		ColumnCount:    3,
+		SchemaHash:     "external-schemahash1",
+		ChecksJSON:     `["表数量：1","字段数量：3","表清单：orders(订单表)","字段结构：orders(订单表): id、order_no、amount"]`,
+		SchemaJSON:     `[{"name":"orders","comment":"订单表","columns":[{"name":"id","type":"integer","comment":"主键","nullable":false,"key":"PK"},{"name":"order_no","type":"text","comment":"订单编号","nullable":false},{"name":"amount","type":"real","comment":"订单金额","nullable":false}]}]`,
+		CapturedAt:     time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("append external schema snapshot: %v", err)
+	}
+	return stateFile, "datasource.business_main.orders"
+}
+
 func loginTestAdmin(t *testing.T, client *http.Client, serverURL string) *http.Cookie {
 	t.Helper()
 
+	return loginTestUser(t, client, serverURL, "admin", "secret123")
+}
+
+func loginTestUser(t *testing.T, client *http.Client, serverURL string, username string, password string) *http.Cookie {
+	t.Helper()
+
 	resp, err := client.PostForm(serverURL+"/moyi-7k3x9-admin/login", url.Values{
-		"username": {"admin"},
-		"password": {"secret123"},
+		"username": {username},
+		"password": {password},
 	})
 	if err != nil {
 		t.Fatalf("POST hidden admin login failed: %v", err)

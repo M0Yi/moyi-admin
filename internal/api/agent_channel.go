@@ -64,6 +64,185 @@ func defaultAgentChannelConfig() agentChannelConfig {
 	}
 }
 
+func agentWeChatDefaultChannelKeyForAdmin(username string) string {
+	username = normalizeSettingText(username, 32)
+	if username == "" {
+		return newAgentWeChatChannelKey()
+	}
+	return normalizeAgentWeChatChannelKey("wechat_admin_" + username)
+}
+
+func agentWeChatDefaultChannelNameForAdmin(user adminAccountConfig) string {
+	label := strings.TrimSpace(user.DisplayName)
+	if label == "" {
+		label = strings.TrimSpace(user.Username)
+	}
+	if label == "" {
+		return agentWeChatDefaultName
+	}
+	name := normalizeSettingText(label+" 的微信 Agent", 48)
+	if name == "" {
+		return agentWeChatDefaultName
+	}
+	return name
+}
+
+func ensureDefaultAgentWeChatChannelsForAdmins(state *installState) bool {
+	if state == nil {
+		return false
+	}
+	access := state.Access.normalized(*state)
+	existing := state.AgentChannels.normalized().WeChats
+	knownUsers := make(map[string]adminAccountConfig, len(access.Users))
+	for _, user := range access.Users {
+		key := strings.ToLower(strings.TrimSpace(user.Username))
+		if key == "" {
+			continue
+		}
+		knownUsers[key] = user
+	}
+	now := time.Now().UTC()
+	claimed := make([]bool, len(existing))
+	result := make([]agentWeChatChannelConfig, 0, len(access.Users))
+	changed := false
+	pickBestChannel := func(username string, allowOrphan bool) (agentWeChatChannelConfig, int, bool) {
+		username = strings.ToLower(strings.TrimSpace(username))
+		if username == "" {
+			return agentWeChatChannelConfig{}, -1, false
+		}
+		defaultKey := agentWeChatDefaultChannelKeyForAdmin(username)
+		bestIndex := -1
+		bestScore := -1
+		for i, channel := range existing {
+			if claimed[i] {
+				continue
+			}
+			adminUser := strings.ToLower(strings.TrimSpace(channel.AdminUser))
+			matches := adminUser == username
+			if !matches && allowOrphan {
+				if adminUser == "" || knownUsers[adminUser].Username == "" {
+					matches = true
+				}
+			}
+			if !matches {
+				continue
+			}
+			score := agentWeChatChannelPriority(channel, defaultKey)
+			if bestIndex == -1 || score > bestScore {
+				bestIndex = i
+				bestScore = score
+			}
+		}
+		if bestIndex == -1 {
+			return agentWeChatChannelConfig{}, -1, false
+		}
+		return existing[bestIndex], bestIndex, true
+	}
+	for _, user := range access.Users {
+		username := strings.TrimSpace(user.Username)
+		if username == "" {
+			continue
+		}
+		allowOrphan := strings.EqualFold(username, state.AdminUser)
+		createdDefault := false
+		channel, index, ok := pickBestChannel(username, allowOrphan)
+		if ok {
+			claimed[index] = true
+		} else {
+			createdDefault = true
+			channel = agentWeChatChannelConfig{
+				Key:         agentWeChatDefaultChannelKeyForAdmin(username),
+				DisplayName: agentWeChatDefaultChannelNameForAdmin(user),
+				AgentHint:   agentWeChatDefaultHint,
+				BaseURL:     agentWeChatDefaultBaseURL,
+				BotType:     agentWeChatDefaultBotType,
+				CreatedAt:   now,
+			}
+			changed = true
+		}
+		normalizedUser := strings.ToLower(strings.TrimSpace(username))
+		if strings.ToLower(strings.TrimSpace(channel.AdminUser)) != normalizedUser {
+			channel.AdminUser = username
+			changed = true
+		}
+		if strings.TrimSpace(channel.DisplayName) == "" {
+			channel.DisplayName = agentWeChatDefaultChannelNameForAdmin(user)
+			changed = true
+		}
+		if channel.CreatedAt.IsZero() {
+			channel.CreatedAt = now
+			changed = true
+		}
+		enabled := !strings.EqualFold(strings.TrimSpace(user.Status), "disabled")
+		if createdDefault && channel.Enabled != enabled {
+			channel.Enabled = enabled
+			changed = true
+		}
+		if !enabled {
+			if channel.Enabled {
+				channel.Enabled = false
+				changed = true
+			}
+		}
+		if channel.Enabled {
+			if strings.TrimSpace(channel.Token) == "" {
+				channel.Token = newAgentWeChatToken()
+				changed = true
+			}
+			if channel.Status == "" || channel.Status == "disabled" {
+				channel.Status = "waiting"
+				changed = true
+			}
+		} else if channel.Status != "disabled" {
+			channel.Status = "disabled"
+			changed = true
+		}
+		channel.UpdatedAt = now
+		result = append(result, channel.normalized())
+	}
+	if len(existing) != len(result) {
+		changed = true
+	}
+	state.AgentChannels = agentChannelConfig{WeChats: result}.normalized()
+	return changed
+}
+
+func agentWeChatChannelPriority(channel agentWeChatChannelConfig, defaultKey string) int {
+	channel = channel.normalized()
+	score := 0
+	if channel.Key == defaultKey {
+		score += 2
+	}
+	if channel.Status == "bound" || channel.ProviderToken != "" || channel.AccountID != "" {
+		score += 100
+	}
+	if channel.BoundUser != "" || !channel.BoundAt.IsZero() {
+		score += 40
+	}
+	if channel.Status == "scanned" || channel.LoginQRCode != "" || channel.BindCode != "" || channel.QRPayload != "" {
+		score += 20
+	}
+	if channel.Enabled {
+		score += 10
+	}
+	if !channel.LastOutboundAt.IsZero() {
+		score += 8
+	}
+	if !channel.LastMessageAt.IsZero() {
+		score += 6
+	}
+	if !channel.LastHeartbeatAt.IsZero() {
+		score += 4
+	}
+	if !channel.UpdatedAt.IsZero() {
+		score += 2
+	}
+	if channel.Token != "" {
+		score++
+	}
+	return score
+}
+
 func (c agentChannelConfig) normalized() agentChannelConfig {
 	defaults := defaultAgentChannelConfig()
 	var wechats []agentWeChatChannelConfig
@@ -123,6 +302,7 @@ func (c agentWeChatChannelConfig) normalized() agentWeChatChannelConfig {
 	c.Token = strings.TrimSpace(c.Token)
 	c.DisplayName = normalizeSettingText(c.DisplayName, 48)
 	c.AgentHint = normalizeSettingText(c.AgentHint, 64)
+	c.AdminUser = normalizeSettingText(c.AdminUser, 32)
 	c.AllowedTables = normalizeAgentAllowedTables(c.AllowedTables)
 	c.DataScope = normalizeAgentWeChatDataScope(c.DataScope, c.AllowedTables)
 	if c.DataScope != agentTableAccessTables {
@@ -241,7 +421,7 @@ func (c agentWeChatChannelConfig) statusClass() string {
 	return "is-muted"
 }
 
-func buildAdminAgentWeChatChannel(channel agentWeChatChannelConfig, entry string, requestBase string) adminAgentWeChatChannel {
+func buildAdminAgentWeChatChannel(state installState, channel agentWeChatChannelConfig, entry string, requestBase string) adminAgentWeChatChannel {
 	channel = channel.normalized()
 	base := strings.TrimRight(requestBase, "/")
 	if base == "" {
@@ -258,10 +438,20 @@ func buildAdminAgentWeChatChannel(channel agentWeChatChannelConfig, entry string
 		qrURL = channel.QRImageURL
 		qrPayload = channel.QRPayload
 	}
+	scope := agentScopeForWeChatChannel(state, channel)
+	adminUser := strings.TrimSpace(channel.AdminUser)
+	adminUserLabel := "未关联管理员"
+	if adminUser != "" {
+		adminUserLabel = adminUser
+		if user, ok := findAdminAccount(state, adminUser); ok {
+			adminUserLabel = user.DisplayName + " (" + user.Username + ")"
+		}
+	}
 	return adminAgentWeChatChannel{
 		Key:             channel.Key,
 		Action:          entry + "/wechat-agent/channels",
 		Enabled:         channel.Enabled,
+		IsBound:         channel.Status == "bound" || channel.ProviderToken != "" || channel.AccountID != "",
 		StatusText:      channel.statusText(),
 		StatusClass:     channel.statusClass(),
 		BindCode:        channel.BindCode,
@@ -272,9 +462,12 @@ func buildAdminAgentWeChatChannel(channel agentWeChatChannelConfig, entry string
 		QRPayload:       qrPayload,
 		TokenMasked:     maskAgentWeChatToken(channel.Token),
 		DisplayName:     channel.DisplayName,
-		DataScope:       channel.DataScope,
-		AllowedTables:   agentAllowedTablesString(channel.AllowedTables),
-		AllowedSummary:  agentWeChatAllowedSummary(channel.DataScope, channel.AllowedTables),
+		AdminUser:       adminUser,
+		AdminUserLabel:  adminUserLabel,
+		AdminRole:       agentWeChatChannelAdminRoleSummary(state, channel),
+		DataScope:       scope.Mode,
+		AllowedTables:   agentAllowedTablesString(scope.Tables),
+		AllowedSummary:  roleTableAccessSummary(scope.Mode, scope.Tables),
 		BaseURL:         channel.BaseURL,
 		BotType:         channel.BotType,
 		LoginMessage:    displayFallback(channel.LoginMessage, "等待通道动作"),
@@ -294,13 +487,98 @@ func buildAdminAgentWeChatChannel(channel agentWeChatChannelConfig, entry string
 	}
 }
 
-func buildAdminAgentWeChatChannels(channels agentChannelConfig, entry string, requestBase string) []adminAgentWeChatChannel {
+func buildAdminAgentWeChatChannels(state installState, channels agentChannelConfig, entry string, requestBase string) []adminAgentWeChatChannel {
 	channels = channels.normalized()
 	rows := make([]adminAgentWeChatChannel, 0, len(channels.WeChats))
 	for _, channel := range channels.WeChats {
-		rows = append(rows, buildAdminAgentWeChatChannel(channel, entry, requestBase))
+		rows = append(rows, buildAdminAgentWeChatChannel(state, channel, entry, requestBase))
 	}
 	return rows
+}
+
+func buildAdminAgentTableGroups(state installState, snapshots []adminSchemaSnapshotRecord) []adminAgentTableGroup {
+	provider := newTableToolProvider(state, "", "")
+	provider.schemaSnapshots = snapshots
+	definitions := provider.tableDefinitions()
+	groupLabels := []struct {
+		key         string
+		title       string
+		description string
+	}{
+		{"core", "核心管理", "初始化状态、管理员、角色、菜单和权限边界。"},
+		{"foundation", "基础服务", "数据源、文件、任务、通知、审计和系统设置。"},
+		{"agent", "智能体记录", "Agent 会话、运行轨迹、工具结果和微信聊天归档。"},
+		{"extension", "能力扩展", "插件扩展、资源模型和自动生成工具。"},
+	}
+	index := map[string]int{}
+	groups := make([]adminAgentTableGroup, 0, len(groupLabels)+4)
+	for _, item := range groupLabels {
+		index[item.key] = len(groups)
+		groups = append(groups, adminAgentTableGroup{
+			Title:       item.title,
+			Description: item.description,
+		})
+	}
+	externalIndex := map[string]int{}
+	for _, definition := range definitions {
+		option := adminAgentTableOption{
+			Name:        definition.Name,
+			Label:       definition.DisplayName,
+			Type:        definition.Type,
+			Description: definition.Description,
+		}
+		groupKey := adminAgentTableGroupKey(definition.Name)
+		if strings.HasPrefix(definition.Name, "datasource.") {
+			sourceLabel := agentExternalTableSourceLabel(definition.DisplayName)
+			externalKey := strings.ToLower(sourceLabel)
+			if _, ok := externalIndex[externalKey]; !ok {
+				externalIndex[externalKey] = len(groups)
+				groups = append(groups, adminAgentTableGroup{
+					Title:       "外部数据源：" + sourceLabel,
+					Description: "来自真实业务库结构快照的只读数据表，需要通道显式授权后才能查询。",
+				})
+			}
+			groups[externalIndex[externalKey]].Tables = append(groups[externalIndex[externalKey]].Tables, option)
+			continue
+		}
+		if groupIndex, ok := index[groupKey]; ok {
+			groups[groupIndex].Tables = append(groups[groupIndex].Tables, option)
+		}
+	}
+	out := make([]adminAgentTableGroup, 0, len(groups))
+	for _, group := range groups {
+		if len(group.Tables) == 0 {
+			continue
+		}
+		out = append(out, group)
+	}
+	return out
+}
+
+func adminAgentTableGroupKey(table string) string {
+	switch normalizeAgentTableName(table) {
+	case "install_state", "admin_settings", "admin_users", "admin_sessions", "admin_roles", "admin_menus", "admin_permissions":
+		return "core"
+	case "data_sources", "schema_snapshots", "storage_settings", "upload_files", "audit_events", "setting_change_logs", "background_tasks", "task_worker_settings", "background_task_logs", "notification_deliveries":
+		return "foundation"
+	case "agent_sessions", "agent_runs", "agent_tool_results", "agent_wechat_messages", "ai_capabilities", "agent_blueprint":
+		return "agent"
+	case "plugin_extensions", "resource_models", "resource_tools":
+		return "extension"
+	default:
+		return "foundation"
+	}
+}
+
+func agentExternalTableSourceLabel(displayName string) string {
+	displayName = strings.TrimSpace(displayName)
+	if displayName == "" {
+		return "未命名"
+	}
+	if idx := strings.Index(displayName, "."); idx > 0 {
+		return displayName[:idx]
+	}
+	return displayName
 }
 
 func findAgentWeChatChannelByKey(channels agentChannelConfig, key string) (agentWeChatChannelConfig, int, bool) {
@@ -313,6 +591,33 @@ func findAgentWeChatChannelByKey(channels agentChannelConfig, key string) (agent
 		if channel.Key == key {
 			return channel, i, true
 		}
+	}
+	return agentWeChatChannelConfig{}, -1, false
+}
+
+func findAgentWeChatChannelByAdminUser(channels agentChannelConfig, username string) (agentWeChatChannelConfig, int, bool) {
+	channels = channels.normalized()
+	username = strings.ToLower(strings.TrimSpace(username))
+	if username == "" {
+		return agentWeChatChannelConfig{}, -1, false
+	}
+	defaultKey := agentWeChatDefaultChannelKeyForAdmin(username)
+	var fallback agentWeChatChannelConfig
+	fallbackIndex := -1
+	for i, channel := range channels.WeChats {
+		if strings.ToLower(strings.TrimSpace(channel.AdminUser)) != username {
+			continue
+		}
+		if channel.Key == defaultKey {
+			return channel, i, true
+		}
+		if fallbackIndex == -1 {
+			fallback = channel
+			fallbackIndex = i
+		}
+	}
+	if fallbackIndex >= 0 {
+		return fallback, fallbackIndex, true
 	}
 	return agentWeChatChannelConfig{}, -1, false
 }
@@ -362,7 +667,7 @@ func upsertAgentWeChatChannel(channels *agentChannelConfig, channel agentWeChatC
 }
 
 func (s *adminServer) agentWeChatChannelSubmit(w http.ResponseWriter, r *http.Request) {
-	state, entry, ok := s.authenticatedAdminState(w, r)
+	state, entry, _, ok := s.authorizedAdminState(w, r, "wechat-agent", "agent.wechat.manage")
 	if !ok {
 		return
 	}
@@ -377,25 +682,18 @@ func (s *adminServer) agentWeChatChannelSubmit(w http.ResponseWriter, r *http.Re
 	if action == "" {
 		action = "save"
 	}
+	if action == "add" {
+		http.Redirect(w, r, redirectBase+"?error="+url.QueryEscape("微信 Agent 通道会随着管理员账号自动创建，不能手动新增"), http.StatusFound)
+		return
+	}
 	key := normalizeAgentWeChatChannelKey(r.FormValue("wechat_channel_key"))
 	wechat, _, found := findAgentWeChatChannelByKey(channels, key)
-	if action == "add" || (!found && len(channels.WeChats) == 0) {
-		key = newAgentWeChatChannelKey()
-		wechat = agentWeChatChannelConfig{
-			Key:         key,
-			Enabled:     true,
-			Status:      "waiting",
-			DisplayName: fmt.Sprintf("%s %d", agentWeChatDefaultName, len(channels.WeChats)+1),
-			AgentHint:   agentWeChatDefaultHint,
-			BaseURL:     agentWeChatDefaultBaseURL,
-			BotType:     agentWeChatDefaultBotType,
-			DataScope:   agentTableAccessNone,
+	if !found {
+		if currentChannel, _, ok := findAgentWeChatChannelByAdminUser(channels, s.sessionUsername(r)); ok {
+			wechat = currentChannel
+			key = wechat.Key
+			found = true
 		}
-		found = true
-	} else if !found && len(channels.WeChats) > 0 {
-		wechat = channels.WeChats[0]
-		key = wechat.Key
-		found = true
 	}
 	if found && key == "" {
 		key = wechat.Key
@@ -416,13 +714,27 @@ func (s *adminServer) agentWeChatChannelSubmit(w http.ResponseWriter, r *http.Re
 	wechat.Key = key
 	wechat.DisplayName = strings.TrimSpace(r.FormValue("wechat_channel_name"))
 	if wechat.DisplayName == "" {
-		wechat.DisplayName = fmt.Sprintf("%s %d", agentWeChatDefaultName, len(channels.WeChats)+1)
+		if adminUser, ok := findAdminAccount(state, wechat.AdminUser); ok {
+			wechat.DisplayName = agentWeChatDefaultChannelNameForAdmin(adminUser)
+		} else {
+			wechat.DisplayName = agentWeChatDefaultName
+		}
 	}
-	wechat.AllowedTables = normalizeAgentAllowedTables([]string{r.FormValue("wechat_allowed_tables")})
-	wechat.DataScope = normalizeAgentWeChatDataScope(r.FormValue("wechat_data_scope"), wechat.AllowedTables)
-	if wechat.DataScope != agentTableAccessTables {
-		wechat.AllowedTables = nil
+	adminUser := strings.TrimSpace(wechat.AdminUser)
+	if adminUser == "" {
+		adminUser = strings.TrimSpace(r.FormValue("wechat_admin_user"))
 	}
+	if adminUser == "" {
+		adminUser = defaultAgentWeChatAdminUser(state, s.sessionUsername(r))
+	}
+	adminAccount, adminOK := findAdminAccount(state, adminUser)
+	if !adminOK || adminAccount.Status == "disabled" {
+		http.Redirect(w, r, redirectBase+"?error="+url.QueryEscape("请选择一个启用的后台管理员账号作为微信 Agent 身份"), http.StatusFound)
+		return
+	}
+	wechat.AdminUser = adminAccount.Username
+	wechat.AllowedTables = nil
+	wechat.DataScope = ""
 	wechat.BaseURL = normalizeAgentWeChatBaseURL(r.FormValue("wechat_base_url"))
 	wechat.BotType = normalizeSettingText(r.FormValue("wechat_bot_type"), 16)
 	if !enabled {
@@ -844,11 +1156,16 @@ func (s *adminServer) agentWeChatMessage(w http.ResponseWriter, r *http.Request)
 	}
 	messageID := firstNonEmpty(payload.MessageID, payload.MessageSid, payload.MessageSidAlt)
 	agentPayload := agentChatRequest{
-		Message:         message,
-		SessionID:       sessionID,
-		TableAccessMode: wechat.DataScope,
-		AllowedTables:   wechat.AllowedTables,
+		Message:   message,
+		SessionID: sessionID,
 	}
+	scope := agentScopeForWeChatChannel(state, wechat)
+	roleAccess := adminRoleAccessForUsername(state, wechat.AdminUser)
+	agentPayload.TableAccessMode = scope.Mode
+	agentPayload.AllowedTables = scope.Tables
+	agentPayload.AllowReadOnlyQuery = boolPtr(roleAccess.HasPermission("agent.sql.select"))
+	agentPayload.AllowWebRead = boolPtr(roleAccess.HasPermission("agent.web.read"))
+	agentPayload.AllowImageGenerate = boolPtr(roleAccess.HasPermission("agent.image.generate"))
 	response := s.runAgentChat(r.Context(), state, agentPayload)
 	response.SessionID = sessionID
 	duration := time.Since(startedAt)
@@ -1047,6 +1364,7 @@ func upsertAgentWeChatRuntimeChannel(channels *agentChannelConfig, updated agent
 
 func preserveAgentWeChatAuthorization(updated agentWeChatChannelConfig, original agentWeChatChannelConfig) agentWeChatChannelConfig {
 	original = original.normalized()
+	updated.AdminUser = original.AdminUser
 	updated.DataScope = original.DataScope
 	updated.AllowedTables = append([]string(nil), original.AllowedTables...)
 	return updated
@@ -1067,15 +1385,19 @@ func (s *adminServer) processAgentWeChatChannelMessages(ctx context.Context, sta
 			continue
 		}
 		sessionID := agentWeChatSessionID(firstNonEmpty(message.SessionID, message.FromUserID, message.ClientID), message.FromUserID)
-		slog.Info("agent wechat inbound message", "key", wechat.Key, "message_id", agentWeChatMessageID(message.MessageID), "from", message.FromUserID, "to", message.ToUserID, "session", sessionID, "text_len", len([]rune(inboundText)), "data_scope", wechat.DataScope, "allowed_tables", len(normalizeAgentAllowedTables(wechat.AllowedTables)))
+		scope := agentScopeForWeChatChannel(state, *wechat)
+		slog.Info("agent wechat inbound message", "key", wechat.Key, "message_id", agentWeChatMessageID(message.MessageID), "from", message.FromUserID, "to", message.ToUserID, "session", sessionID, "text_len", len([]rune(inboundText)), "admin_user", wechat.AdminUser, "data_scope", scope.Mode, "allowed_tables", len(scope.Tables))
 		stopTyping := s.startAgentWeChatTyping(ctx, *wechat, message)
 		startedAt := time.Now()
 		receivedAt := agentWeChatProviderMessageTime(message, startedAt.UTC())
 		response := s.runAgentChat(ctx, state, agentChatRequest{
-			Message:         inboundText,
-			SessionID:       sessionID,
-			TableAccessMode: wechat.DataScope,
-			AllowedTables:   wechat.AllowedTables,
+			Message:            inboundText,
+			SessionID:          sessionID,
+			TableAccessMode:    scope.Mode,
+			AllowedTables:      scope.Tables,
+			AllowReadOnlyQuery: boolPtr(adminRoleAccessForUsername(state, wechat.AdminUser).HasPermission("agent.sql.select")),
+			AllowWebRead:       boolPtr(adminRoleAccessForUsername(state, wechat.AdminUser).HasPermission("agent.web.read")),
+			AllowImageGenerate: boolPtr(adminRoleAccessForUsername(state, wechat.AdminUser).HasPermission("agent.image.generate")),
 		})
 		response.SessionID = sessionID
 		duration := time.Since(startedAt)
@@ -1112,7 +1434,7 @@ func (s *adminServer) processAgentWeChatChannelMessages(ctx context.Context, sta
 		}
 		replyText := strings.TrimSpace(response.Reply)
 		if len(response.Files) > 0 {
-			replyText = agentWeChatExportReplyText(response.Files)
+			replyText = agentWeChatAttachmentReplyText(response.Files)
 		}
 		replyErrors := []string{}
 		if !response.OK && strings.TrimSpace(response.Error) != "" {
@@ -1133,14 +1455,14 @@ func (s *adminServer) processAgentWeChatChannelMessages(ctx context.Context, sta
 			}
 		}
 		for _, file := range response.Files {
-			slog.Info("agent wechat sending file reply", "message_id", agentWeChatMessageID(message.MessageID), "to", message.FromUserID, "file", file.Name, "size", file.Size, "mime", file.MIME)
+			slog.Info("agent wechat sending attachment reply", "message_id", agentWeChatMessageID(message.MessageID), "to", message.FromUserID, "file", file.Name, "size", file.Size, "mime", file.MIME)
 			if err := s.sendAgentWeChatFileReply(ctx, *wechat, message, file); err != nil {
-				slog.Error("agent wechat file reply failed", "message_id", agentWeChatMessageID(message.MessageID), "to", message.FromUserID, "file", file.Name, "error", err)
-				wechat.LastError = normalizeSettingText("微信文件发送失败："+err.Error(), 240)
+				slog.Error("agent wechat attachment reply failed", "message_id", agentWeChatMessageID(message.MessageID), "to", message.FromUserID, "file", file.Name, "error", err)
+				wechat.LastError = normalizeSettingText("微信附件发送失败："+err.Error(), 240)
 				replyErrors = append(replyErrors, file.Name+": "+err.Error())
 				continue
 			}
-			slog.Info("agent wechat file reply sent", "message_id", agentWeChatMessageID(message.MessageID), "to", message.FromUserID, "file", file.Name)
+			slog.Info("agent wechat attachment reply sent", "message_id", agentWeChatMessageID(message.MessageID), "to", message.FromUserID, "file", file.Name)
 			wechat.LastOutboundAt = time.Now().UTC()
 			repliedAt = wechat.LastOutboundAt
 			wechat.LastError = ""
@@ -1668,27 +1990,37 @@ func sendAgentWeChatTextReply(ctx context.Context, channel agentWeChatChannelCon
 }
 
 func (s *adminServer) sendAgentWeChatFileReply(ctx context.Context, channel agentWeChatChannelConfig, inbound agentWeChatProviderMessage, file agentFileResult) error {
-	slog.Debug("agent wechat resolving export file", "file", file.Name, "url", file.URL)
-	filePath, err := s.agentWeChatExportFilePath(file)
+	slog.Debug("agent wechat resolving reply file", "file", file.Name, "url", file.URL)
+	filePath, err := s.agentWeChatReplyFilePath(file)
 	if err != nil {
 		return err
 	}
-	slog.Info("agent wechat uploading export file to provider CDN", "file", filepath.Base(filePath), "path", filePath)
-	uploaded, err := uploadAgentWeChatFileAttachment(ctx, channel, inbound.FromUserID, filePath)
+	mediaType := 3
+	if agentWeChatIsImageFile(file) {
+		mediaType = 1
+	}
+	slog.Info("agent wechat uploading reply file to provider CDN", "file", filepath.Base(filePath), "path", filePath, "media_type", mediaType)
+	uploaded, err := uploadAgentWeChatFileAttachment(ctx, channel, inbound.FromUserID, filePath, mediaType)
 	if err != nil {
 		return err
 	}
-	slog.Info("agent wechat provider CDN upload completed", "file", filepath.Base(filePath), "filekey", agentWeChatShortID(uploaded.FileKey), "plain_size", uploaded.FileSize, "cipher_size", uploaded.FileSizeCiphertext)
+	slog.Info("agent wechat provider CDN upload completed", "file", filepath.Base(filePath), "filekey", agentWeChatShortID(uploaded.FileKey), "plain_size", uploaded.FileSize, "cipher_size", uploaded.FileSizeCiphertext, "media_type", mediaType)
+	if mediaType == 1 {
+		return sendAgentWeChatImageMessage(ctx, channel, inbound, filepath.Base(filePath), uploaded)
+	}
 	return sendAgentWeChatFileMessage(ctx, channel, inbound, filepath.Base(filePath), uploaded)
 }
 
-func (s *adminServer) agentWeChatExportFilePath(file agentFileResult) (string, error) {
+func (s *adminServer) agentWeChatReplyFilePath(file agentFileResult) (string, error) {
 	name := filepath.Base(strings.TrimSpace(file.Name))
-	if name == "." || name == "/" || name == "" || !strings.HasPrefix(name, "moyi-agent-export-") {
-		return "", fmt.Errorf("unsupported agent export file %q", file.Name)
+	if name == "." || name == "/" || name == "" {
+		return "", fmt.Errorf("unsupported agent reply file %q", file.Name)
+	}
+	if !strings.HasPrefix(name, "moyi-agent-export-") && !strings.HasPrefix(name, "moyi-agent-image-") {
+		return "", fmt.Errorf("unsupported agent reply file %q", file.Name)
 	}
 	if _, ok := agentExportContentType(name); !ok {
-		return "", fmt.Errorf("unsupported agent export file type %q", name)
+		return "", fmt.Errorf("unsupported agent reply file type %q", name)
 	}
 	filePath := filepath.Join(s.agentExportDir(), name)
 	info, err := os.Stat(filePath)
@@ -1701,7 +2033,7 @@ func (s *adminServer) agentWeChatExportFilePath(file agentFileResult) (string, e
 	return filePath, nil
 }
 
-func uploadAgentWeChatFileAttachment(ctx context.Context, channel agentWeChatChannelConfig, toUserID string, filePath string) (agentWeChatUploadedFile, error) {
+func uploadAgentWeChatFileAttachment(ctx context.Context, channel agentWeChatChannelConfig, toUserID string, filePath string, mediaType int) (agentWeChatUploadedFile, error) {
 	plaintext, err := os.ReadFile(filePath)
 	if err != nil {
 		return agentWeChatUploadedFile{}, err
@@ -1723,7 +2055,7 @@ func uploadAgentWeChatFileAttachment(ctx context.Context, channel agentWeChatCha
 	slog.Debug("agent wechat requesting upload url", "to", toUserID, "file", filepath.Base(filePath), "raw_size", len(plaintext), "cipher_size", len(ciphertext), "filekey", agentWeChatShortID(fileKey))
 	uploadURL, err := getAgentWeChatUploadURL(ctx, channel, agentWeChatGetUploadURLRequest{
 		FileKey:     fileKey,
-		MediaType:   3,
+		MediaType:   mediaType,
 		ToUserID:    strings.TrimSpace(toUserID),
 		RawSize:     len(plaintext),
 		RawFileMD5:  hex.EncodeToString(rawMD5[:]),
@@ -1899,6 +2231,67 @@ func sendAgentWeChatFileMessage(ctx context.Context, channel agentWeChatChannelC
 		}
 	}
 	slog.Debug("agent wechat sendmessage file completed", "client_id", clientID, "to", targetUserID, "file", fileName, "duration_ms", time.Since(startedAt).Milliseconds())
+	return nil
+}
+
+func sendAgentWeChatImageMessage(ctx context.Context, channel agentWeChatChannelConfig, inbound agentWeChatProviderMessage, fileName string, uploaded agentWeChatUploadedFile) error {
+	channel = channel.normalized()
+	targetUserID := strings.TrimSpace(inbound.FromUserID)
+	if targetUserID == "" {
+		return fmt.Errorf("missing image target")
+	}
+	clientID := newAgentWeChatClientID()
+	payload := agentWeChatSendMessageRequest{
+		Message: agentWeChatProviderMessage{
+			FromUserID:   "",
+			ToUserID:     targetUserID,
+			ClientID:     clientID,
+			MessageType:  2,
+			MessageState: 2,
+			ContextToken: strings.TrimSpace(inbound.ContextToken),
+			ItemList: []agentWeChatProviderMessageItem{
+				{
+					Type: 2,
+					ImageItem: &agentWeChatProviderImageItem{
+						Media: &agentWeChatProviderCDNMedia{
+							EncryptQueryParam: uploaded.DownloadParam,
+							AESKey:            base64.StdEncoding.EncodeToString([]byte(uploaded.AESKeyHex)),
+							EncryptType:       1,
+						},
+						AESKey:  uploaded.AESKeyHex,
+						MidSize: uploaded.FileSize,
+						HDSize:  uploaded.FileSize,
+					},
+				},
+			},
+		},
+		BaseInfo: agentWeChatBaseInfo(),
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	req, err := newAgentWeChatProviderRequest(ctx, channel, http.MethodPost, "/ilink/bot/sendmessage", body)
+	if err != nil {
+		return err
+	}
+	startedAt := time.Now()
+	resp, err := agentWeChatHTTPClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return fmt.Errorf("send image http %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	var parsed agentWeChatProviderResponse
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 128*1024)).Decode(&parsed); err == nil {
+		if code := parsed.errorCode(); code != 0 {
+			return fmt.Errorf("send image errcode %d: %s", code, parsed.ErrMsg)
+		}
+	}
+	slog.Debug("agent wechat sendmessage image completed", "client_id", clientID, "to", targetUserID, "file", fileName, "duration_ms", time.Since(startedAt).Milliseconds())
 	return nil
 }
 
@@ -2121,14 +2514,37 @@ func agentWeChatAESECBEncrypt(plaintext []byte, key []byte) ([]byte, error) {
 	return ciphertext, nil
 }
 
-func agentWeChatExportReplyText(files []agentFileResult) string {
+func agentWeChatIsImageFile(file agentFileResult) bool {
+	mimeType := strings.ToLower(strings.TrimSpace(file.MIME))
+	if strings.HasPrefix(mimeType, "image/") {
+		return true
+	}
+	contentType, ok := agentExportContentType(strings.TrimSpace(file.Name))
+	return ok && strings.HasPrefix(strings.ToLower(contentType), "image/")
+}
+
+func agentWeChatAttachmentReplyText(files []agentFileResult) string {
 	if len(files) == 0 {
 		return ""
 	}
-	if len(files) == 1 {
-		return "已生成导出文件，正在通过微信附件发送：" + files[0].Name
+	imageCount := 0
+	for _, file := range files {
+		if agentWeChatIsImageFile(file) {
+			imageCount++
+		}
 	}
-	return "已生成 " + strconv.Itoa(len(files)) + " 个导出文件，正在通过微信附件发送。"
+	switch {
+	case imageCount == len(files) && len(files) == 1:
+		return "图片已经生成好了，下面直接发给你。"
+	case imageCount == len(files):
+		return "已生成 " + strconv.Itoa(len(files)) + " 张图片，下面直接发给你。"
+	case imageCount == 0 && len(files) == 1:
+		return "已生成导出文件，正在通过微信附件发送：" + files[0].Name
+	case imageCount == 0:
+		return "已生成 " + strconv.Itoa(len(files)) + " 个导出文件，正在通过微信附件发送。"
+	default:
+		return "已生成 " + strconv.Itoa(len(files)) + " 个结果，下面继续通过微信发送。"
+	}
 }
 
 func agentWeChatShouldSkipMessage(message agentWeChatProviderMessage) bool {
@@ -2243,6 +2659,7 @@ func agentWeChatChannelHasStoredConfig(channel agentWeChatChannelConfig) bool {
 		channel.OpenClawUserID,
 		channel.SyncBuffer,
 		channel.Token,
+		channel.AdminUser,
 		channel.BoundUser,
 		channel.ClientInfo,
 		channel.LastError,
@@ -2492,6 +2909,7 @@ func redactedAgentChannelSnapshot(channels agentChannelConfig) map[string]any {
 			"token":            maskAgentWeChatToken(wechat.Token),
 			"display_name":     wechat.DisplayName,
 			"agent_hint":       wechat.AgentHint,
+			"admin_user":       wechat.AdminUser,
 			"data_scope":       wechat.DataScope,
 			"allowed_tables":   normalizeAgentAllowedTables(wechat.AllowedTables),
 			"account_id":       wechat.AccountID,
@@ -2641,10 +3059,11 @@ type agentWeChatProviderMessage struct {
 }
 
 type agentWeChatProviderMessageItem struct {
-	Type     int                          `json:"type,omitempty"`
-	Text     string                       `json:"text,omitempty"`
-	TextItem *agentWeChatProviderTextItem `json:"text_item,omitempty"`
-	FileItem *agentWeChatProviderFileItem `json:"file_item,omitempty"`
+	Type      int                           `json:"type,omitempty"`
+	Text      string                        `json:"text,omitempty"`
+	TextItem  *agentWeChatProviderTextItem  `json:"text_item,omitempty"`
+	FileItem  *agentWeChatProviderFileItem  `json:"file_item,omitempty"`
+	ImageItem *agentWeChatProviderImageItem `json:"image_item,omitempty"`
 }
 
 type agentWeChatProviderTextItem struct {
@@ -2656,6 +3075,17 @@ type agentWeChatProviderFileItem struct {
 	FileName string                       `json:"file_name,omitempty"`
 	MD5      string                       `json:"md5,omitempty"`
 	Len      string                       `json:"len,omitempty"`
+}
+
+type agentWeChatProviderImageItem struct {
+	Media       *agentWeChatProviderCDNMedia `json:"media,omitempty"`
+	ThumbMedia  *agentWeChatProviderCDNMedia `json:"thumb_media,omitempty"`
+	AESKey      string                       `json:"aeskey,omitempty"`
+	MidSize     int                          `json:"mid_size,omitempty"`
+	ThumbSize   int                          `json:"thumb_size,omitempty"`
+	ThumbHeight int                          `json:"thumb_height,omitempty"`
+	ThumbWidth  int                          `json:"thumb_width,omitempty"`
+	HDSize      int                          `json:"hd_size,omitempty"`
 }
 
 type agentWeChatProviderCDNMedia struct {

@@ -15,6 +15,7 @@ type Config struct {
 	AdminPassword    string
 	SessionSecret    string
 	InstallStateFile string
+	DisableTaskWorker bool
 	LogLevel         slog.Level
 }
 
@@ -29,6 +30,7 @@ func Load() Config {
 		AdminPassword:    getenv("MOYI_ADMIN_PASSWORD", "admin"),
 		SessionSecret:    getenv("MOYI_SESSION_SECRET", "moyi-admin-dev-session-secret"),
 		InstallStateFile: getenv("MOYI_INSTALL_STATE_FILE", filepath.Join(dataDir, "install_state.json")),
+		DisableTaskWorker: parseBool(getenv("MOYI_DISABLE_TASK_WORKER", "")),
 		LogLevel:         parseLogLevel(getenv("MOYI_LOG_LEVEL", "info")),
 	}
 }
@@ -51,6 +53,15 @@ func parseLogLevel(value string) slog.Level {
 		return slog.LevelError
 	default:
 		return slog.LevelInfo
+	}
+}
+
+func parseBool(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "1", "true", "yes", "y", "on":
+		return true
+	default:
+		return false
 	}
 }
 
